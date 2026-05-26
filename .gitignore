@@ -1,0 +1,29 @@
+# logs
+/logs
+
+# environment vars
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# Claude / agent tooling (local config; mirror chartbreaker)
+.claude/*
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/plan/
+.codex
+AGENTS.md
+
+# node
+node_modules
+
+# dev editor configs
+/.idea/*
+/.vscode/*
+.DS_Store
