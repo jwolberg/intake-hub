@@ -1,0 +1,45 @@
+# Local-first topology (ARCHITECTURE.md §17). Phase 0 brings up db + api + hub.
+# The worker is deferred (Open Decision OD-3: MVP may run synchronously) and the
+# mock-clinrun / mcp-reference services are added in P0-T4.
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: invoicescreener
+      POSTGRES_PASSWORD: invoicescreener
+      POSTGRES_DB: invoicescreener
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U invoicescreener"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      DATABASE_URL: postgresql+psycopg://invoicescreener:invoicescreener@db:5432/invoicescreener
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  hub:
+    build:
+      context: ./frontend
+    environment:
+      VITE_API_URL: http://localhost:8000
+    ports:
+      - "5173:5173"
+    depends_on:
+      - api
+
+volumes:
+  db_data:
