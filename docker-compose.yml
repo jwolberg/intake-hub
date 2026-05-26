@@ -1,6 +1,6 @@
-# Local-first topology (ARCHITECTURE.md §17). Phase 0 brings up db + api + hub.
-# The worker is deferred (Open Decision OD-3: MVP may run synchronously) and the
-# mock-clinrun / mcp-reference services are added in P0-T4.
+# Local-first topology (ARCHITECTURE.md §17). Brings up db + api + hub plus the
+# mcp-reference and mock-clinrun stub services. The async worker is deferred
+# (Open Decision OD-3: MVP may run synchronously).
 
 services:
   db:
@@ -25,11 +25,35 @@ services:
       dockerfile: backend/Dockerfile
     environment:
       DATABASE_URL: postgresql+psycopg://invoicescreener:invoicescreener@db:5432/invoicescreener
+      MCP_REFERENCE_URL: http://mcp-reference:8100
+      CLINRUN_URL: http://mock-clinrun:8200
     ports:
       - "8000:8000"
     depends_on:
       db:
         condition: service_healthy
+      mcp-reference:
+        condition: service_started
+      mock-clinrun:
+        condition: service_started
+
+  mcp-reference:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command:
+      ["uvicorn", "backend.clients.stub_servers.mcp_app:app", "--host", "0.0.0.0", "--port", "8100"]
+    ports:
+      - "8100:8100"
+
+  mock-clinrun:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command:
+      ["uvicorn", "backend.clients.stub_servers.clinrun_app:app", "--host", "0.0.0.0", "--port", "8200"]
+    ports:
+      - "8200:8200"
 
   hub:
     build:

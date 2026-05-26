@@ -142,3 +142,77 @@ Files created/modified: see Code Changes.
 - Updated ticket status: P0-T1 Complete, P0-T2 Complete, P0-T3 Complete, P0-T4 Todo
 - Blockers: None
 - Recommended next ticket: P0-T4
+
+---
+
+# Implementation — P0-T4 (External client interfaces + stubs)
+
+## Scope Implemented
+- Requested scope: continue Phase 0 — implement P0-T4.
+- Related phase: Phase 0 (completes it).
+- Related ticket(s): P0-T4.
+
+## Approach
+- For each external dependency, define a `Protocol` interface plus two
+  implementations: an in-process stub (tests/offline) and an HTTP client (Compose
+  topology). Back the stubs and the stub servers with one shared `fixtures`
+  module so both paths return identical data. Make failures typed.
+
+## Code Changes
+### File: backend/clients/errors.py
+- Typed errors: `ReferenceUnavailable` / `CatalogNotFound` (reference) and
+  `SubmissionFailed` (ClinRun) — distinct because they drive retry vs. hold.
+
+### File: backend/clients/fixtures.py
+- Shared canned sponsors/studies/sites + sponsor+study-scoped catalogs.
+
+### File: backend/clients/llm.py
+- `LLMClient` protocol (`complete_json`), `StubLLMClient` (scripted + records
+  calls), `parse_json_or_raise` helper.
+
+### File: backend/clients/mcp_reference.py
+- `MCPReferenceClient` protocol; `StubMCPReferenceClient` (ranks candidates,
+  scopes catalog); `HttpMCPReferenceClient` (calls `mcp-reference`, maps errors).
+
+### File: backend/clients/clinrun.py
+- `ClinRunClient` protocol + `SubmissionResult`; `StubClinRunClient` and
+  `HttpClinRunClient`.
+
+### File: backend/clients/stub_servers/{mcp_app.py,clinrun_app.py}
+- FastAPI stub services for `mcp-reference` and `mock-clinrun`, reusing fixtures.
+
+### File: backend/clients/__init__.py
+- Public surface + `get_reference_client()` / `get_clinrun_client()` /
+  `get_llm_client()` factories (HTTP by default; LLM stub until OD-2 wired).
+
+### File: backend/requirements.txt · backend/requirements-dev.txt
+- `httpx` promoted to runtime.
+
+### File: docker-compose.yml
+- Added `mcp-reference` (:8100) and `mock-clinrun` (:8200) services; wired their
+  URLs + dependency ordering into `api`.
+
+### File: tests/unit/test_clients.py · tests/integration/test_stub_servers.py
+- Unit tests for the in-process stubs; HTTP-client↔stub-server integration tests
+  via FastAPI `TestClient`.
+
+## Acceptance Criteria Mapping
+- Criterion: ARCHITECTURE.md §7 (MCP integration: ranking, typed failures,
+  catalog) → `MCPReferenceClient` + stubs + errors. File(s): mcp_reference.py, errors.py.
+- Criterion: ARCHITECTURE.md §8 (provider-agnostic LLM, schema-validated JSON) →
+  `LLMClient` + `parse_json_or_raise`. File(s): llm.py.
+- Criterion: PRD FR3/FR4/FR7 dependencies isolated behind clients → factories +
+  HTTP clients + Compose services. File(s): __init__.py, clinrun.py, docker-compose.yml.
+
+## Build Plan Mapping
+- Ticket: P0-T4 — External client interfaces + stubs. Status: Complete. Phase 0 done.
+
+## Validation
+- `ruff check .` clean; `pytest -q` → 13 passed (4 domain, 6 client unit, 3 integration).
+- Visible outcome: `docker compose up` now starts db/api/hub/mcp-reference/mock-clinrun; clients reach the stubs.
+
+## Open Issues
+- `get_llm_client()` returns a stub until a real provider is wired in P1-T3 (OD-2).
+
+## Next
+- Phase 1, P1-T1 — intake of sample invoices (start of the MVP vertical slice).

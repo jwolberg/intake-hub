@@ -34,8 +34,8 @@
 
 ## Current Status
 - Overall status: In Progress
-- Current phase: Phase 0 — Decisions & Scaffolding (P0-T1..T3 Complete)
-- Current ticket: P0-T4 — External client interfaces + stubs
+- Current phase: Phase 0 Complete → Phase 1 (MVP Vertical Slice) next
+- Current ticket: P1-T1 — Intake of sample invoices
 - Blockers: None (OD-1 resolved: backend = Python/FastAPI; OD-2..OD-5 provisional behind interfaces)
 - Implementation log: /docs/implementation.md, /docs/implementation-notes.md
 
@@ -74,7 +74,7 @@
   - Files likely involved: /backend/clients/**, /backend/context (mcp client), docker-compose.yml
   - Depends on: P0-T2
   - Acceptance criteria covered: ARCHITECTURE §7 (MCP integration), §8 (LLM integration); PRD FR3, FR4, FR7 (dependencies isolated behind clients).
-  - Status: Todo  ← recommended next
+  - Status: Complete — LLM/MCP/ClinRun interfaces + in-process stubs + HTTP clients + mcp-reference/mock-clinrun compose services; 13 tests passing.
 
 ### Phase 1 — MVP Vertical Slice (Walking Skeleton)
 **Goal**
@@ -305,8 +305,8 @@ Tickets are grouped by STRATEGY § Tracks. Each traces to a PRD requirement.
 17. Phase 3: P3-T1, P3-T4 → P3-T2, P3-T3, P3-T5 → P3-T6 → P3-T7
 
 ## Recommended Next Step
-- Start with: **P0-T4 — External client interfaces + stubs**
-- Why this is next: P0-T1..T3 are Complete (stack resolved, layout + domain + schema in place). P0-T4 (`LLMClient`, `MCPReferenceClient`, `ClinRunClient` + the `mock-clinrun` / `mcp-reference` compose services) is the last Phase 0 ticket and unblocks the Phase 1 vertical slice, which depends on all three clients.
+- Start with: **P1-T1 — Intake of sample invoices**
+- Why this is next: Phase 0 is complete — stack resolved, ARCHITECTURE §19 layout, domain + schema, and all three external clients (LLM/MCP/ClinRun) with stubs + compose services are in place. P1-T1 begins the MVP vertical slice by creating `Invoice` workflow records from the provided samples, which every later Phase 1 stage builds on.
 
 ## Deferred / Out of Scope
 - PRD §4 Non-Goals: perfect OCR/document intelligence; supporting every invoice format; replacing finance/compliance workflows; production-scale email ingestion; full ClinRun production integration (mock used instead); guaranteed 100% match accuracy in ambiguous cases.
