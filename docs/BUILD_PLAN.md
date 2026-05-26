@@ -43,12 +43,12 @@
 
 ## Phase Breakdown
 
-### Phase 0 — Decisions & Scaffolding
+### Phase 0 — Decisions & Scaffolding  ✅ Complete (2026-05-26)
 **Goal**
 - Resolve the blocking open decision (backend stack) and stand up the monorepo, data model, client interfaces, and lint/test/compose harness.
 
-**Exit Criteria**
-- Backend stack chosen; ARCHITECTURE §19 layout in place; shared domain types + Postgres schema defined; stubbed clients (LLM, MCP, ClinRun) compile; `docker-compose up` brings up api/worker/hub/db/mock-clinrun/mcp-reference; lint + empty test suite run green.
+**Exit Criteria** — met
+- Backend stack chosen (Python/FastAPI); ARCHITECTURE §19 layout in place; shared domain types + Postgres schema defined; clients (LLM, MCP, ClinRun) implemented with stubs + HTTP impls; `docker-compose` brings up db/api/hub/mcp-reference/mock-clinrun (worker deferred per OD-3); lint clean + 13 tests green.
 
 **Tickets**
 - **P0-T1 — Resolve backend stack & confirm provisional decisions**
@@ -76,7 +76,7 @@
   - Acceptance criteria covered: ARCHITECTURE §7 (MCP integration), §8 (LLM integration); PRD FR3, FR4, FR7 (dependencies isolated behind clients).
   - Status: Complete — LLM/MCP/ClinRun interfaces + in-process stubs + HTTP clients + mcp-reference/mock-clinrun compose services; 13 tests passing.
 
-### Phase 1 — MVP Vertical Slice (Walking Skeleton)
+### Phase 1 — MVP Vertical Slice (Walking Skeleton)  ◻ Not started — next (P1-T1)
 **Goal**
 - Thinnest end-to-end happy path: a seeded sample invoice flows through every stage to a stored, explainable submit/hold decision that an operator can view in the hub.
 
