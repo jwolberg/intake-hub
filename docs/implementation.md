@@ -291,3 +291,35 @@ Files created/modified: see Code Changes.
 
 ## Next
 - P1-T10 — `PostgresRepository` (validated against Docker Postgres) + FastAPI routes.
+
+---
+
+# Implementation — P1-T10 (API + PostgresRepository)
+
+## Scope Implemented
+- Related phase: Phase 1. Related ticket(s): P1-T10.
+
+## Approach
+- Expose the orchestrator over HTTP with the repository + pipeline clients injected via FastAPI dependencies (overridable in tests). Implement `PostgresRepository` by reflecting the canonical schema. Validate the API in-process with stubs; skip-guard the Postgres round-trip.
+
+## Code Changes
+- `backend/db/repository.py` — `PostgresRepository` (reflected tables; JSONB/NUMERIC round-trips; upserts; transactional replace) + `get_repository()` factory.
+- `backend/api/main.py` — `POST /api/invoices/process`, `GET /api/invoices`, `GET /api/invoices/:id`; `get_repo` / `get_pipeline_clients` deps (`Annotated` style); `_summary` list-row view.
+- `tests/integration/test_api.py` — process→list→detail + 404, via TestClient with InMemory + stubs.
+- `tests/integration/test_postgres_repository.py` — skip-guarded Postgres round-trip.
+
+## Acceptance Criteria Mapping
+- PRD §13 (API endpoints) → the three routes. PRD FR9 (backend read surface) → list summaries + full detail (extraction, context, matches, exceptions, audit).
+
+## Build Plan Mapping
+- P1-T10: Complete (API verified in-process). PostgresRepository: implemented, live-DB validation pending (Docker unavailable in session). P1-T11 (hub): Todo, next.
+
+## Validation
+- `ruff` clean; `pytest -q` → 21 passed, 1 skipped (Postgres). Manual: `POST /api/invoices/process` (clean sample) → `{status: submitted, decision: submit, confidence: 1.0, ...}`.
+- Run the API: `uvicorn backend.api.main:app` (needs Postgres + stub services) or `docker compose up`.
+
+## Open Issues
+- `PostgresRepository` not exercised against a live DB here; round-trip test skips until a DB is reachable (see implementation-notes for the command).
+
+## Next
+- P1-T11 — reviewer hub (list + detail) over these routes; completes the MVP slice.

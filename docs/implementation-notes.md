@@ -150,3 +150,37 @@ isolation across a batch). All without a DB.
 **Follow-up (P1-T10):** `PostgresRepository` + the FastAPI routes
 (`/process`, `/invoices`, `/invoices/:id`), validated end-to-end against the
 `db` compose service.
+
+## 2026-05-26 — Phase 1 (P1-T10): API + PostgresRepository
+
+**FastAPI routes** `POST /api/invoices/process`, `GET /api/invoices`,
+`GET /api/invoices/:id` (PRD §13). The repository and the pipeline clients are
+injected via FastAPI dependencies (`get_repo`, `get_pipeline_clients`), so tests
+override them with `InMemoryRepository` + stubs — the routes are fully verified
+with no DB and no network.
+
+**Decision: `Annotated[...]` dependency style** (`RepoDep`, `ClientsDep`) instead
+of `= Depends(...)` defaults — the latter trips ruff B008, and Annotated is
+FastAPI's current idiom.
+
+**`PostgresRepository`** reflects the schema created by `init_schema` (no second
+copy of the DDL to drift). Handles JSONB (metadata/candidates/warnings/alternates/
+exceptions/audit details) and NUMERIC via reflected column types, upserts
+invoices/context, and replaces line-items/matches transactionally. `save_invoice`
+upserts without touching `source_text`, so `set_source_text` isn't clobbered.
+
+**⚠️ Validation gap — Postgres not exercised here.** The Docker daemon was
+unavailable in this session (`docker compose up -d db` → cannot connect to the
+daemon socket), so `PostgresRepository` was NOT run against a real database. The
+round-trip test (`tests/integration/test_postgres_repository.py`) is
+**skip-guarded** and skips when no DB is reachable. To validate:
+`docker compose up` (full stack), or `docker compose up -d db` then
+`DATABASE_URL=postgresql+psycopg://invoicescreener:invoicescreener@localhost:5432/invoicescreener pytest tests/integration/test_postgres_repository.py`.
+Everything else (API + pipeline + orchestrator) is validated in-process.
+
+**Validation:** `ruff` clean; `pytest -q` → **21 passed, 1 skipped** (the Postgres
+round-trip). Manual API demo confirms `POST /process` on the clean sample returns
+`status=submitted, decision=submit, confidence=1.0`.
+
+**Follow-up (P1-T11):** the reviewer hub list + detail views on top of these
+routes — completes the MVP vertical slice.

@@ -34,8 +34,9 @@
 
 ## Current Status
 - Overall status: In Progress
-- Current phase: Phase 1 — MVP Vertical Slice (P1-T1..T9 Complete; orchestrated end-to-end with persistence + audit)
-- Current ticket: P1-T10 — API: process / list / detail (+ PostgresRepository, validated vs Docker Postgres)
+- Current phase: Phase 1 — MVP Vertical Slice (P1-T1..T10 Complete; API live over the orchestrator)
+- Current ticket: P1-T11 — Reviewer hub (minimal list + detail) — the last Phase 1 ticket
+- Note: PostgresRepository implemented; its round-trip test is skip-guarded and was NOT run here (Docker daemon unavailable in the dev session). Run `docker compose up` (or `up -d db` + DATABASE_URL) to validate.
 - Blockers: None (OD-1 resolved; OD-2..OD-5 provisional behind interfaces)
 - Implementation log: /docs/implementation.md, /docs/implementation-notes.md
 
@@ -143,13 +144,13 @@
   - Files likely involved: /backend/api/**
   - Depends on: P1-T9
   - Acceptance criteria covered: PRD §13 (API), FR9 (backend read surface).
-  - Status: Todo  ← recommended next (also adds PostgresRepository, validated against a real Docker Postgres)
+  - Status: Complete — `POST /api/invoices/process`, `GET /api/invoices`, `GET /api/invoices/:id`; `PostgresRepository` + `get_repository`; repo/clients injected via FastAPI deps. API verified with InMemory + stubs; Postgres round-trip test skip-guarded (Docker unavailable in dev session).
 - **P1-T11 — Reviewer hub (minimal list + detail)**
   - Objective: SPA list (status, decision, confidence, exception count) + detail (extracted, matched, decision + rationale, exceptions). Read-only.
   - Files likely involved: /frontend/**
   - Depends on: P1-T10
   - Acceptance criteria covered: PRD FR9 §6 bullets (what was extracted/matched, confidence/exceptions, submitted/withheld); USERS § Invoice Operations Reviewer.
-  - Status: Todo
+  - Status: Todo  ← recommended next (completes the MVP vertical slice)
 
 ### Phase 2 — Deepen the Tracks
 Tickets are grouped by STRATEGY § Tracks. Each traces to a PRD requirement.
@@ -305,8 +306,8 @@ Tickets are grouped by STRATEGY § Tracks. Each traces to a PRD requirement.
 17. Phase 3: P3-T1, P3-T4 → P3-T2, P3-T3, P3-T5 → P3-T6 → P3-T7
 
 ## Recommended Next Step
-- Start with: **P1-T10 — API: process / list / detail**
-- Why this is next: the orchestrator (P1-T9) runs the full pipeline end-to-end with persistence + audit behind a `Repository` protocol. P1-T10 exposes it over HTTP (`POST /api/invoices/process`, `GET /api/invoices`, `GET /api/invoices/:id`) and adds the `PostgresRepository` (validated against a real Docker Postgres), so the hub (P1-T11) has a real read/write surface.
+- Start with: **P1-T11 — Reviewer hub (minimal list + detail)**
+- Why this is next: the API (P1-T10) exposes process/list/detail over HTTP. P1-T11 builds the read-only hub views on top — invoice list (status/decision/confidence/exception count) and a detail view (extracted, matched, decision + rationale, exceptions) — completing the MVP vertical slice and the FR9 §6 surface for the Invoice Operations Reviewer.
 
 ## Deferred / Out of Scope
 - PRD §4 Non-Goals: perfect OCR/document intelligence; supporting every invoice format; replacing finance/compliance workflows; production-scale email ingestion; full ClinRun production integration (mock used instead); guaranteed 100% match accuracy in ambiguous cases.
