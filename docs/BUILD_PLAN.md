@@ -315,6 +315,7 @@ Tickets are grouped by STRATEGY § Tracks. Each traces to a PRD requirement.
 
 ## Deferred / Out of Scope
 - PRD §4 Non-Goals: perfect OCR/document intelligence; supporting every invoice format; replacing finance/compliance workflows; production-scale email ingestion; full ClinRun production integration (mock used instead); guaranteed 100% match accuracy in ambiguous cases.
+  - **Out-of-plan addition (2026-05-27, user-requested):** a *controlled-format* real-PDF demo path (`samples/generate_pdfs.py` → `backend/parser/pdf.py` + `backend/tools/process_pdf.py`, RUNBOOK Path D). We render the PDFs ourselves, so this does not claim to parse arbitrary invoices — the OCR/arbitrary-document non-goal stands. See implementation-notes 2026-05-27 "EXTRA".
 - Authentication/authorization beyond basic operator access — not a PRD functional requirement; not planned for this scope.
 - Real MCP reference API and real ClinRun backend — wired only if provided (OD-4, OD-5); otherwise stub/mock.
 - Async job orchestration (OD-3) — MVP may run synchronously; revisited only if Phase 3 performance requires it.

@@ -25,6 +25,19 @@ _IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".tif", ".tiff", ".gif", ".bmp")
 
 def parse(invoice_id: str, sample: dict) -> ParsedDocument:
     source = sample.get("source", {})
+
+    # Real PDF: read its text layer rather than a structured stand-in block.
+    pdf_path = source.get("attachment_path")
+    if pdf_path and str(pdf_path).lower().endswith(".pdf"):
+        from backend.parser.pdf import extract_text  # lazy: only on the PDF path
+
+        return ParsedDocument(
+            invoice_id=invoice_id,
+            source=source,
+            text=extract_text(pdf_path),
+            format="pdf",
+        )
+
     payload, location = _locate_payload(sample)
     fmt = _detect_format(source, location)
 

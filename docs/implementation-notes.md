@@ -410,3 +410,49 @@ large 2000-item catalog).
 structured output, which will *consume* the per-field confidence (P2-A1) and the
 context/matching flags built across Track A. Phase 1 live-stack gate still open
 (Docker unavailable).
+
+## 2026-05-27 — EXTRA (user-requested): real PDF ingestion demo path
+
+**Scope note: this is outside the BUILD_PLAN tickets** — added on direct user
+request ("is there any example pdf files I can use to test?" → chose to generate
+real PDFs + a parser). PRD §4 lists real document intelligence as a non-goal, so
+the build plan deliberately used a structured `document` stand-in. This adds a
+*controlled-format* real-PDF path for demos without contradicting that non-goal:
+we render the PDFs ourselves, so parsing our own layout is reliable, not a claim
+to parse arbitrary invoices.
+
+**What was added:**
+- `backend/parser/pdf.py` — `extract_text` (pypdf text layer), `parse_invoice_text`
+  (reverses the rendered layout → `{metadata, line_items}`), and `LayoutLLMClient`
+  (that parse behind the `LLMClient` protocol = the offline extraction stand-in
+  for the PDF format, mirroring `PassthroughLLMClient` for JSON). The shared label
+  map + table markers live here so generator and parser never drift.
+- `backend/parser/__init__.py` — `parse()` now reads a real PDF when
+  `source.attachment_path` ends in `.pdf` (lazy import; JSON path untouched).
+- `samples/generate_pdfs.py` — renders the JSON samples to `samples/pdf/*.pdf`
+  via reportlab (labelled headers + monospaced pipe-delimited line-item table,
+  chosen because it round-trips cleanly through pypdf — verified empirically).
+- `backend/tools/process_pdf.py` — `python -m backend.tools.process_pdf <pdf>`
+  CLI: runs the full pipeline and prints status/decision/context/matches/
+  exceptions/trace. No DB, network, or API key.
+- Committed PDFs: clean→submit, unmatched→hold, body→submit, mismatch→hold.
+
+**Decision: deterministic `LayoutLLMClient`, not a real LLM.** The parser yields
+real PDF text, which the offline Passthrough client can't turn into structure (it
+echoes JSON). Rather than require an API key, the LayoutLLMClient deterministically
+parses our known layout — same boundary a real provider (OD-2) would occupy. Keeps
+the demo offline + reproducible.
+
+**Decision: pypdf = runtime dep, reportlab = dev dep.** Parsing a PDF is a runtime
+capability; rendering fixtures is dev tooling. Added to `backend/requirements.txt`
+and `requirements-dev.txt` respectively. Two new deps, justified by the feature.
+
+**Validation:** `ruff` clean; `pytest -q` → **65 passed, 1 skipped** (added
+`tests/unit/test_pdf_parser.py` (4) + `tests/integration/test_pdf_pipeline.py` (8:
+each sample reaches the expected decision, and PDF-path == JSON-path)). Manual:
+all four PDFs flow end-to-end to the correct outcome via the CLI. RUNBOOK Path D
+documents it.
+
+**Follow-ups if this graduates from demo to feature:** a PDF *upload* API endpoint
+(multipart) so the hub can ingest files; a real OCR/LLM extractor for arbitrary
+(non-self-rendered) PDFs. Both isolated behind the existing parser/LLM boundaries.

@@ -180,13 +180,43 @@ This un-skips and exercises every JSONB/NUMERIC column round-trip through
 
 ---
 
+## Path D — Process a real PDF (demo)
+
+The pipeline normally reads a structured `document` block (an OCR/parse stand-in).
+For a tangible demo there is also a **real PDF** path: render the JSON samples to
+PDFs, then run one through the full pipeline. No DB, network, or API key needed.
+
+```bash
+source .venv/bin/activate
+pip install -r backend/requirements-dev.txt   # pulls reportlab (generator) + pypdf (parser)
+
+# 1. generate sample PDFs → samples/pdf/*.pdf  (also committed, so this is optional)
+python -m samples.generate_pdfs
+
+# 2. watch one flow: parse PDF → extract → resolve → match → decide
+python -m backend.tools.process_pdf samples/pdf/inv_clean_001.pdf
+python -m backend.tools.process_pdf samples/pdf/inv_hold_mismatch_005.pdf
+```
+
+The CLI prints status, decision + confidence, resolved context, the line-item
+matches, any exceptions, and the stage trace. How it works: `backend/parser/pdf.py`
+extracts the PDF text layer (`pypdf`); the offline `LayoutLLMClient` parses that
+text back into `{metadata, line_items}` (the extraction stand-in for the PDF
+format — a real LLM provider, OD-2, replaces it for arbitrary invoices).
+
+Provided PDFs: `inv_clean_001` (→ submit), `inv_hold_unmatched_002` (→ hold,
+unmatched line item), `inv_body_003` (→ submit), `inv_hold_mismatch_005`
+(→ hold, sponsor mismatch).
+
 ## Common tasks
 
 - **Reset the database:** `docker compose down -v && docker compose up -d db`
   (schema is recreated by the API on next startup).
 - **Add a sample invoice:** drop a JSON file in `samples/` shaped like the existing
   ones (`source` + `document.metadata` + `document.line_items`) and POST it to
-  `/api/invoices/process`.
+  `/api/invoices/process`. To make a matching PDF, add its stem to `_RENDERABLE`
+  in `samples/generate_pdfs.py` and re-run the generator.
+- **Process a real PDF:** see Path D.
 - **Browse the API:** interactive docs at <http://localhost:8000/docs>.
 
 ## Troubleshooting
