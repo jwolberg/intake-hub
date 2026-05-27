@@ -1,0 +1,70 @@
+"""API tests (P1-T10).
+
+Drive the routes through FastAPI ``TestClient`` with the repository and pipeline
+clients overridden to in-process stubs — no DB, no network. Verifies the
+process → list → detail flow and the 404 path.
+"""
+
+import json
+import pathlib
+
+import pytest
+from backend.api.main import app, get_pipeline_clients, get_repo
+from backend.clients import PassthroughLLMClient, StubClinRunClient, StubMCPReferenceClient
+from backend.db.repository import InMemoryRepository
+from fastapi.testclient import TestClient
+
+SAMPLES = pathlib.Path(__file__).resolve().parents[2] / "samples"
+
+
+@pytest.fixture
+def client():
+    repo = InMemoryRepository()
+    app.dependency_overrides[get_repo] = lambda: repo
+    app.dependency_overrides[get_pipeline_clients] = lambda: {
+        "llm": PassthroughLLMClient(),
+        "ref": StubMCPReferenceClient(),
+        "clinrun": StubClinRunClient(),
+    }
+    yield TestClient(app)
+    app.dependency_overrides.clear()
+
+
+def _sample(name: str) -> dict:
+    return json.loads((SAMPLES / name).read_text())
+
+
+def test_process_list_and_detail(client):
+    # process a clean invoice
+    resp = client.post("/api/invoices/process", json=_sample("inv_clean_001.json"))
+    assert resp.status_code == 200
+    summary = resp.json()
+    assert summary["status"] == "submitted"
+    assert summary["decision"] == "submit"
+    assert summary["sponsor_id"] == "sponsor_001"
+    assert summary["exception_count"] == 0
+    invoice_id = summary["id"]
+
+    # it appears in the list
+    listing = client.get("/api/invoices").json()
+    assert [row["id"] for row in listing] == [invoice_id]
+
+    # detail exposes every stage output + audit trail
+    detail = client.get(f"/api/invoices/{invoice_id}").json()
+    assert len(detail["line_items"]) == 4
+    assert detail["context"]["site_id"] == "site_001"
+    assert [e["action"] for e in detail["audit"]][-1] == "submitted"
+
+
+def test_process_hold_records_exception(client):
+    resp = client.post("/api/invoices/process", json=_sample("inv_hold_unmatched_002.json"))
+    summary = resp.json()
+    assert summary["status"] == "held"
+    assert summary["exception_count"] >= 1
+
+    detail = client.get(f"/api/invoices/{summary['id']}").json()
+    assert any(e["type"] == "unmatched_line_item" for e in detail["exceptions"])
+
+
+def test_detail_404_for_unknown_invoice(client):
+    assert client.get("/api/invoices/nope").status_code == 404
