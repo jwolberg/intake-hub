@@ -79,3 +79,42 @@ client unit, 3 HTTP-integration via TestClient).
 
 **Phase 0 is complete.** Next: **Phase 1 (P1-T1)** — intake of sample invoices,
 the start of the MVP vertical slice.
+
+## 2026-05-26 — Phase 1 (P1-T1..T8): pipeline stages
+
+**Built the eight pipeline stages as pure functions** (intake, parser,
+extraction, context, catalog, matching, decision, submission/exceptions), each
+in its package. Per ARCHITECTURE.md §4 stages are pure transformations; the
+orchestrator (P1-T9) owns persistence + audit, so these stages take/return
+domain objects and touch no DB.
+
+**Decision: MVP extraction runs offline via `PassthroughLLMClient`.** The parser
+renders the sample's `document` block to JSON; the passthrough LLM echoes it; the
+extraction stage validates it into the domain models. This proves the pipeline
+shape and the schema-validation gate without a provider key. A real provider
+(OD-2) drops in at the `complete_json` boundary in P2-A1 — nothing else changes.
+This is a deliberate stand-in, consistent with PRD §4 (no real document
+intelligence) for the walking skeleton.
+
+**Decision: removed the 1.0 cap from the reference stub's `_score`.** Study-level
+clues (sponsor/protocol/study) are shared by every site under a study, so only
+the site-name match can break a tie between sibling sites; clamping erased that
+and made the clean sample look ambiguous. Confidence is still clamped to 1.0 in
+`ResolvedContext`, but ranking uses the raw score.
+
+**Baseline policy (P1-T7):** any HIGH-severity risk flag → hold; otherwise submit.
+HIGH flags: unresolved/ambiguous context, catalog unavailable, unmatched line
+item, amount mismatch, total mismatch. Full severity model + tolerances in P2-B1.
+
+**Samples added:** `inv_clean_001.json` (all items match, totals reconcile →
+SUBMIT) and `inv_hold_unmatched_002.json` (an item absent from the catalog →
+HOLD). These cover the two terminal outcomes the MVP must show.
+
+**Validation:** `ruff check .` clean; `pytest -q` → **15 passed** (added a chained
+end-to-end pipeline test). Manual run confirms: clean → SUBMIT (conf 1.0, 4/4
+matched), unmatched → HOLD (conf 0.9, rationale "1 line item(s) could not be
+matched to the catalog").
+
+**Follow-up (P1-T9):** add a `Repository` (in-memory for tests + Postgres for the
+app) and the orchestrator that chains these stages, persists each output, and
+writes audit events — then API (P1-T10) and hub (P1-T11).

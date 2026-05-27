@@ -34,9 +34,9 @@
 
 ## Current Status
 - Overall status: In Progress
-- Current phase: Phase 0 Complete → Phase 1 (MVP Vertical Slice) next
-- Current ticket: P1-T1 — Intake of sample invoices
-- Blockers: None (OD-1 resolved: backend = Python/FastAPI; OD-2..OD-5 provisional behind interfaces)
+- Current phase: Phase 1 — MVP Vertical Slice (P1-T1..T8 Complete; pipeline stages green end-to-end)
+- Current ticket: P1-T9 — Orchestrator + state machine + audit (needs persistence/repository)
+- Blockers: None (OD-1 resolved; OD-2..OD-5 provisional behind interfaces)
 - Implementation log: /docs/implementation.md, /docs/implementation-notes.md
 
 ---
@@ -76,7 +76,7 @@
   - Acceptance criteria covered: ARCHITECTURE §7 (MCP integration), §8 (LLM integration); PRD FR3, FR4, FR7 (dependencies isolated behind clients).
   - Status: Complete — LLM/MCP/ClinRun interfaces + in-process stubs + HTTP clients + mcp-reference/mock-clinrun compose services; 13 tests passing.
 
-### Phase 1 — MVP Vertical Slice (Walking Skeleton)  ◻ Not started — next (P1-T1)
+### Phase 1 — MVP Vertical Slice (Walking Skeleton)  🔄 In progress (P1-T1..T8 Complete; P1-T9 next)
 **Goal**
 - Thinnest end-to-end happy path: a seeded sample invoice flows through every stage to a stored, explainable submit/hold decision that an operator can view in the hub.
 
@@ -89,55 +89,55 @@
   - Files likely involved: /backend/intake/**, /samples/**, /backend/api (process route stub)
   - Depends on: P0-T3, P0-T4
   - Acceptance criteria covered: PRD FR1 (all acceptance bullets); ARCHITECTURE §4 (`intake`); PRD §7 Step 1.
-  - Status: Todo
+  - Status: Complete — `intake.ingest` creates the Invoice record (status received); persistence wired in P1-T9.
 - **P1-T2 — Document parsing**
   - Objective: Extract raw text + available structure from a sample invoice; persist parsed text + attachment metadata.
   - Files likely involved: /backend/parser/**
   - Depends on: P1-T1
   - Acceptance criteria covered: PRD §7 Step 2; ARCHITECTURE §4 (`parser`).
-  - Status: Todo
+  - Status: Complete — `parser.parse` → `ParsedDocument` (MVP renders the sample document block; real parser swaps in later).
 - **P1-T3 — LLM extraction (happy path)**
   - Objective: Extract metadata + line items via `LLMClient`, schema-validated, with per-field/item confidence; mark missing fields explicitly.
   - Files likely involved: /backend/extraction/**, /backend/clients (LLMClient)
   - Depends on: P1-T2
   - Acceptance criteria covered: PRD FR2 (all acceptance bullets); ARCHITECTURE §8.
-  - Status: Todo
+  - Status: Complete — `extraction.extract` validates LLM JSON into `ExtractionResult`; offline `PassthroughLLMClient` default (real provider = OD-2 swap).
 - **P1-T4 — Context resolution via MCP (single best candidate)**
   - Objective: Resolve sponsor/study/site using the stubbed `MCPReferenceClient`; persist resolved IDs + confidence + candidates.
   - Files likely involved: /backend/context/**
   - Depends on: P1-T3, P0-T4
   - Acceptance criteria covered: PRD FR3; ARCHITECTURE §7; PRD §7 Step 4.
-  - Status: Todo
+  - Status: Complete — `context.resolve` picks top candidate, clamps confidence, flags near-tie ambiguity.
 - **P1-T5 — Catalog fetch (scoped)**
   - Objective: Fetch sponsor+study-scoped catalog via client; cache by `(sponsorId, studyId)`.
   - Files likely involved: /backend/catalog/**
   - Depends on: P1-T4
   - Acceptance criteria covered: PRD FR4; ARCHITECTURE §7 (catalog caching), §12 (`catalog_cache`).
-  - Status: Todo
+  - Status: Complete — `catalog.fetch` scopes by resolved sponsor/study; raises `CatalogNotFound` (caching in P2-A3).
 - **P1-T6 — Line-item matching (baseline)**
   - Objective: Produce a `MatchResult` per line item (best catalog item, confidence, rationale, amount/qty comparison, unmatched flag).
   - Files likely involved: /backend/matching/**
   - Depends on: P1-T5
   - Acceptance criteria covered: PRD FR5; ARCHITECTURE §9.
-  - Status: Todo
+  - Status: Complete — `matching.match` (normalize + exact/containment + price check); unmatched flagged (layered matcher in P2-A4).
 - **P1-T7 — Decision engine (policy table)**
   - Objective: Apply the data-driven policy → `submit`|`hold` with confidence, rationale, risk_flags; no human gate.
   - Files likely involved: /backend/decision/**
   - Depends on: P1-T6
   - Acceptance criteria covered: PRD FR6 (decision before QC); ARCHITECTURE §10 (policy table); STRATEGY § Our approach.
-  - Status: Todo
+  - Status: Complete — `decision.decide` applies the baseline policy; any HIGH flag → hold, else submit (full model in P2-B1).
 - **P1-T8 — Submission to mock ClinRun + hold exception**
   - Objective: On `submit`, send structured payload to `mock-clinrun` and store result; on `hold`, create an `Exception` with a specific reason.
   - Files likely involved: /backend/submission/**, /backend/exceptions/**, /backend/clients (ClinRunClient)
   - Depends on: P1-T7
   - Acceptance criteria covered: PRD FR7, FR8 (baseline); ARCHITECTURE §2, §4.
-  - Status: Todo
+  - Status: Complete — `submission.submit_invoice` (payload + ClinRun) and `exceptions.from_decision` (hold reasons → typed exceptions).
 - **P1-T9 — Orchestrator + state machine + audit (baseline)**
   - Objective: Sequence stages, own state transitions, append audit events, isolate per-invoice failures so one failure doesn't stop others.
   - Files likely involved: /backend/orchestrator/**, /backend/audit/**
   - Depends on: P1-T1..P1-T8
   - Acceptance criteria covered: PRD FR11 (baseline), §14 (one failed invoice doesn't stop others); ARCHITECTURE §5–§6.
-  - Status: Todo
+  - Status: Todo  ← recommended next (introduces the repository/persistence layer the stages feed)
 - **P1-T10 — API: process / list / detail**
   - Objective: Implement `POST /api/invoices/process`, `GET /api/invoices`, `GET /api/invoices/:id` returning source/extraction/context/matches/decision/exceptions/audit.
   - Files likely involved: /backend/api/**
@@ -305,8 +305,8 @@ Tickets are grouped by STRATEGY § Tracks. Each traces to a PRD requirement.
 17. Phase 3: P3-T1, P3-T4 → P3-T2, P3-T3, P3-T5 → P3-T6 → P3-T7
 
 ## Recommended Next Step
-- Start with: **P1-T1 — Intake of sample invoices**
-- Why this is next: Phase 0 is complete — stack resolved, ARCHITECTURE §19 layout, domain + schema, and all three external clients (LLM/MCP/ClinRun) with stubs + compose services are in place. P1-T1 begins the MVP vertical slice by creating `Invoice` workflow records from the provided samples, which every later Phase 1 stage builds on.
+- Start with: **P1-T9 — Orchestrator + state machine + audit**
+- Why this is next: the eight pipeline stages (P1-T1..T8) are complete and proven end-to-end on the sample set (clean→submit, unmatched→hold). P1-T9 introduces the repository/persistence layer and the orchestrator that chains the stages, owns state transitions, persists each stage output, and appends audit events — the prerequisite for the API (P1-T10) and hub (P1-T11).
 
 ## Deferred / Out of Scope
 - PRD §4 Non-Goals: perfect OCR/document intelligence; supporting every invoice format; replacing finance/compliance workflows; production-scale email ingestion; full ClinRun production integration (mock used instead); guaranteed 100% match accuracy in ambiguous cases.

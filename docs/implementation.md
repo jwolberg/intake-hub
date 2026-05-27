@@ -216,3 +216,47 @@ Files created/modified: see Code Changes.
 
 ## Next
 - Phase 1, P1-T1 — intake of sample invoices (start of the MVP vertical slice).
+
+---
+
+# Implementation — P1-T1..T8 (MVP pipeline stages)
+
+## Scope Implemented
+- Requested scope: continue — implement the Phase 1 pipeline stages.
+- Related phase: Phase 1 (MVP Vertical Slice).
+- Related ticket(s): P1-T1 (intake), P1-T2 (parser), P1-T3 (extraction), P1-T4 (context), P1-T5 (catalog), P1-T6 (matching), P1-T7 (decision), P1-T8 (submission + exceptions). **P1-T9..T11 deferred** (need persistence + API + hub).
+
+## Approach
+- Implement each stage as a pure function (typed in → typed out), per ARCHITECTURE §4; persistence/audit is the orchestrator's job (P1-T9). Prove the chain end-to-end on sample invoices with the in-process stub clients — no DB, no network.
+
+## Code Changes
+- `backend/intake/__init__.py` — `ingest(sample) -> Invoice` (status received).
+- `backend/parser/__init__.py` — `parse(invoice_id, sample) -> ParsedDocument` (renders document block).
+- `backend/extraction/__init__.py` — `extract(invoice_id, parsed, llm) -> ExtractionResult` (LLM JSON → validated models).
+- `backend/context/__init__.py` — `resolve(...) -> ResolvedContext` (top candidate, clamp confidence, ambiguity warning).
+- `backend/catalog/__init__.py` — `fetch(ctx, ref) -> list[CatalogItem]` (scoped; raises `CatalogNotFound`).
+- `backend/matching/__init__.py` — `match(line_items, catalog) -> list[MatchResult]` (normalize + exact/containment + price check).
+- `backend/decision/__init__.py` — `decide(...) -> DecisionResult` (baseline policy; HIGH flag → hold).
+- `backend/submission/__init__.py` — `build_payload` + `submit_invoice(...)`.
+- `backend/exceptions/__init__.py` — `from_decision(invoice_id, decision) -> list[ExceptionRecord]`.
+- `backend/domain/models.py` (+`__init__`) — added `ParsedDocument`, `ExtractionResult`.
+- `backend/clients/llm.py` (+`__init__`) — added `PassthroughLLMClient`; `get_llm_client()` now returns it (offline default).
+- `backend/clients/mcp_reference.py` — removed score cap so site-name match disambiguates siblings.
+- `samples/inv_clean_001.json`, `samples/inv_hold_unmatched_002.json` — submit + hold fixtures.
+- `tests/integration/test_pipeline.py` — chained end-to-end test over both samples.
+
+## Acceptance Criteria Mapping
+- PRD FR1 → intake creates the Invoice record. PRD FR2 → extraction validates LLM JSON into models. PRD FR3 → context resolution with candidates + ambiguity. PRD FR4 → scoped catalog fetch. PRD FR5 → per-line match results + unmatched flag. PRD FR6 → submit/hold decision before any human. PRD FR7/FR8 → ClinRun payload + typed hold exceptions.
+
+## Build Plan Mapping
+- P1-T1..T8: Complete. P1-T9 (orchestrator + persistence + audit): Todo, next.
+
+## Validation
+- `ruff` clean; `pytest -q` → 15 passed (incl. the chained pipeline test).
+- Visible outcome: `inv_clean_001` → SUBMIT (conf 1.0, 4/4 matched); `inv_hold_unmatched_002` → HOLD (conf 0.9, "1 line item(s) could not be matched").
+
+## Open Issues
+- Stages are not yet persisted or exposed over HTTP (P1-T9/T10). MVP extraction is the offline passthrough until a provider is wired (OD-2, P2-A1).
+
+## Next
+- P1-T9 — repository (in-memory + Postgres) + orchestrator (chain, state machine, audit), then P1-T10 (API) and P1-T11 (hub).
