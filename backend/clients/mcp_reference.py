@@ -52,7 +52,10 @@ def _score(clues: dict, sponsor: dict, study: dict, site: dict) -> float:
         score += 0.4
     if study_name and study_name == study["name"].lower():
         score += 0.2
-    return round(min(score, 1.0), 3)
+    # Not clamped to 1.0: study-level clues (sponsor/protocol/study) are shared by
+    # every site under a study, so only the site-name match can break a tie
+    # between sibling sites. Clamping would erase that signal.
+    return round(score, 3)
 
 
 class StubMCPReferenceClient:
