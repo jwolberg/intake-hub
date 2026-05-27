@@ -323,3 +323,37 @@ Files created/modified: see Code Changes.
 
 ## Next
 - P1-T11 — reviewer hub (list + detail) over these routes; completes the MVP slice.
+
+---
+
+# Implementation — P1-T11 (Reviewer hub) — MVP slice complete
+
+## Scope Implemented
+- Related phase: Phase 1 (completes it). Related ticket(s): P1-T11.
+
+## Approach
+- Read-only React/Vite hub over the API: a list view for triage and a detail view that surfaces every stage output + the decision + the audit timeline. No QC actions yet (Phase 2 / P2-C3).
+
+## Code Changes
+- `frontend/src/api.js` — list/detail/health fetch helpers.
+- `frontend/src/components/InvoiceList.jsx` — list (status/decision/confidence/exception count).
+- `frontend/src/components/InvoiceDetail.jsx` — decision + rationale, exceptions, context, metadata, line-items↔matches, audit timeline.
+- `frontend/src/App.jsx` — list↔detail navigation + API status; `main.jsx` imports `styles.css`.
+- `frontend/src/styles.css` — minimal styling + badges.
+- `.gitignore` — ignore `dist/`.
+
+## Acceptance Criteria Mapping
+- PRD FR9 §6 (what was extracted / matched / confidence / exceptions / submitted-or-withheld) → detail view sections. PRD §10 (list + detail views) → the two views. USERS § Reviewer (focus on flagged invoices) → list shows decision + exception count.
+
+## Build Plan Mapping
+- P1-T11: Complete. Phase 1 (MVP vertical slice): feature-complete. Next: Phase 1 exit gate (live-stack validation), then Phase 2.
+
+## Validation
+- `npm install` + `npm run build` → clean production build (34 modules). Python suite unchanged (21 passed, 1 skipped).
+- Not browser-validated (needs `docker compose up`; Docker unavailable in session).
+
+## Open Issues
+- Live hub render + Postgres round-trip + full compose stack are the Phase 1 exit gate — only ever run with stubs/in-memory so far.
+
+## Next
+- Phase 1 exit gate (Postgres + compose + browser), then Phase 2 Track A (P2-A1: robust multi-format extraction).

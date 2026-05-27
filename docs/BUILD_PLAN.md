@@ -34,9 +34,9 @@
 
 ## Current Status
 - Overall status: In Progress
-- Current phase: Phase 1 — MVP Vertical Slice (P1-T1..T10 Complete; API live over the orchestrator)
-- Current ticket: P1-T11 — Reviewer hub (minimal list + detail) — the last Phase 1 ticket
-- Note: PostgresRepository implemented; its round-trip test is skip-guarded and was NOT run here (Docker daemon unavailable in the dev session). Run `docker compose up` (or `up -d db` + DATABASE_URL) to validate.
+- Current phase: Phase 1 — MVP Vertical Slice COMPLETE (P1-T1..T11). Walking skeleton runs intake → … → decision → hub.
+- Current ticket: Phase 1 exit gate — validate the live stack (Postgres round-trip + `docker compose up` + hub in a browser), then Phase 2.
+- Note: PostgresRepository + the hub were NOT exercised against the live stack here (Docker daemon unavailable in the dev session). API + pipeline + orchestrator are validated in-process; the frontend builds clean. Run `docker compose up` to validate end-to-end.
 - Blockers: None (OD-1 resolved; OD-2..OD-5 provisional behind interfaces)
 - Implementation log: /docs/implementation.md, /docs/implementation-notes.md
 
@@ -77,7 +77,7 @@
   - Acceptance criteria covered: ARCHITECTURE §7 (MCP integration), §8 (LLM integration); PRD FR3, FR4, FR7 (dependencies isolated behind clients).
   - Status: Complete — LLM/MCP/ClinRun interfaces + in-process stubs + HTTP clients + mcp-reference/mock-clinrun compose services; 13 tests passing.
 
-### Phase 1 — MVP Vertical Slice (Walking Skeleton)  🔄 In progress (P1-T1..T8 Complete; P1-T9 next)
+### Phase 1 — MVP Vertical Slice (Walking Skeleton)  ✅ Complete (2026-05-26)
 **Goal**
 - Thinnest end-to-end happy path: a seeded sample invoice flows through every stage to a stored, explainable submit/hold decision that an operator can view in the hub.
 
@@ -150,7 +150,7 @@
   - Files likely involved: /frontend/**
   - Depends on: P1-T10
   - Acceptance criteria covered: PRD FR9 §6 bullets (what was extracted/matched, confidence/exceptions, submitted/withheld); USERS § Invoice Operations Reviewer.
-  - Status: Todo  ← recommended next (completes the MVP vertical slice)
+  - Status: Complete — React/Vite hub: list (status/decision/confidence/exception count) + detail (metadata, context, line items↔matches, decision + rationale, exceptions, audit timeline). Builds clean; live browser check pending (Docker unavailable in dev session).
 
 ### Phase 2 — Deepen the Tracks
 Tickets are grouped by STRATEGY § Tracks. Each traces to a PRD requirement.
@@ -306,8 +306,12 @@ Tickets are grouped by STRATEGY § Tracks. Each traces to a PRD requirement.
 17. Phase 3: P3-T1, P3-T4 → P3-T2, P3-T3, P3-T5 → P3-T6 → P3-T7
 
 ## Recommended Next Step
-- Start with: **P1-T11 — Reviewer hub (minimal list + detail)**
-- Why this is next: the API (P1-T10) exposes process/list/detail over HTTP. P1-T11 builds the read-only hub views on top — invoice list (status/decision/confidence/exception count) and a detail view (extracted, matched, decision + rationale, exceptions) — completing the MVP vertical slice and the FR9 §6 surface for the Invoice Operations Reviewer.
+- Start with: **Phase 1 exit gate — validate the live stack** (then begin Phase 2, Track A).
+- What it is: Phase 1 is feature-complete and validated in-process, but three things have only ever run with stubs/in-memory because the Docker daemon was down this session. Before deepening tracks, prove the real stack once:
+  1. `docker compose up -d db` then `DATABASE_URL=postgresql+psycopg://invoicescreener:invoicescreener@localhost:5432/invoicescreener pytest tests/integration/test_postgres_repository.py` — un-skips the Postgres round-trip.
+  2. `docker compose up` — API lifespan `init_schema` + reflection + the mcp-reference/mock-clinrun services end-to-end.
+  3. Open the hub (`:5173`), POST a sample to `/api/invoices/process`, confirm it lists + detail renders.
+- Then **P2-A1** (robust multi-format extraction) begins Phase 2.
 
 ## Deferred / Out of Scope
 - PRD §4 Non-Goals: perfect OCR/document intelligence; supporting every invoice format; replacing finance/compliance workflows; production-scale email ingestion; full ClinRun production integration (mock used instead); guaranteed 100% match accuracy in ambiguous cases.

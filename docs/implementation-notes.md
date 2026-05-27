@@ -184,3 +184,31 @@ round-trip). Manual API demo confirms `POST /process` on the clean sample return
 
 **Follow-up (P1-T11):** the reviewer hub list + detail views on top of these
 routes — completes the MVP vertical slice.
+
+## 2026-05-26 — Phase 1 (P1-T11): reviewer hub — MVP slice complete
+
+**React/Vite hub** (read-only, per the ticket and the human-after principle):
+- **List view** — invoice #, vendor, sponsor/study, decision badge, status badge,
+  confidence, exception count; row click → detail (PRD §10 list view).
+- **Detail view** — decision + rationale (pulled from the terminal audit event),
+  exceptions table, resolved context (+ warnings), extracted metadata, a line
+  items ↔ matches table (raw description, qty, total, matched catalog item, match
+  %, flags), and the processing timeline (PRD §10 detail view, FR9 §6).
+
+Split into `api.js`, `App.jsx` (list↔detail nav + API status), and
+`components/InvoiceList.jsx` / `InvoiceDetail.jsx`, with a small `styles.css`.
+QC actions (correct/rerun/escalate) are intentionally out of scope here — Phase 2
+(P2-C3).
+
+**Validation:** `npm install` + `npm run build` → clean production build (34
+modules). Python suite unchanged (21 passed, 1 skipped).
+
+**⚠️ Not browser-validated here.** A live hub check needs the API running, which
+needs Postgres + the stub services — i.e. `docker compose up` — and the Docker
+daemon was unavailable this session. The build proves it compiles; rendering
+against real data is part of the Phase 1 exit gate.
+
+**Phase 1 (MVP vertical slice) is feature-complete:** intake → parse → extract →
+resolve → catalog → match → decide → submit/hold, persisted + audited, exposed
+over the API, and surfaced in the hub. Remaining before Phase 2: the live-stack
+validation gate (Postgres round-trip, `docker compose up`, hub in a browser).
