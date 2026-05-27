@@ -53,3 +53,16 @@ def record(
     )
     repo.append_audit(event)
     return event
+
+
+def latest_details(audit: list[AuditEvent], action: AuditAction) -> dict:
+    """Details of the most recent event with ``action`` (``{}`` if none).
+
+    The audit trail is the source of truth (PRD §17), so stage signals stored on
+    their events — e.g. per-field extraction confidence/evidence — are read back
+    from it for the detail view (P2-C2) and rerun (P2-C4).
+    """
+    for event in reversed(audit):
+        if event.action is action:
+            return event.details
+    return {}

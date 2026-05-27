@@ -65,6 +65,8 @@ def process(
     source = sample.get("source", {})
     record(repo, invoice.id, AuditAction.RECEIVED, actor=Actor.SYSTEM, details={
         "channel": source.get("channel"),
+        "subject": source.get("subject"),
+        "sender": source.get("sender"),
         "attachment": source.get("attachment"),
     })
 
@@ -85,6 +87,11 @@ def process(
             "invoice_number": extraction.metadata.invoice_number,
             "fields_extracted": len(extraction.field_confidence) - len(extraction.missing_fields),
             "missing_fields": extraction.missing_fields,
+            # Per-field signals persisted here (no schema change) so the detail
+            # view can show value/confidence/evidence (PRD §10) and rerun can
+            # reconstruct the extraction (P2-C2/C4).
+            "field_confidence": extraction.field_confidence,
+            "field_evidence": extraction.field_evidence,
         })
 
         ctx = resolve(invoice.id, extraction.metadata, source, ref)
@@ -143,8 +150,11 @@ def _submit(repo, invoice, metadata, ctx, matches, clinrun, decision) -> None:
         _fail(repo, invoice, "submission_failed", str(exc))
         return
     _advance(repo, invoice, InvoiceStatus.SUBMITTED)
+    # Record risk flags on submit too (symmetric with held) so the detail view's
+    # Decision section can show visibility-only medium/low flags (PRD §10).
     record(repo, invoice.id, AuditAction.SUBMITTED, reason=decision.rationale, details={
         "reference_id": result.reference_id,
+        "risk_flags": [f.model_dump(mode="json") for f in decision.risk_flags],
     })
 
 

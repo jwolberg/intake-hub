@@ -649,3 +649,35 @@ server-side, tags should be precomputed/persisted. Noted, not done (YAGNI).
 **Validation:** `ruff` clean; `pytest -q` → **93 passed, 1 skipped** (+2 API tests:
 filters narrow correctly + tags present; unknown filter → 422); frontend builds
 clean. Next: **P2-C2** — detail-view full sections.
+
+## 2026-05-27 — Phase 2 Track C (P2-C2): detail-view full sections
+
+**Persisting per-field signals (the P2-A1 follow-up).** P2-A1 captured per-field
+confidence/evidence but they were dropped after decisioning. P2-C2 persists them
+on the **`extracted` audit event** (`field_confidence`, `field_evidence`,
+`missing_fields`) — no schema change, works identically for InMemory + Postgres,
+and keeps the audit trail the source of truth (PRD §17). Symmetrically, a *submit*
+now records its `risk_flags` on the `submitted` event (held already did), and the
+`received` event gained `subject`/`sender`. New `audit.latest_details(audit,
+action)` reads the most recent event of a kind; the `GET /api/invoices/:id` route
+projects `source` + `extraction` blocks onto the detail payload from it.
+
+**Why audit, not new columns.** Postgres is untestable here (Docker unavailable),
+so a column add would be the one change exercised only on an unrun path. Storing
+on the audit event reuses the JSONB `details` both repos already round-trip, so
+the tested in-memory path and the prod path share one mechanism. (If these signals
+ever need indexed querying, promote them to columns — not now.)
+
+**Frontend.** `InvoiceDetail` rebuilt into the six PRD §10 sections: Decision
+(submit/hold + confidence + rationale + risk-flag table + submission status),
+Source (subject/sender/channel/attachment + collapsible original preview),
+Extracted Metadata (per-field value/confidence/evidence table, missing fields
+flagged), Context Resolution (resolved + confidence + mismatch-warning badges +
+candidate-alternatives table), Line Items & Matches (raw→normalized, qty/total,
+matched item, confidence, rationale + exception flags), and the timeline (now with
+inline reasons). Added severity badges (high/medium/low) + confidence colour
+coding. Editable correction fields + QC action controls are P2-C3.
+
+**Validation:** `ruff` clean; `pytest -q` → **94 passed, 1 skipped** (+1 API test:
+source block, per-field confidence/evidence, submit risk_flags persisted); frontend
+builds clean. Next: **P2-C3** — QC actions.

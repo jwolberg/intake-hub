@@ -85,10 +85,23 @@ tbody tr:hover { background: #f0f3f8; }
 .kv dd { margin: 0; }
 
 .muted { color: var(--muted); }
+.small { font-size: 0.78rem; }
 .right { text-align: right; }
 .flag { color: var(--hold); font-size: 0.8rem; }
 .empty { color: var(--muted); padding: 1.5rem 0; text-align: center; }
 .error { color: var(--failed); }
+
+.subhead { font-size: 0.82rem; color: var(--muted); margin: 0.9rem 0 0.4rem; text-transform: uppercase; letter-spacing: 0.03em; }
+.evidence { font-style: italic; max-width: 320px; }
+.preview { background: #f0f3f8; border: 1px solid var(--border); border-radius: 6px; padding: 0.75rem; font-size: 0.78rem; white-space: pre-wrap; max-height: 320px; overflow: auto; margin-top: 0.5rem; }
+
+/* Severity badges (PRD §16) + confidence colour coding. */
+.sev-high { display: inline-block; color: var(--failed); background: var(--failed-bg); border-radius: 4px; padding: 0.05rem 0.4rem; margin-right: 0.3rem; font-weight: 600; }
+.sev-medium { display: inline-block; color: var(--hold); background: var(--hold-bg); border-radius: 4px; padding: 0.05rem 0.4rem; margin-right: 0.3rem; font-weight: 600; }
+.sev-low { display: inline-block; color: var(--muted); background: #eef0f3; border-radius: 4px; padding: 0.05rem 0.4rem; margin-right: 0.3rem; }
+.conf-low { color: var(--failed); font-weight: 600; }
+.conf-mid { color: var(--hold); }
+.conf-high { color: var(--submit); }
 
 .timeline { list-style: none; padding: 0; margin: 0; font-size: 0.84rem; }
 .timeline li { padding: 0.25rem 0; border-bottom: 1px dashed var(--border); display: flex; gap: 0.6rem; }

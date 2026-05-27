@@ -94,6 +94,25 @@ def test_unknown_filter_is_rejected(client):
     assert client.get("/api/invoices?filter=bogus").status_code == 422
 
 
+def test_detail_exposes_source_and_extraction_signals(client):
+    invoice_id = client.post(
+        "/api/invoices/process", json=_sample("inv_clean_001.json")
+    ).json()["id"]
+    detail = client.get(f"/api/invoices/{invoice_id}").json()
+
+    # Source section projected from the received audit event (PRD §10).
+    assert detail["source"]["sender"] == "billing@riverside-cr.example"
+    assert detail["source"]["attachment"] == "INV-1001.pdf"
+
+    # Per-field extraction confidence + evidence surfaced (PRD §10).
+    assert detail["extraction"]["field_confidence"]["invoice_number"] > 0
+    assert "invoice_number" in detail["extraction"]["field_evidence"]
+
+    # A submit records its risk flags on the submitted event (Decision section).
+    submitted = [e for e in detail["audit"] if e["action"] == "submitted"][-1]
+    assert "risk_flags" in submitted["details"]
+
+
 def test_detail_404_for_unknown_invoice(client):
     assert client.get("/api/invoices/nope").status_code == 404
 

@@ -19,12 +19,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
+from backend.audit import latest_details
 from backend.audit.metrics import WorkflowMetrics, compute_metrics
 from backend.clients import get_clinrun_client, get_llm_client, get_reference_client
 from backend.config import settings
 from backend.db import get_engine, init_schema
 from backend.db.repository import Repository, get_repository
-from backend.domain import Decision, InvoiceStatus
+from backend.domain import AuditAction, Decision, InvoiceStatus
 from backend.orchestrator import process
 
 logger = logging.getLogger("invoicescreener.api")
@@ -188,4 +189,20 @@ def get_invoice(invoice_id: str, repo: RepoDep) -> dict:
     detail = repo.get_detail(invoice_id)
     if detail is None:
         raise HTTPException(status_code=404, detail="invoice not found")
+    # Project the source + per-field extraction signals out of the audit trail
+    # for the detail view's Source and Extracted Metadata sections (PRD §10).
+    audit = detail["audit"]
+    received = latest_details(audit, AuditAction.RECEIVED)
+    extracted = latest_details(audit, AuditAction.EXTRACTED)
+    detail["source"] = {
+        "channel": received.get("channel"),
+        "subject": received.get("subject"),
+        "sender": received.get("sender"),
+        "attachment": received.get("attachment"),
+    }
+    detail["extraction"] = {
+        "field_confidence": extracted.get("field_confidence", {}),
+        "field_evidence": extracted.get("field_evidence", {}),
+        "missing_fields": extracted.get("missing_fields", []),
+    }
     return detail

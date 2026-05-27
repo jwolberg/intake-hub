@@ -34,9 +34,9 @@
 
 ## Current Status
 - Overall status: In Progress
-- Current phase: Phase 2 — Deepen the Tracks. Track A COMPLETE (P2-A1..A4); **Track B COMPLETE** (P2-B1..B4); Track C IN PROGRESS (P2-C1 done; P2-C2 next).
-- Current ticket: **P2-C2** (detail-view full sections). The Phase 1 live-stack exit gate (Postgres round-trip + `docker compose up` + hub in a browser) is still OPEN — deferred because the Docker daemon is unavailable in the dev session, not because it passed. Commands: /docs/RUNBOOK.md.
-- Note: PostgresRepository + the hub were NOT exercised against the live stack (Docker daemon unavailable across sessions). API + pipeline + orchestrator validated in-process; frontend builds clean; CORS wired but not browser-verified. P2-A1..A4 + P2-B1..B4 + P2-C1 fully validated in-process (93 passed, 1 skipped). Also: out-of-plan real-PDF demo path (RUNBOOK Path D). Run `docker compose up` to clear the gate end-to-end.
+- Current phase: Phase 2 — Deepen the Tracks. Track A COMPLETE (P2-A1..A4); **Track B COMPLETE** (P2-B1..B4); Track C IN PROGRESS (P2-C1..C2 done; P2-C3 next).
+- Current ticket: **P2-C3** (QC actions). The Phase 1 live-stack exit gate (Postgres round-trip + `docker compose up` + hub in a browser) is still OPEN — deferred because the Docker daemon is unavailable in the dev session, not because it passed. Commands: /docs/RUNBOOK.md.
+- Note: PostgresRepository + the hub were NOT exercised against the live stack (Docker daemon unavailable across sessions). API + pipeline + orchestrator validated in-process; frontend builds clean; CORS wired but not browser-verified. P2-A1..A4 + P2-B1..B4 + P2-C1..C2 fully validated in-process (94 passed, 1 skipped). Also: out-of-plan real-PDF demo path (RUNBOOK Path D). Run `docker compose up` to clear the gate end-to-end.
 - Blockers: None for in-process work (OD-1 resolved; OD-2..OD-5 provisional behind interfaces). Live-stack exit gate blocked on Docker availability only.
 - Implementation log: /docs/implementation.md, /docs/implementation-notes.md
 - Dev setup/run: /docs/RUNBOOK.md
@@ -220,7 +220,7 @@ Tickets are grouped by STRATEGY § Tracks. Each traces to a PRD requirement.
   - Files: /frontend/**
   - Depends on: P1-T11
   - Acceptance criteria covered: PRD §10 (Invoice Detail View), FR9; USERS § Reviewer (understand a decision fast).
-  - Status: Todo
+  - Status: Complete — per-field extraction confidence/evidence + missing fields persisted on the `extracted` audit event (no schema change); submit risk_flags recorded on `submitted` (symmetric with held); received event carries subject/sender; `GET /api/invoices/:id` projects `source` + `extraction` blocks via `audit.latest_details`. Hub detail rebuilt into all six PRD §10 sections (Source, Extracted Metadata value/confidence/evidence, Context + candidates + mismatch warnings, Line Items raw→normalized + rationale + flags, Decision + risk flags + submission status). 94 passed, 1 skipped (+1 API test).
 - **P2-C3 — QC actions**
   - Objective: Mark reviewed, correct metadata, correct line match, rerun, escalate, add note; recorded as human audit events; corrections as overlays (not in-place mutation).
   - Files: /frontend/**, /backend/api (corrections/rerun/reviewed/escalate routes)
