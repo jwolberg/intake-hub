@@ -23,7 +23,7 @@ from .errors import (
     ReferenceUnavailable,
     SubmissionFailed,
 )
-from .llm import LLMClient, StubLLMClient, parse_json_or_raise
+from .llm import LLMClient, PassthroughLLMClient, StubLLMClient, parse_json_or_raise
 from .mcp_reference import (
     HttpMCPReferenceClient,
     MCPReferenceClient,
@@ -38,6 +38,7 @@ __all__ = [
     "HttpMCPReferenceClient",
     "LLMClient",
     "MCPReferenceClient",
+    "PassthroughLLMClient",
     "ReferenceClientError",
     "ReferenceUnavailable",
     "StubClinRunClient",
@@ -65,7 +66,9 @@ def get_clinrun_client() -> ClinRunClient:
 def get_llm_client() -> LLMClient:
     """Default LLM client.
 
-    Returns a stub until a real provider is wired (OD-2) by the first stage that
-    needs it (extraction, P1-T3). Centralised here so that swap is one edit.
+    Returns the offline passthrough stand-in (echoes the structured document the
+    parser renders) so the MVP runs without a provider key. Wiring a real
+    provider (OD-2) is a one-line change here. ``StubLLMClient`` remains the tool
+    for scripted unit tests.
     """
-    return StubLLMClient()
+    return PassthroughLLMClient()

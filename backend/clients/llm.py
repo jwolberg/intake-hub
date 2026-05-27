@@ -50,6 +50,23 @@ class StubLLMClient:
         return dict(self._default)
 
 
+class PassthroughLLMClient:
+    """Offline stand-in that echoes JSON embedded in the prompt.
+
+    The MVP parser renders the document as JSON, so this returns the structured
+    invoice for the extraction stage without a real provider. A real provider
+    (OD-2) replaces this at the ``complete_json`` boundary to extract from genuine
+    invoice text; nothing else in the pipeline changes. Returns ``{}`` when the
+    prompt is not JSON.
+    """
+
+    def complete_json(self, *, system: str, user: str) -> dict:
+        try:
+            return parse_json_or_raise(user)
+        except ValueError:
+            return {}
+
+
 def parse_json_or_raise(raw: str) -> dict:
     """Parse a JSON object from raw model text or raise ``ValueError``.
 
