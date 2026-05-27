@@ -103,6 +103,24 @@ tbody tr:hover { background: #f0f3f8; }
 .conf-mid { color: var(--hold); }
 .conf-high { color: var(--submit); }
 
+/* QC action controls (PRD §10 QC Actions). */
+.qc-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-top: 0.6rem; }
+.qc-actions button, .small-btn {
+  background: #2563eb; color: #fff; border: none; border-radius: 6px;
+  padding: 0.35rem 0.8rem; font-size: 0.82rem; cursor: pointer;
+}
+.qc-actions button:hover:not(:disabled), .small-btn:hover:not(:disabled) { background: #1d4ed8; }
+.qc-actions button:disabled, .small-btn:disabled { opacity: 0.5; cursor: default; }
+.qc-actions button.danger { background: var(--failed); }
+.qc-actions button.danger:hover:not(:disabled) { background: #911d17; }
+.small-btn { padding: 0.2rem 0.5rem; font-size: 0.75rem; }
+.note-input { width: 100%; margin-top: 0.6rem; min-height: 3rem; font-family: inherit;
+  font-size: 0.84rem; padding: 0.5rem; border: 1px solid var(--border); border-radius: 6px; resize: vertical; }
+.reason-input { flex: 1; min-width: 200px; padding: 0.35rem 0.5rem; font-size: 0.82rem;
+  border: 1px solid var(--border); border-radius: 6px; }
+.cell-input { width: 9rem; padding: 0.2rem 0.4rem; font-size: 0.78rem; margin: 0.1rem 0.2rem 0.1rem 0;
+  border: 1px solid var(--border); border-radius: 4px; }
+
 .timeline { list-style: none; padding: 0; margin: 0; font-size: 0.84rem; }
 .timeline li { padding: 0.25rem 0; border-bottom: 1px dashed var(--border); display: flex; gap: 0.6rem; }
 .timeline .ts { color: var(--muted); min-width: 200px; }

@@ -68,3 +68,4 @@ class AuditAction(str, Enum):
     CORRECTED = "corrected"
     RERUN = "rerun"
     ESCALATED = "escalated"
+    NOTE = "note"

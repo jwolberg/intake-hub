@@ -5,9 +5,9 @@ import InvoiceDetail from "./components/InvoiceDetail.jsx";
 import InvoiceList from "./components/InvoiceList.jsx";
 import MetricsBar from "./components/MetricsBar.jsx";
 
-// Reviewer hub shell: invoice list <-> detail. Read-only post-decision QC
-// surface (PRD FR9; USERS § Invoice Operations Reviewer). QC actions
-// (correct / rerun / escalate) arrive in Phase 2 (P2-C3).
+// Reviewer hub shell: invoice list <-> detail. The detail view is the
+// post-decision QC surface (PRD FR9/FR10; USERS § Invoice Operations Reviewer)
+// where reviewers correct, review, escalate, note, and rerun invoices.
 export default function App() {
   const [invoices, setInvoices] = useState([]);
   const [metrics, setMetrics] = useState(null);
@@ -21,6 +21,20 @@ export default function App() {
     getMetrics().then(setMetrics).catch((e) => setError(String(e)));
   }, []);
 
+  const loadDetail = useCallback((id) => {
+    getInvoice(id).then(setDetail).catch((e) => setError(String(e)));
+  }, []);
+
+  // After a QC action: refresh the open detail and the list/metrics behind it.
+  const onAction = useCallback(
+    (updated) => {
+      if (updated) setDetail(updated);
+      else if (selectedId) loadDetail(selectedId);
+      refresh();
+    },
+    [selectedId, loadDetail, refresh],
+  );
+
   useEffect(() => {
     refresh();
     getHealth()
@@ -33,8 +47,8 @@ export default function App() {
       setDetail(null);
       return;
     }
-    getInvoice(selectedId).then(setDetail).catch((e) => setError(String(e)));
-  }, [selectedId]);
+    loadDetail(selectedId);
+  }, [selectedId, loadDetail]);
 
   return (
     <div className="app">
@@ -50,7 +64,7 @@ export default function App() {
           <button className="link-btn" onClick={() => setSelectedId(null)}>
             ← Back to all invoices
           </button>
-          <InvoiceDetail detail={detail} />
+          <InvoiceDetail detail={detail} onAction={onAction} setError={setError} />
         </>
       ) : (
         <>

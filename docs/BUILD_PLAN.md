@@ -34,9 +34,9 @@
 
 ## Current Status
 - Overall status: In Progress
-- Current phase: Phase 2 — Deepen the Tracks. Track A COMPLETE (P2-A1..A4); **Track B COMPLETE** (P2-B1..B4); Track C IN PROGRESS (P2-C1..C2 done; P2-C3 next).
-- Current ticket: **P2-C3** (QC actions). The Phase 1 live-stack exit gate (Postgres round-trip + `docker compose up` + hub in a browser) is still OPEN — deferred because the Docker daemon is unavailable in the dev session, not because it passed. Commands: /docs/RUNBOOK.md.
-- Note: PostgresRepository + the hub were NOT exercised against the live stack (Docker daemon unavailable across sessions). API + pipeline + orchestrator validated in-process; frontend builds clean; CORS wired but not browser-verified. P2-A1..A4 + P2-B1..B4 + P2-C1..C2 fully validated in-process (94 passed, 1 skipped). Also: out-of-plan real-PDF demo path (RUNBOOK Path D). Run `docker compose up` to clear the gate end-to-end.
+- Current phase: Phase 2 — Deepen the Tracks. Track A COMPLETE (P2-A1..A4); **Track B COMPLETE** (P2-B1..B4); Track C IN PROGRESS (P2-C1..C3 done; P2-C4 next).
+- Current ticket: **P2-C4** (rerun semantics with corrected data). The Phase 1 live-stack exit gate (Postgres round-trip + `docker compose up` + hub in a browser) is still OPEN — deferred because the Docker daemon is unavailable in the dev session, not because it passed. Commands: /docs/RUNBOOK.md.
+- Note: PostgresRepository + the hub were NOT exercised against the live stack (Docker daemon unavailable across sessions). API + pipeline + orchestrator validated in-process; frontend builds clean; CORS wired but not browser-verified. P2-A1..A4 + P2-B1..B4 + P2-C1..C3 fully validated in-process (103 passed, 1 skipped). Also: out-of-plan real-PDF demo path (RUNBOOK Path D). Run `docker compose up` to clear the gate end-to-end.
 - Blockers: None for in-process work (OD-1 resolved; OD-2..OD-5 provisional behind interfaces). Live-stack exit gate blocked on Docker availability only.
 - Implementation log: /docs/implementation.md, /docs/implementation-notes.md
 - Dev setup/run: /docs/RUNBOOK.md
@@ -226,7 +226,7 @@ Tickets are grouped by STRATEGY § Tracks. Each traces to a PRD requirement.
   - Files: /frontend/**, /backend/api (corrections/rerun/reviewed/escalate routes)
   - Depends on: P2-C2, P2-B3
   - Acceptance criteria covered: PRD FR10, §13 (correction/rerun/reviewed/escalate endpoints); ARCHITECTURE §11; USERS § Reviewer + § Exception Handler.
-  - Status: Todo
+  - Status: Complete — routes for corrections/metadata, corrections/line-item, reviewed, escalate, note (rerun = P2-C4); each records a human-attributed audit event. New `backend/corrections` derives overlays from the append-only trail (latest-wins, type-coerced) so corrections are overlays, never in-place mutation (ARCHITECTURE §11); detail exposes AI value + overlay; status flips to corrected/escalated (FR10 reflected-in-state). Fixed `metrics.py` to bucket rates by immutable decision (status now mutated by QC). Hub: QC action panel + inline metadata/line-match correction inputs. 103 passed, 1 skipped (+5 API, +4 unit).
 - **P2-C4 — Rerun semantics with corrected data**
   - Objective: `rerun` re-enters pipeline using corrected fields as fixed inputs; downstream stages recompute, unchanged-input stages may reuse outputs.
   - Files: /backend/orchestrator/**, /backend/api/**

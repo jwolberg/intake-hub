@@ -681,3 +681,48 @@ coding. Editable correction fields + QC action controls are P2-C3.
 **Validation:** `ruff` clean; `pytest -q` → **94 passed, 1 skipped** (+1 API test:
 source block, per-field confidence/evidence, submit risk_flags persisted); frontend
 builds clean. Next: **P2-C3** — QC actions.
+
+## 2026-05-27 — Phase 2 Track C (P2-C3): human QC actions
+
+**Routes (PRD §13, FR10).** `POST /api/invoices/:id/` → `corrections/metadata`,
+`corrections/line-item`, `reviewed`, `escalate`, `note`. Each records a
+**human-attributed** audit event (so AI vs. human stays distinguishable, PRD §17)
+and returns the refreshed detail. Added a `note` action to `AuditAction` (the
+`action` column is free-text, so no migration). Escalate sets status `escalated`;
+corrections set status `corrected`; reviewed/note leave status unchanged.
+
+**Corrections as overlays (ARCHITECTURE.md §11), not in-place mutation.** New
+`backend/corrections` module replays the append-only audit trail to derive the
+current overlay: `metadata_overlay`/`match_overlay` (latest-wins), `effective_metadata`
+(applies + re-validates so a human's `"1320.00"` becomes a `Decimal`), and
+`apply_match_overlay` (pins a corrected line to the human's catalog choice,
+confidence 1.0, flags cleared). The AI's original `invoices.metadata` /
+`match_results` are never overwritten — the correction lives as a `corrected`
+event with `before`/`after`, and the detail payload exposes both AI value and the
+overlay. The list summary reflects corrected fields via `effective_metadata`, and
+status flips to `corrected`, so the change is "reflected in invoice state" (FR10)
+without losing what the AI produced.
+
+**Decision (interpretation) — overlay vs. in-place.** PRD FR10 requires only
+(a) corrections reflected in state and (b) audit distinguishing AI from human.
+ARCHITECTURE §11 additionally requires overlays, not in-place edits. We satisfy
+both with the audit-replayed overlay; no parallel correction table is needed
+(works identically for InMemory + Postgres).
+
+**Fix — metrics now bucket by decision, not status (P2-B4 ↔ P2-C3).** Escalating a
+held invoice (or correcting a submitted one) moves its *status*, which would drop
+it from `metrics.py`'s status-based buckets — exactly the invoices `false_submit_rate`
+/ `hold_precision` measure. Reworked `compute_metrics` so the rate buckets key off
+the immutable AI `decision` (submit/hold); throughput counts stay status-based.
+This is why `hold_precision` finally populates once reviewers act, as P2-B4's note
+anticipated.
+
+**Frontend.** `InvoiceDetail` gains a QC Actions panel (Mark reviewed / Escalate /
+Add note + a shared reason/note box), inline editable correction inputs per
+metadata field (showing corrected value + AI original), and per-line catalog-match
+correction inputs. Actions post and refresh detail + list + metrics via an
+`onAction` callback threaded from `App`.
+
+**Validation:** `ruff` clean; `pytest -q` → **103 passed, 1 skipped** (+5 API tests
+for the routes/overlay/state + metrics integration; +4 unit tests for the overlay
+helpers); frontend builds clean. Next: **P2-C4** — rerun with corrected data.

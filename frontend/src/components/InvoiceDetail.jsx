@@ -1,9 +1,20 @@
-// Invoice detail view (PRD §10 Invoice Detail View, FR9 §6). The post-decision
-// QC surface: every section the reviewer needs to understand a decision fast —
-// source, extracted metadata (value/confidence/evidence), context (resolved +
-// candidates + mismatch warnings), line-item matching (raw vs normalized +
-// rationale + flags), and the decision (submit/hold + confidence + rationale +
-// risk flags + submission status). QC actions arrive in P2-C3.
+// Invoice detail view (PRD §10 Invoice Detail View, FR9/FR10 §6). The
+// post-decision QC surface: every section the reviewer needs to understand a
+// decision fast — source, extracted metadata (value/confidence/evidence +
+// editable correction), context (resolved + candidates + mismatch warnings),
+// line-item matching (raw vs normalized + rationale + flags + match correction),
+// and the decision (submit/hold + confidence + rationale + risk flags +
+// submission status) — plus the human QC actions (correct/review/escalate/note).
+
+import { useState } from "react";
+
+import {
+  addNote,
+  correctLineItem,
+  correctMetadata,
+  escalateInvoice,
+  markReviewed,
+} from "../api.js";
 
 // Header fields shown in the Extracted Metadata section (PRD §10), in order.
 const META_FIELDS = [
@@ -26,7 +37,6 @@ function pct(v) {
   return v == null ? "—" : `${Math.round(v * 100)}%`;
 }
 
-// Humanize a taxonomy code (e.g. "context_mismatch" → "Context mismatch").
 function humanize(code) {
   if (!code) return "";
   const spaced = code.replace(/_/g, " ");
@@ -57,10 +67,12 @@ function submissionStatus(invoice, event) {
   return "Pending";
 }
 
-export default function InvoiceDetail({ detail }) {
+export default function InvoiceDetail({ detail, onAction, setError }) {
   const { invoice, source, extraction, line_items, context, matches, exceptions, audit } =
     detail;
   const meta = invoice.metadata ?? {};
+  const overlay = detail.corrections?.metadata ?? {};
+  const matchOverlay = detail.corrections?.line_items ?? {};
   const conf = extraction?.field_confidence ?? {};
   const evidence = extraction?.field_evidence ?? {};
   const missing = new Set(extraction?.missing_fields ?? []);
@@ -70,16 +82,94 @@ export default function InvoiceDetail({ detail }) {
   const rationale = d.reason ?? d.rationale ?? d.error;
   const riskFlags = d.risk_flags ?? [];
 
+  const [metaEdits, setMetaEdits] = useState({});
+  const [metaReason, setMetaReason] = useState("");
+  const [lineEdits, setLineEdits] = useState({});
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  // Run a QC action; the route returns the refreshed detail, which onAction applies.
+  function run(promise) {
+    setBusy(true);
+    promise
+      .then(onAction)
+      .catch((e) => setError(String(e)))
+      .finally(() => setBusy(false));
+  }
+
+  function effective(key) {
+    const o = overlay[key];
+    return o != null && o !== "" ? o : meta[key];
+  }
+
+  function saveMetadata() {
+    const updates = {};
+    for (const [key, val] of Object.entries(metaEdits)) {
+      const current = effective(key);
+      if (val !== "" && val !== (current == null ? "" : String(current))) {
+        updates[key] = val;
+      }
+    }
+    if (Object.keys(updates).length === 0) return;
+    run(correctMetadata(invoice.id, updates, metaReason || null));
+    setMetaEdits({});
+    setMetaReason("");
+  }
+
+  function saveLine(lineId) {
+    const edit = lineEdits[lineId] ?? {};
+    run(
+      correctLineItem(invoice.id, {
+        line_item_id: lineId,
+        catalog_item_id: edit.catalog_item_id || null,
+        catalog_description: edit.catalog_description || null,
+      }),
+    );
+    setLineEdits((prev) => ({ ...prev, [lineId]: {} }));
+  }
+
   return (
     <div>
       <div className="panel">
         <h2>
-          {meta.invoice_number ?? invoice.id}{" "}
+          {effective("invoice_number") ?? invoice.id}{" "}
           <span className={`badge ${invoice.decision ?? "neutral"}`}>
             {invoice.decision ?? "no decision"}
           </span>{" "}
           <span className={`badge ${invoice.status}`}>{invoice.status}</span>
         </h2>
+      </div>
+
+      {/* QC Actions (PRD §10/FR10) — every action records a human audit event. */}
+      <div className="panel">
+        <h2>QC actions</h2>
+        <div className="qc-actions">
+          <button disabled={busy} onClick={() => run(markReviewed(invoice.id, note || null))}>
+            Mark reviewed
+          </button>
+          <button
+            disabled={busy}
+            className="danger"
+            onClick={() => run(escalateInvoice(invoice.id, note || null))}
+          >
+            Escalate
+          </button>
+          <button
+            disabled={busy || !note.trim()}
+            onClick={() => {
+              run(addNote(invoice.id, note));
+              setNote("");
+            }}
+          >
+            Add note
+          </button>
+        </div>
+        <textarea
+          className="note-input"
+          placeholder="Reviewer note / reason (used by note, and attached to reviewed / escalate)"
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+        />
       </div>
 
       {exceptions.length > 0 && (
@@ -156,7 +246,7 @@ export default function InvoiceDetail({ detail }) {
         )}
       </div>
 
-      {/* Extracted Metadata (PRD §10) — value + confidence + source evidence. */}
+      {/* Extracted Metadata (PRD §10) — value + confidence + evidence + correction. */}
       <div className="panel">
         <h2>Extracted metadata</h2>
         <table>
@@ -166,29 +256,59 @@ export default function InvoiceDetail({ detail }) {
               <th>Value</th>
               <th className="right">Confidence</th>
               <th>Source evidence</th>
+              <th>Correction</th>
             </tr>
           </thead>
           <tbody>
             {META_FIELDS.map(([key, label]) => {
               const value = meta[key];
               const isMissing = missing.has(key) || value == null || value === "";
+              const corrected = key in overlay;
               return (
                 <tr key={key}>
                   <td className="muted">{label}</td>
                   <td>
-                    {isMissing
-                      ? <span className="flag sev-high">missing</span>
-                      : String(value)}
+                    {corrected ? (
+                      <span>
+                        <strong>{String(overlay[key])}</strong>{" "}
+                        <span className="muted small">
+                          (AI: {isMissing ? "missing" : String(value)})
+                        </span>
+                      </span>
+                    ) : isMissing ? (
+                      <span className="flag sev-high">missing</span>
+                    ) : (
+                      String(value)
+                    )}
                   </td>
                   <td className={`right ${confidenceClass(conf[key])}`}>
                     {isMissing ? "—" : pct(conf[key])}
                   </td>
                   <td className="muted evidence">{evidence[key] ?? "—"}</td>
+                  <td>
+                    <input
+                      className="cell-input"
+                      placeholder="correct…"
+                      value={metaEdits[key] ?? ""}
+                      onChange={(e) =>
+                        setMetaEdits((prev) => ({ ...prev, [key]: e.target.value }))
+                      }
+                    />
+                  </td>
                 </tr>
               );
             })}
           </tbody>
         </table>
+        <div className="qc-actions">
+          <input
+            className="reason-input"
+            placeholder="reason for correction (optional)"
+            value={metaReason}
+            onChange={(e) => setMetaReason(e.target.value)}
+          />
+          <button disabled={busy} onClick={saveMetadata}>Save metadata corrections</button>
+        </div>
       </div>
 
       {/* Context Resolution (PRD §10) — resolved + candidates + mismatch warnings. */}
@@ -233,7 +353,7 @@ export default function InvoiceDetail({ detail }) {
         )}
       </div>
 
-      {/* Line-Item Matching (PRD §10) — raw vs normalized + rationale + flags. */}
+      {/* Line-Item Matching (PRD §10) — raw vs normalized + rationale + flags + correction. */}
       <div className="panel">
         <h2>Line items &amp; matches</h2>
         <table>
@@ -245,13 +365,19 @@ export default function InvoiceDetail({ detail }) {
               <th>Matched catalog item</th>
               <th className="right">Match</th>
               <th>Rationale / flags</th>
+              <th>Correct match</th>
             </tr>
           </thead>
           <tbody>
             {line_items.map((li) => {
               const m = matchByLine[li.id];
+              const corrected = li.id in matchOverlay;
               const flags = [...(m?.exceptions ?? [])];
-              if (!m || !m.catalog_item_id) flags.push("unmatched");
+              if (!corrected && (!m || !m.catalog_item_id)) flags.push("unmatched");
+              const edit = lineEdits[li.id] ?? {};
+              const display = corrected
+                ? matchOverlay[li.id].catalog_description ?? matchOverlay[li.id].catalog_item_id
+                : m?.catalog_description;
               return (
                 <tr key={li.id}>
                   <td>
@@ -262,15 +388,49 @@ export default function InvoiceDetail({ detail }) {
                   </td>
                   <td className="right">{li.quantity ?? "—"}</td>
                   <td className="right">{li.total ?? "—"}</td>
-                  <td className="muted">{m?.catalog_description ?? "—"}</td>
-                  <td className={`right ${confidenceClass(m?.confidence)}`}>
-                    {pct(m?.confidence)}
+                  <td className="muted">
+                    {display ?? "—"}
+                    {corrected && <span className="flag sev-low">corrected</span>}
+                  </td>
+                  <td className={`right ${confidenceClass(corrected ? 1 : m?.confidence)}`}>
+                    {corrected ? "100%" : pct(m?.confidence)}
                   </td>
                   <td>
                     {m?.rationale && <div className="small">{m.rationale}</div>}
                     {flags.length > 0 && (
                       <span className="flag sev-high">{flags.map(humanize).join(", ")}</span>
                     )}
+                  </td>
+                  <td>
+                    <input
+                      className="cell-input"
+                      placeholder="catalog id"
+                      value={edit.catalog_item_id ?? ""}
+                      onChange={(e) =>
+                        setLineEdits((prev) => ({
+                          ...prev,
+                          [li.id]: { ...edit, catalog_item_id: e.target.value },
+                        }))
+                      }
+                    />
+                    <input
+                      className="cell-input"
+                      placeholder="description"
+                      value={edit.catalog_description ?? ""}
+                      onChange={(e) =>
+                        setLineEdits((prev) => ({
+                          ...prev,
+                          [li.id]: { ...edit, catalog_description: e.target.value },
+                        }))
+                      }
+                    />
+                    <button
+                      className="small-btn"
+                      disabled={busy || !(edit.catalog_item_id || edit.catalog_description)}
+                      onClick={() => saveLine(li.id)}
+                    >
+                      Save
+                    </button>
                   </td>
                 </tr>
               );
