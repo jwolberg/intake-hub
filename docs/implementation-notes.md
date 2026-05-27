@@ -456,3 +456,52 @@ documents it.
 **Follow-ups if this graduates from demo to feature:** a PDF *upload* API endpoint
 (multipart) so the hub can ingest files; a real OCR/LLM extractor for arbitrary
 (non-self-rendered) PDFs. Both isolated behind the existing parser/LLM boundaries.
+
+## 2026-05-27 — Phase 2 Track B (P2-B1): full decision policy + structured output
+
+**Replaced the all-HIGH baseline policy with the full §16 severity model.** The
+decision stage now grades flags **low / medium / high** (PRD §16; ARCHITECTURE §10):
+high blocks (→ hold), medium is visibility-only (rides along on a submit), low is
+informational. It consumes every upstream confidence and the new signals from
+Track A.
+
+**Signature change: `decide(extraction, ctx, matches, catalog_available)`** — now
+takes the full `ExtractionResult` (was `metadata, ctx, line_items, matches, …`) so
+it can read P2-A1's per-field `field_confidence` / `missing_fields`. Two callers
+updated (orchestrator, pipeline test).
+
+**New policy behaviour:**
+- **Missing critical fields** (`invoice_number`, `total_amount`) → HIGH
+  `missing_invoice_number` / `missing_total` (PRD FR8, §16). Other missing fields →
+  a single LOW `missing_optional_fields` (informational; still submits).
+- **Extraction confidence** (weakest-link over populated fields + line items):
+  `< 0.5` → HIGH `low_extraction_confidence` (hold); `0.5–0.8` → MEDIUM
+  `moderate_extraction_confidence` (submit + visibility). Realises PRD §16 "Low
+  extraction confidence → Hold".
+- **Match confidence** (weakest matched item): `< 0.5` → HIGH `low_match_confidence`;
+  `0.5–0.85` → MEDIUM `weak_match`.
+- **`decision_confidence`** is now computed: submit = the weakest-link of context /
+  extraction / match confidence; hold = a fixed 0.9 (confidence that deferring to a
+  human is right). The clean samples now submit at 0.9 (honest — the offline
+  extraction stand-in is a 0.9-confidence source) rather than the old 1.0.
+- **Never a silent submit:** if no HIGH flag fires but `decision_confidence` is
+  below the 0.5 floor, a HIGH `low_confidence` flag is raised → hold.
+
+**Consolidation, not just addition.** The minimal per-flag holds added during
+Track A (`context_mismatch`, `quantity_mismatch`, generalised ambiguity) are now
+part of the single graded policy with `required_human_actions` per blocking flag.
+
+**Sample outcomes unchanged:** clean/body/image → submit (conf 0.9),
+unmatched/mismatch → hold. Existing exception-creation behaviour is unaffected
+(`from_decision` still reports MEDIUM+HIGH; LOW informational flags create no
+exception).
+
+**Validation:** `ruff` clean; `pytest -q` → **75 passed, 1 skipped**. Added
+`tests/unit/test_decision.py` (10: submit, high-flag hold, missing critical → hold,
+missing optional → low+submit, low/moderate extraction confidence, weak match,
+catalog unavailable, total mismatch, weakest-link confidence) — the decision-policy
+unit coverage PRD §18 calls for.
+
+**Follow-up:** Track B continues with **P2-B2** (exception taxonomy — typed
+exceptions for all FR8 hold reasons with severity + specific message, surfaced to
+the hub). Phase 1 live-stack gate still open (Docker unavailable).

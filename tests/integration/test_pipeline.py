@@ -39,7 +39,7 @@ def _run(sample: dict):
     except CatalogNotFound:
         catalog, catalog_available = [], False
     matches = match(extraction.line_items, catalog)
-    decision = decide(extraction.metadata, ctx, extraction.line_items, matches, catalog_available)
+    decision = decide(extraction, ctx, matches, catalog_available)
     return invoice, extraction, ctx, matches, decision
 
 

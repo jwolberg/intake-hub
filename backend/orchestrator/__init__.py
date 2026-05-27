@@ -107,9 +107,7 @@ def process(
             "total": len(matches),
         })
 
-        decision = decide(
-            extraction.metadata, ctx, extraction.line_items, matches, catalog_available
-        )
+        decision = decide(extraction, ctx, matches, catalog_available)
         invoice.decision = decision.decision
         invoice.decision_confidence = decision.confidence
 

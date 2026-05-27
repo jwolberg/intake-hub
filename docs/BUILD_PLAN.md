@@ -34,9 +34,9 @@
 
 ## Current Status
 - Overall status: In Progress
-- Current phase: Phase 2 — Deepen the Tracks. **Track A (interpretation engine) COMPLETE** (P2-A1..A4).
-- Current ticket: **P2-B1** (full decision policy + structured output) starts Track B — consumes the per-field confidence (P2-A1) and context/matching flags from Track A. The Phase 1 live-stack exit gate (Postgres round-trip + `docker compose up` + hub in a browser) is still OPEN — deferred because the Docker daemon is unavailable in the dev session, not because it passed. Commands: /docs/RUNBOOK.md.
-- Note: PostgresRepository + the hub were NOT exercised against the live stack (Docker daemon unavailable across sessions). API + pipeline + orchestrator validated in-process; frontend builds clean; CORS wired but not browser-verified. P2-A1..A4 fully validated in-process (53 passed, 1 skipped). Run `docker compose up` to clear the gate end-to-end.
+- Current phase: Phase 2 — Deepen the Tracks. Track A COMPLETE (P2-A1..A4); Track B in progress (P2-B1 complete).
+- Current ticket: **P2-B2** (exception taxonomy — typed exceptions for all FR8 hold reasons with severity + specific message). The Phase 1 live-stack exit gate (Postgres round-trip + `docker compose up` + hub in a browser) is still OPEN — deferred because the Docker daemon is unavailable in the dev session, not because it passed. Commands: /docs/RUNBOOK.md.
+- Note: PostgresRepository + the hub were NOT exercised against the live stack (Docker daemon unavailable across sessions). API + pipeline + orchestrator validated in-process; frontend builds clean; CORS wired but not browser-verified. P2-A1..A4 + P2-B1 fully validated in-process (75 passed, 1 skipped). Also: out-of-plan real-PDF demo path (RUNBOOK Path D). Run `docker compose up` to clear the gate end-to-end.
 - Blockers: None for in-process work (OD-1 resolved; OD-2..OD-5 provisional behind interfaces). Live-stack exit gate blocked on Docker availability only.
 - Implementation log: /docs/implementation.md, /docs/implementation-notes.md
 - Dev setup/run: /docs/RUNBOOK.md
@@ -188,7 +188,7 @@ Tickets are grouped by STRATEGY § Tracks. Each traces to a PRD requirement.
   - Files: /backend/decision/**
   - Depends on: P1-T7
   - Acceptance criteria covered: PRD FR6, §9 (AI decisioning), §16 (confidence/risk model); ARCHITECTURE §10.
-  - Status: Todo
+  - Status: Complete — graded severity model (low/medium/high); any HIGH → hold, MEDIUM = visibility, LOW = informational. Consumes per-field extraction confidence (P2-A1) + context + match confidence; missing-critical-field holds; computed `decision_confidence` (submit = weakest-link, hold = 0.9); low-confidence floor → hold (never silent submit). `decide(extraction, ctx, matches, catalog_available)`. 75 passed, 1 skipped; new `tests/unit/test_decision.py` (10).
 - **P2-B2 — Exception taxonomy**
   - Objective: Typed exceptions for all PRD FR8 hold reasons with severity + specific message, surfaced to the hub.
   - Files: /backend/exceptions/**
@@ -307,7 +307,7 @@ Tickets are grouped by STRATEGY § Tracks. Each traces to a PRD requirement.
 17. Phase 3: P3-T1, P3-T4 → P3-T2, P3-T3, P3-T5 → P3-T6 → P3-T7
 
 ## Recommended Next Step
-- Start with: **P2-B1 — full decision policy + structured output** (Track B). Complete the §10 policy with severity levels, `risk_flags`, `required_human_actions`, decision confidence; high-severity always holds; low confidence (incl. low extraction confidence from P2-A1) → hold, never silent submit (PRD FR6, §9, §16; ARCHITECTURE §10). This is where the Track A signals (per-field confidence, context mismatch/ambiguity, match flags) are consolidated into the policy rather than the current minimal per-flag extensions.
+- Start with: **P2-B2 — exception taxonomy** (Track B). Typed exceptions for all PRD FR8 hold reasons with severity + a specific message, surfaced to the hub (PRD FR8; ARCHITECTURE §12). The decision stage already emits richly-typed `risk_flags` (P2-B1) and `from_decision` maps MEDIUM/HIGH flags to `ExceptionRecord`s — P2-B2 formalises the full reason set, messages, and severities, and ensures every FR8 reason is covered + displayed.
 - Still OPEN — **Phase 1 exit gate (live stack)**: deferred only because the Docker daemon is unavailable in the dev session. Run once Docker is up, before demo:
   1. `docker compose up -d db` then `DATABASE_URL=postgresql+psycopg://invoicescreener:invoicescreener@localhost:5432/invoicescreener pytest tests/integration/test_postgres_repository.py` — un-skips the Postgres round-trip.
   2. `docker compose up` — API lifespan `init_schema` + reflection + the mcp-reference/mock-clinrun services end-to-end.
