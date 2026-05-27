@@ -6,6 +6,13 @@ function pct(v) {
   return v == null ? "—" : `${Math.round(v * 100)}%`;
 }
 
+// Humanize a taxonomy code (e.g. "context_mismatch" → "Context mismatch").
+function humanize(code) {
+  if (!code) return "";
+  const spaced = code.replace(/_/g, " ");
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
 function terminalEvent(audit) {
   const terminal = ["submitted", "held", "failed"];
   return [...audit].reverse().find((e) => terminal.includes(e.action));
@@ -46,7 +53,7 @@ export default function InvoiceDetail({ detail }) {
             <tbody>
               {exceptions.map((e) => (
                 <tr key={e.id}>
-                  <td>{e.type}</td>
+                  <td title={e.type}>{humanize(e.type)}</td>
                   <td><span className="flag">{e.severity}</span></td>
                   <td>{e.message}</td>
                 </tr>

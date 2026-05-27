@@ -28,11 +28,10 @@ from backend.domain import (
     Actor,
     AuditAction,
     Decision,
-    ExceptionRecord,
     Invoice,
     InvoiceStatus,
-    Severity,
 )
+from backend.exceptions import build as build_exception
 from backend.exceptions import from_decision
 from backend.extraction import extract
 from backend.intake import ingest
@@ -130,10 +129,6 @@ def _submit(repo, invoice, metadata, ctx, matches, clinrun, decision) -> None:
     try:
         result = submit_invoice(invoice, metadata, ctx, matches, clinrun)
     except SubmissionFailed as exc:
-        repo.add_exceptions([ExceptionRecord(
-            invoice_id=invoice.id, type="submission_failed",
-            severity=Severity.HIGH, message=str(exc),
-        )])
         _fail(repo, invoice, "submission_failed", str(exc))
         return
     _advance(repo, invoice, InvoiceStatus.SUBMITTED)
@@ -144,9 +139,7 @@ def _submit(repo, invoice, metadata, ctx, matches, clinrun, decision) -> None:
 
 
 def _fail(repo: Repository, invoice: Invoice, kind: str, message: str) -> None:
-    repo.add_exceptions([ExceptionRecord(
-        invoice_id=invoice.id, type=kind, severity=Severity.HIGH, message=message,
-    )])
+    repo.add_exceptions([build_exception(invoice.id, kind, message=message)])
     invoice.status = InvoiceStatus.FAILED
     invoice.updated_at = datetime.now(timezone.utc)
     repo.save_invoice(invoice)

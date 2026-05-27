@@ -34,9 +34,9 @@
 
 ## Current Status
 - Overall status: In Progress
-- Current phase: Phase 2 — Deepen the Tracks. Track A COMPLETE (P2-A1..A4); Track B in progress (P2-B1 complete).
-- Current ticket: **P2-B2** (exception taxonomy — typed exceptions for all FR8 hold reasons with severity + specific message). The Phase 1 live-stack exit gate (Postgres round-trip + `docker compose up` + hub in a browser) is still OPEN — deferred because the Docker daemon is unavailable in the dev session, not because it passed. Commands: /docs/RUNBOOK.md.
-- Note: PostgresRepository + the hub were NOT exercised against the live stack (Docker daemon unavailable across sessions). API + pipeline + orchestrator validated in-process; frontend builds clean; CORS wired but not browser-verified. P2-A1..A4 + P2-B1 fully validated in-process (75 passed, 1 skipped). Also: out-of-plan real-PDF demo path (RUNBOOK Path D). Run `docker compose up` to clear the gate end-to-end.
+- Current phase: Phase 2 — Deepen the Tracks. Track A COMPLETE (P2-A1..A4); Track B in progress (P2-B1, P2-B2 complete).
+- Current ticket: **P2-B3** (audit trail completeness — AI vs human, before/after, reason). The Phase 1 live-stack exit gate (Postgres round-trip + `docker compose up` + hub in a browser) is still OPEN — deferred because the Docker daemon is unavailable in the dev session, not because it passed. Commands: /docs/RUNBOOK.md.
+- Note: PostgresRepository + the hub were NOT exercised against the live stack (Docker daemon unavailable across sessions). API + pipeline + orchestrator validated in-process; frontend builds clean; CORS wired but not browser-verified. P2-A1..A4 + P2-B1..B2 fully validated in-process (82 passed, 1 skipped). Also: out-of-plan real-PDF demo path (RUNBOOK Path D). Run `docker compose up` to clear the gate end-to-end.
 - Blockers: None for in-process work (OD-1 resolved; OD-2..OD-5 provisional behind interfaces). Live-stack exit gate blocked on Docker availability only.
 - Implementation log: /docs/implementation.md, /docs/implementation-notes.md
 - Dev setup/run: /docs/RUNBOOK.md
@@ -194,7 +194,7 @@ Tickets are grouped by STRATEGY § Tracks. Each traces to a PRD requirement.
   - Files: /backend/exceptions/**
   - Depends on: P1-T8
   - Acceptance criteria covered: PRD FR8 (all hold reasons); ARCHITECTURE §12.
-  - Status: Todo
+  - Status: Complete — canonical taxonomy in `backend/domain/taxonomy.py` (code → severity + title, FR8-flagged); decision severities sourced from it; FR8 unresolved sponsor/study/site split out; shared `exceptions.build` factory used by `from_decision` + orchestrator failures (also removed a duplicate `submission_failed`); hub humanises type codes. 82 passed, 1 skipped; new `tests/unit/test_exceptions.py` (7) guarantees FR8 coverage + code/severity consistency.
 - **P2-B3 — Audit trail completeness (AI vs human)**
   - Objective: Append-only audit of every stage + human action with actor, action, before/after, reason; AI and human edits distinguishable.
   - Files: /backend/audit/**
@@ -307,7 +307,7 @@ Tickets are grouped by STRATEGY § Tracks. Each traces to a PRD requirement.
 17. Phase 3: P3-T1, P3-T4 → P3-T2, P3-T3, P3-T5 → P3-T6 → P3-T7
 
 ## Recommended Next Step
-- Start with: **P2-B2 — exception taxonomy** (Track B). Typed exceptions for all PRD FR8 hold reasons with severity + a specific message, surfaced to the hub (PRD FR8; ARCHITECTURE §12). The decision stage already emits richly-typed `risk_flags` (P2-B1) and `from_decision` maps MEDIUM/HIGH flags to `ExceptionRecord`s — P2-B2 formalises the full reason set, messages, and severities, and ensures every FR8 reason is covered + displayed.
+- Start with: **P2-B3 — audit trail completeness** (Track B). Append-only audit of every stage + human action with actor, action, before/after, reason; AI and human edits distinguishable (PRD §17, FR10/FR11; ARCHITECTURE §12). The orchestrator already records system/AI stage events with an `actor`; P2-B3 fills out before/after + reason and prepares for human-action events (corrections/rerun/escalate land with P2-C3).
 - Still OPEN — **Phase 1 exit gate (live stack)**: deferred only because the Docker daemon is unavailable in the dev session. Run once Docker is up, before demo:
   1. `docker compose up -d db` then `DATABASE_URL=postgresql+psycopg://invoicescreener:invoicescreener@localhost:5432/invoicescreener pytest tests/integration/test_postgres_repository.py` — un-skips the Postgres round-trip.
   2. `docker compose up` — API lifespan `init_schema` + reflection + the mcp-reference/mock-clinrun services end-to-end.

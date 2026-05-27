@@ -505,3 +505,47 @@ unit coverage PRD §18 calls for.
 **Follow-up:** Track B continues with **P2-B2** (exception taxonomy — typed
 exceptions for all FR8 hold reasons with severity + specific message, surfaced to
 the hub). Phase 1 live-stack gate still open (Docker unavailable).
+
+## 2026-05-27 — Phase 2 Track B (P2-B2): exception taxonomy
+
+**Canonical hold-reason taxonomy in the domain layer** (`backend/domain/taxonomy.py`):
+a registry mapping every risk-flag / exception `code` → default `severity` + human
+`title`, flagged `fr8=True` for the reasons PRD FR8 lists explicitly. Lives in
+domain so the decision stage, exceptions stage, and orchestrator all depend on it
+*downward* (never sideways on each other). Covers all 12 FR8 reasons plus the
+operational failures (`submission_failed`, `catalog_fetch_failed`, `stage_failure`)
+and confidence-band signals.
+
+**One source of truth for severity.** The decision stage's `flag()` helper no
+longer hardcodes severities — it looks them up via `severity_of(code)`. So a
+reason's severity is defined once, in the taxonomy.
+
+**Context specificity (FR8).** FR8 lists unresolved sponsor / study / site as
+*separate* reasons; the decision stage now emits `unresolved_sponsor` /
+`unresolved_study` / `unresolved_site` based on which id is missing (and
+`context_unresolved` for the low-confidence-but-resolved case), instead of one
+generic code.
+
+**Shared factory `exceptions.build(invoice_id, code, message?, severity?)`** —
+defaults severity + message from the taxonomy when not supplied. `from_decision`
+uses it (reportable = medium/high; LOW stays informational, no exception). The
+orchestrator's failure paths (`_fail`, submission failure) now go through it too —
+which also removed a pre-existing **duplicate** `submission_failed` exception (the
+old code added it once explicitly and again inside `_fail`).
+
+**Hub:** exception `type` codes are humanised for display (`context_mismatch` →
+"Context mismatch", raw code kept in a tooltip). Small, non-duplicating tweak; the
+authoritative titles live in the backend taxonomy.
+
+**Validation:** `ruff` clean; `pytest -q` → **82 passed, 1 skipped**; frontend
+builds clean. Added `tests/unit/test_exceptions.py` (7): all FR8 reasons + all
+orchestrator failure codes are registered; `build` defaults/overrides; unknown
+codes fail safe to HIGH; the decision stage only emits *registered* codes with
+taxonomy-consistent severities; `from_decision` reports medium/high only. Spot-
+checked: mismatch → `context_mismatch`; empty doc → `unresolved_sponsor`,
+`missing_invoice_number`, `missing_total`, `low_extraction_confidence`,
+`catalog_unavailable`.
+
+**Follow-up:** Track B continues with **P2-B3** (audit trail completeness — every
+stage + human action with actor/action/before-after/reason; AI vs human
+distinguishable). Phase 1 live-stack gate still open (Docker unavailable).
