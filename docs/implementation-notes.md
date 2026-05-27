@@ -762,3 +762,38 @@ invoice → 404); frontend builds clean.
 **P3-T1** (failure isolation, retry & recovery). Phase 1 live-stack exit gate
 remains OPEN (Docker daemon unavailable in the dev session) — run `docker compose
 up` per RUNBOOK to clear it before the demo.
+
+## 2026-05-27 — Dev test on the live stack (Docker available): metrics fix + Phase 1 gate cleared
+
+First run of the full `docker compose up` stack (Docker finally available). Drove
+Track C end-to-end against the **real Postgres-backed** API + stub services:
+process → filters (`filter_tags` + `?filter=`) → detail blocks (source/extraction/
+corrections) → QC corrections → **rerun** → metrics. All worked; the headline
+correction→rerun loop submitted both a context-mismatch hold (after a sponsor
+correction) and an unmatched-line hold (after a line-match correction).
+
+**Fix found in dev — metric bucketing (`backend/audit/metrics.py`).** With the
+rerun flow exercised, `auto_submit_rate`/`false_submit_rate` came out wrong (0.75 /
+0.667): three invoices the AI *held*, a human corrected and reran to submit, were
+being counted as autonomous submits and as false submits. Root cause: P2-C3 had
+switched the rate buckets to the invoice's *current* decision, which rerun flips
+from hold→submit. Fixed to bucket on the AI's **first (autonomous) decision** from
+the audit trail (`_first_decision` = first `submitted`/`held` event). Now the same
+data reads honestly: auto_submit_rate 0.25 (only the clean invoice was autonomous),
+false_submit_rate 0.0 (no autonomous submit needed fixing), hold_precision 1.0 (all
+three holds were confirmed as genuinely needing a human). `pytest -q` → 106 passed,
+1 skipped; existing metric unit tests unchanged and still green.
+
+**Phase 1 live-stack exit gate — CLEARED.** (1) The skip-guarded Postgres
+round-trip test passes against the live DB
+(`DATABASE_URL=...@localhost:5432/... pytest tests/integration/test_postgres_repository.py`
+→ 1 passed). (2) `docker compose up` brings up db/api/hub/mcp-reference/
+mock-clinrun; `/health` reports `db: up`; schema bootstrap runs on lifespan.
+(3) The hub serves at `http://127.0.0.1:5173` (`<title>InvoiceScreener</title>`,
+`main.jsx`) and CORS preflight from that origin succeeds for GET and the POST QC
+actions. Remaining: a human visual click-through of the hub UI in a browser.
+
+**Env note (not a code issue).** A stray host `voicerace` Vite dev server is bound
+to `[::1]:5173`; since macOS resolves `localhost`→IPv6 first, `http://localhost:5173`
+hits *that* app, not ours. Use `http://127.0.0.1:5173` (or stop the other server)
+to reach the InvoiceScreener hub.

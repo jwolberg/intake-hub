@@ -35,8 +35,8 @@
 ## Current Status
 - Overall status: In Progress
 - Current phase: **Phase 2 — Deepen the Tracks: COMPLETE** (Track A P2-A1..A4; Track B P2-B1..B4; Track C P2-C1..C4). Phase 3 (Hardening & Polish) next.
-- Current ticket: **P3-T1** (failure isolation, retry & recovery). The Phase 1 live-stack exit gate (Postgres round-trip + `docker compose up` + hub in a browser) is still OPEN — deferred because the Docker daemon is unavailable in the dev session, not because it passed. Commands: /docs/RUNBOOK.md.
-- Note: PostgresRepository + the hub were NOT exercised against the live stack (Docker daemon unavailable across sessions). API + pipeline + orchestrator validated in-process; frontend builds clean; CORS wired but not browser-verified. All of Phase 2 (P2-A1..A4 + P2-B1..B4 + P2-C1..C4) fully validated in-process (106 passed, 1 skipped). Also: out-of-plan real-PDF demo path (RUNBOOK Path D). Run `docker compose up` to clear the gate end-to-end.
+- Current ticket: **P3-T1** (failure isolation, retry & recovery). The Phase 1 live-stack exit gate is **CLEARED** (2026-05-27): Postgres round-trip test passes against the live DB, `docker compose up` brings up the full stack (`/health` → `db: up`), and the hub serves at `http://127.0.0.1:5173` with working CORS. Remaining: a human visual click-through of the hub UI. Commands: /docs/RUNBOOK.md.
+- Note: All of Phase 2 (P2-A1..A4 + P2-B1..B4 + P2-C1..C4) validated in-process (106 passed, 1 skipped) **and** exercised end-to-end against the live Postgres stack (process → filters → detail → QC corrections → rerun → metrics). The skipped test is the Postgres round-trip, which passes when run with a live `DATABASE_URL`. Dev test also fixed a metric-bucketing bug (rates now key off the AI's first/autonomous decision, robust to rerun). Also: out-of-plan real-PDF demo path (RUNBOOK Path D).
 - Blockers: None for in-process work (OD-1 resolved; OD-2..OD-5 provisional behind interfaces). Live-stack exit gate blocked on Docker availability only.
 - Implementation log: /docs/implementation.md, /docs/implementation-notes.md
 - Dev setup/run: /docs/RUNBOOK.md
@@ -206,7 +206,7 @@ Tickets are grouped by STRATEGY § Tracks. Each traces to a PRD requirement.
   - Files: /backend/api/**, /backend/audit/**, /frontend/**
   - Depends on: P2-B1, P2-B3
   - Acceptance criteria covered: STRATEGY § Key metrics; USERS § Operations Lead.
-  - Status: Complete — `backend/audit/metrics.py` computes auto-submit rate, false-submit rate (human-corrected/escalated submits), hold precision (human-confirmed holds) from invoices + audit; rates are `None` when no data (false-submit/hold-precision populate as reviewers act in P2-C3). Surfaced via `GET /api/metrics` + a hub `MetricsBar`. 91 passed, 1 skipped; new `tests/unit/test_metrics.py` (4) + API test.
+  - Status: Complete — `backend/audit/metrics.py` computes auto-submit rate, false-submit rate (human-corrected/escalated submits), hold precision (human-confirmed holds) from invoices + audit; rates are `None` when no data. Surfaced via `GET /api/metrics` + a hub `MetricsBar`. **Refined in P2-C3/C4 + dev test:** rate buckets key off the AI's *first (autonomous) decision* in the audit trail (not current status/decision), so human QC + rerun (which flip an invoice hold→submit) don't inflate auto-submit rate or fabricate false submits. `tests/unit/test_metrics.py` (4) + API tests.
 
 #### Track C — Reviewer hub (STRATEGY Track 3)
 - **P2-C1 — List view filters**
