@@ -27,6 +27,15 @@ def _new_id(prefix: str) -> str:
     return f"{prefix}_{uuid4().hex[:12]}"
 
 
+class ParsedDocument(BaseModel):
+    """Output of the parser stage: raw text + source metadata (PRD §7 Step 2)."""
+
+    invoice_id: str
+    source: dict = Field(default_factory=dict)
+    text: str = ""
+    sections: list[str] = Field(default_factory=list)
+
+
 class LineItem(BaseModel):
     """An extracted invoice line item (PRD §11 Line Item, §7 Step 3)."""
 
@@ -58,6 +67,13 @@ class InvoiceMetadata(BaseModel):
     total_amount: Decimal | None = None
     tax: Decimal | None = None
     payment_terms: str | None = None
+
+
+class ExtractionResult(BaseModel):
+    """Output of the extraction stage (PRD FR2): header + line items."""
+
+    metadata: InvoiceMetadata = Field(default_factory=InvoiceMetadata)
+    line_items: list[LineItem] = Field(default_factory=list)
 
 
 class ContextCandidate(BaseModel):
