@@ -15,10 +15,12 @@ from contextlib import asynccontextmanager
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from backend.clients import get_clinrun_client, get_llm_client, get_reference_client
+from backend.config import settings
 from backend.db import get_engine, init_schema
 from backend.db.repository import Repository, get_repository
 from backend.orchestrator import process
@@ -37,6 +39,15 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="InvoiceScreener", version="0.0.1", lifespan=lifespan)
+
+# The hub is served from a different origin (Vite :5173) than the API (:8000),
+# so browser fetches need CORS. Origins are configurable via CORS_ORIGINS.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=list(settings.cors_origins),
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/health")

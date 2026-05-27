@@ -16,9 +16,13 @@ class Settings:
     database_url: str
     mcp_reference_url: str
     clinrun_url: str
+    cors_origins: tuple[str, ...]
 
     @classmethod
     def from_env(cls) -> Settings:
+        origins = os.environ.get(
+            "CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
+        )
         return cls(
             database_url=os.environ.get(
                 "DATABASE_URL",
@@ -28,6 +32,7 @@ class Settings:
                 "MCP_REFERENCE_URL", "http://mcp-reference:8100"
             ),
             clinrun_url=os.environ.get("CLINRUN_URL", "http://mock-clinrun:8200"),
+            cors_origins=tuple(o.strip() for o in origins.split(",") if o.strip()),
         )
 
 

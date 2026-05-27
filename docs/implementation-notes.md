@@ -212,3 +212,15 @@ against real data is part of the Phase 1 exit gate.
 resolve → catalog → match → decide → submit/hold, persisted + audited, exposed
 over the API, and surfaced in the hub. Remaining before Phase 2: the live-stack
 validation gate (Postgres round-trip, `docker compose up`, hub in a browser).
+
+## 2026-05-26 — dev runbook + CORS fix
+
+Added [`RUNBOOK.md`](./RUNBOOK.md) (dev setup/run: Docker full stack, local backend
+dev, tests, ports, env vars, troubleshooting).
+
+**Fix while writing it:** the hub (Vite :5173) calls the API (:8000) cross-origin,
+but the FastAPI app had no CORS — the browser would block every hub request. Added
+`CORSMiddleware` with origins from a new `CORS_ORIGINS` setting (default
+`http://localhost:5173,http://127.0.0.1:5173`). Caught by documenting the flow,
+not by a test (no browser in the dev session); worth a smoke check during the
+live-stack validation gate.
