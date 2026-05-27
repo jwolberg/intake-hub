@@ -260,3 +260,34 @@ Files created/modified: see Code Changes.
 
 ## Next
 - P1-T9 — repository (in-memory + Postgres) + orchestrator (chain, state machine, audit), then P1-T10 (API) and P1-T11 (hub).
+
+---
+
+# Implementation — P1-T9 (Orchestrator + repository + audit)
+
+## Scope Implemented
+- Related phase: Phase 1. Related ticket(s): P1-T9. (PostgresRepository deferred to P1-T10.)
+
+## Approach
+- Keep stages pure; make the orchestrator the only writer. Persist through a `Repository` protocol so storage is swappable; back tests/offline with `InMemoryRepository`. Own state transitions + audit in one place; catch stage errors to isolate failures.
+
+## Code Changes
+- `backend/db/repository.py` — `Repository` protocol + `InMemoryRepository` (deep-copy on read/write); `get_detail` aggregate.
+- `backend/audit/__init__.py` — `record(repo, invoice_id, action, *, actor, details)`.
+- `backend/orchestrator/__init__.py` — `process` (chain + persist + state machine + audit; catalog-miss → hold; stage error → failed; submission error → retryable failed) and `process_all` (batch with per-invoice isolation).
+- `tests/integration/test_orchestrator.py` — clean→submitted (full audit trail asserted), unmatched→held, stage-failure isolation in a batch.
+
+## Acceptance Criteria Mapping
+- PRD FR11 / ARCHITECTURE §5-§6 → state transitions + audit per stage. PRD §14 → one failed invoice doesn't stop others (`process_all`), retryable vs terminal distinction.
+
+## Build Plan Mapping
+- P1-T9: Complete. P1-T10 (API + PostgresRepository): Todo, next.
+
+## Validation
+- `ruff` clean; `pytest -q` → 18 passed (+3 orchestrator tests), no DB required.
+
+## Open Issues
+- App-grade persistence (`PostgresRepository`) + HTTP surface arrive in P1-T10; until then the orchestrator persists to memory.
+
+## Next
+- P1-T10 — `PostgresRepository` (validated against Docker Postgres) + FastAPI routes.

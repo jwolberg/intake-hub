@@ -118,3 +118,35 @@ matched to the catalog").
 **Follow-up (P1-T9):** add a `Repository` (in-memory for tests + Postgres for the
 app) and the orchestrator that chains these stages, persists each output, and
 writes audit events — then API (P1-T10) and hub (P1-T11).
+
+## 2026-05-26 — Phase 1 (P1-T9): orchestrator + repository + audit
+
+**Added a `Repository` protocol + `InMemoryRepository`.** Stages stay pure; the
+orchestrator is the only writer. The interface lets the orchestrator/API depend
+on the contract, not the engine. `PostgresRepository` is deliberately deferred to
+P1-T10, where it'll be validated against a real Docker Postgres rather than
+shipped untested.
+
+**Orchestrator (`process` / `process_all`)** chains the eight stages, owns state
+transitions (received → parsed → extracted → context_resolved → catalog_matched →
+submitted | held | failed), persists each stage output, and appends an audit
+event per step. Key behaviours:
+- **Failure isolation:** a stage that raises is caught, the invoice is marked
+  `failed` (retryable) with a `stage_failure` exception, and the error never
+  propagates; `process_all` keeps going so one bad invoice can't halt the batch
+  (PRD §14).
+- **Catalog miss is not a failure:** `CatalogNotFound` flows through as
+  `catalog_available=False` and the decision stage holds — no crash.
+- **Submission failure** is a retryable `failed` state with a `submission_failed`
+  exception, distinct from a deliberate `held`.
+
+**`audit.record(repo, ...)`** builds + appends events with an `actor`
+(system/ai/human), so the AI-vs-human distinction is in place from the start.
+
+**Validation:** `ruff` clean; `pytest -q` → **18 passed** (+3 orchestrator tests:
+clean→submitted with full audit trail, unmatched→held, and stage-failure
+isolation across a batch). All without a DB.
+
+**Follow-up (P1-T10):** `PostgresRepository` + the FastAPI routes
+(`/process`, `/invoices`, `/invoices/:id`), validated end-to-end against the
+`db` compose service.

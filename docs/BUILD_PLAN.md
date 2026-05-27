@@ -34,8 +34,8 @@
 
 ## Current Status
 - Overall status: In Progress
-- Current phase: Phase 1 — MVP Vertical Slice (P1-T1..T8 Complete; pipeline stages green end-to-end)
-- Current ticket: P1-T9 — Orchestrator + state machine + audit (needs persistence/repository)
+- Current phase: Phase 1 — MVP Vertical Slice (P1-T1..T9 Complete; orchestrated end-to-end with persistence + audit)
+- Current ticket: P1-T10 — API: process / list / detail (+ PostgresRepository, validated vs Docker Postgres)
 - Blockers: None (OD-1 resolved; OD-2..OD-5 provisional behind interfaces)
 - Implementation log: /docs/implementation.md, /docs/implementation-notes.md
 
@@ -137,13 +137,13 @@
   - Files likely involved: /backend/orchestrator/**, /backend/audit/**
   - Depends on: P1-T1..P1-T8
   - Acceptance criteria covered: PRD FR11 (baseline), §14 (one failed invoice doesn't stop others); ARCHITECTURE §5–§6.
-  - Status: Todo  ← recommended next (introduces the repository/persistence layer the stages feed)
+  - Status: Complete — `orchestrator.process`/`process_all` chain the stages, own state transitions, persist each output via a `Repository`, append audit events, and isolate per-invoice failures. `Repository` protocol + `InMemoryRepository` + `audit.record`. (PostgresRepository lands in P1-T10.)
 - **P1-T10 — API: process / list / detail**
   - Objective: Implement `POST /api/invoices/process`, `GET /api/invoices`, `GET /api/invoices/:id` returning source/extraction/context/matches/decision/exceptions/audit.
   - Files likely involved: /backend/api/**
   - Depends on: P1-T9
   - Acceptance criteria covered: PRD §13 (API), FR9 (backend read surface).
-  - Status: Todo
+  - Status: Todo  ← recommended next (also adds PostgresRepository, validated against a real Docker Postgres)
 - **P1-T11 — Reviewer hub (minimal list + detail)**
   - Objective: SPA list (status, decision, confidence, exception count) + detail (extracted, matched, decision + rationale, exceptions). Read-only.
   - Files likely involved: /frontend/**
@@ -305,8 +305,8 @@ Tickets are grouped by STRATEGY § Tracks. Each traces to a PRD requirement.
 17. Phase 3: P3-T1, P3-T4 → P3-T2, P3-T3, P3-T5 → P3-T6 → P3-T7
 
 ## Recommended Next Step
-- Start with: **P1-T9 — Orchestrator + state machine + audit**
-- Why this is next: the eight pipeline stages (P1-T1..T8) are complete and proven end-to-end on the sample set (clean→submit, unmatched→hold). P1-T9 introduces the repository/persistence layer and the orchestrator that chains the stages, owns state transitions, persists each stage output, and appends audit events — the prerequisite for the API (P1-T10) and hub (P1-T11).
+- Start with: **P1-T10 — API: process / list / detail**
+- Why this is next: the orchestrator (P1-T9) runs the full pipeline end-to-end with persistence + audit behind a `Repository` protocol. P1-T10 exposes it over HTTP (`POST /api/invoices/process`, `GET /api/invoices`, `GET /api/invoices/:id`) and adds the `PostgresRepository` (validated against a real Docker Postgres), so the hub (P1-T11) has a real read/write surface.
 
 ## Deferred / Out of Scope
 - PRD §4 Non-Goals: perfect OCR/document intelligence; supporting every invoice format; replacing finance/compliance workflows; production-scale email ingestion; full ClinRun production integration (mock used instead); guaranteed 100% match accuracy in ambiguous cases.
