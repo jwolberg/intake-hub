@@ -196,6 +196,61 @@ def test_qc_action_404_for_unknown_invoice(client):
     assert client.post("/api/invoices/nope/reviewed", json={}).status_code == 404
 
 
+# --- rerun with corrected data (P2-C4) --------------------------------------
+
+def test_rerun_after_metadata_correction_resolves_hold(client):
+    # holds for context_mismatch: invoice says "Acme Biosciences" but the protocol
+    # maps to Northwind in the reference data
+    invoice_id = _process(client, "inv_hold_mismatch_005.json")
+    assert client.get(f"/api/invoices/{invoice_id}").json()["invoice"]["status"] == "held"
+
+    # a reviewer corrects the sponsor to the reference's canonical name
+    client.post(
+        f"/api/invoices/{invoice_id}/corrections/metadata",
+        json={"updates": {"sponsor_name": "Northwind Therapeutics"}, "reason": "wrong sponsor"},
+    )
+
+    detail = client.post(f"/api/invoices/{invoice_id}/rerun", json={}).json()
+    # the corrected metadata clears the mismatch → the invoice now submits
+    assert detail["invoice"]["status"] == "submitted"
+
+    # the rerun is recorded as a human action naming the corrected field (PRD §17)
+    rerun_event = [e for e in detail["audit"] if e["action"] == "rerun"][-1]
+    assert rerun_event["actor"] == "human"
+    assert rerun_event["details"]["corrected_fields"] == ["sponsor_name"]
+    # AI original preserved; correction stays an overlay (ARCHITECTURE §11)
+    assert detail["invoice"]["metadata"]["sponsor_name"] == "Acme Biosciences"
+    assert detail["corrections"]["metadata"]["sponsor_name"] == "Northwind Therapeutics"
+
+
+def test_rerun_after_line_item_correction_resolves_hold(client):
+    # holds for an unmatched material line ("Investigator travel reimbursement")
+    invoice_id = _process(client, "inv_hold_unmatched_002.json")
+    detail = client.get(f"/api/invoices/{invoice_id}").json()
+    assert detail["invoice"]["status"] == "held"
+    unmatched = next(
+        m["line_item_id"] for m in detail["matches"] if m["catalog_item_id"] is None
+    )
+
+    # a reviewer maps the unmatched line to a catalog item
+    client.post(
+        f"/api/invoices/{invoice_id}/corrections/line-item",
+        json={"line_item_id": unmatched, "catalog_item_id": "cat_004",
+              "catalog_description": "Pharmacy Dispensing Fee"},
+    )
+
+    detail = client.post(f"/api/invoices/{invoice_id}/rerun", json={}).json()
+    # the pinned match clears the unmatched-line hold → submits
+    assert detail["invoice"]["status"] == "submitted"
+    pinned = next(m for m in detail["matches"] if m["line_item_id"] == unmatched)
+    assert pinned["catalog_item_id"] == "cat_004"
+    assert pinned["confidence"] == 1.0
+
+
+def test_rerun_unknown_invoice_404(client):
+    assert client.post("/api/invoices/nope/rerun", json={}).status_code == 404
+
+
 def test_metrics_endpoint(client):
     client.post("/api/invoices/process", json=_sample("inv_clean_001.json"))
     client.post("/api/invoices/process", json=_sample("inv_hold_unmatched_002.json"))

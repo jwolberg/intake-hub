@@ -57,3 +57,7 @@ export function escalateInvoice(id, reason) {
 export function addNote(id, note) {
   return postJSON(`/api/invoices/${id}/note`, { note });
 }
+
+export function rerunInvoice(id) {
+  return postJSON(`/api/invoices/${id}/rerun`, {});
+}

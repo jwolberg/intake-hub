@@ -29,7 +29,7 @@ from backend.config import settings
 from backend.db import get_engine, init_schema
 from backend.db.repository import Repository, get_repository
 from backend.domain import Actor, AuditAction, Decision, InvoiceMetadata, InvoiceStatus
-from backend.orchestrator import process
+from backend.orchestrator import process, rerun
 
 logger = logging.getLogger("invoicescreener.api")
 
@@ -344,6 +344,14 @@ def add_note(invoice_id: str, body: NoteBody, repo: RepoDep) -> dict:
     """Attach a reviewer note (PRD FR10)."""
     _get_invoice_or_404(invoice_id, repo)
     record(repo, invoice_id, AuditAction.NOTE, actor=Actor.HUMAN, reason=body.note)
+    return _require_detail(invoice_id, repo)
+
+
+@app.post("/api/invoices/{invoice_id}/rerun")
+def rerun_invoice(invoice_id: str, repo: RepoDep, clients: ClientsDep) -> dict:
+    """Re-enter the pipeline using corrected data as fixed inputs (PRD FR10)."""
+    _get_invoice_or_404(invoice_id, repo)
+    rerun(invoice_id, repo, **clients)
     return _require_detail(invoice_id, repo)
 
 

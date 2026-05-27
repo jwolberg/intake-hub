@@ -726,3 +726,39 @@ correction inputs. Actions post and refresh detail + list + metrics via an
 **Validation:** `ruff` clean; `pytest -q` → **103 passed, 1 skipped** (+5 API tests
 for the routes/overlay/state + metrics integration; +4 unit tests for the overlay
 helpers); frontend builds clean. Next: **P2-C4** — rerun with corrected data.
+
+## 2026-05-27 — Phase 2 Track C (P2-C4): rerun with corrected data — Phase 2 complete
+
+**`orchestrator.rerun(invoice_id, repo, ...)`.** Re-enters the pipeline for an
+existing invoice using corrected data as fixed inputs (PRD FR10; ARCHITECTURE §6,
+§11). Parsing + extraction are **not** re-run — their persisted outputs (source
+text, metadata, line items) are reused via `_reconstruct_extraction`, which:
+- rebuilds the `ExtractionResult` from `repo.get_line_items` + the per-field
+  signals stored on the `extracted` audit event (P2-C2 synergy);
+- applies the metadata correction overlay (effective, type-coerced) and marks each
+  corrected field **reviewer-verified** (confidence 1.0, removed from
+  `missing_fields`) so the decision stage no longer holds on it.
+
+Context → catalog → matching → decision then recompute from those inputs; corrected
+line matches are pinned via `apply_match_overlay`. Result: a correction that
+resolves the original hold reason lets the invoice **submit on rerun** — the
+correction loop closes end to end.
+
+**Refactor (kept safe).** Extracted the shared "context → match → decide →
+submit/hold" tail of `process` into `_resolve_match_decide`, now called by both
+`process` and `rerun` (rerun passes the audit so corrected matches are pinned;
+first-pass `process` passes none, so matching is unmodified). The full orchestrator
++ API suite confirms no regression.
+
+**Frontend.** Added a "Rerun with corrections" button to the QC panel.
+
+**Validation:** `ruff` clean; `pytest -q` → **106 passed, 1 skipped** (+3 rerun
+tests: metadata-correction rerun clears a context-mismatch hold and submits;
+line-match-correction rerun clears an unmatched-line hold and submits; unknown
+invoice → 404); frontend builds clean.
+
+**Phase 2 (Deepen the Tracks) is COMPLETE** — Track A (P2-A1..A4), Track B
+(P2-B1..B4), Track C (P2-C1..C4). Next: Phase 3 (Hardening & Polish), starting
+**P3-T1** (failure isolation, retry & recovery). Phase 1 live-stack exit gate
+remains OPEN (Docker daemon unavailable in the dev session) — run `docker compose
+up` per RUNBOOK to clear it before the demo.

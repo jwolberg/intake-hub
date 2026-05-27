@@ -14,6 +14,7 @@ import {
   correctMetadata,
   escalateInvoice,
   markReviewed,
+  rerunInvoice,
 } from "../api.js";
 
 // Header fields shown in the Extracted Metadata section (PRD §10), in order.
@@ -146,6 +147,9 @@ export default function InvoiceDetail({ detail, onAction, setError }) {
         <div className="qc-actions">
           <button disabled={busy} onClick={() => run(markReviewed(invoice.id, note || null))}>
             Mark reviewed
+          </button>
+          <button disabled={busy} onClick={() => run(rerunInvoice(invoice.id))}>
+            Rerun with corrections
           </button>
           <button
             disabled={busy}

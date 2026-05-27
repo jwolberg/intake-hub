@@ -34,9 +34,9 @@
 
 ## Current Status
 - Overall status: In Progress
-- Current phase: Phase 2 — Deepen the Tracks. Track A COMPLETE (P2-A1..A4); **Track B COMPLETE** (P2-B1..B4); Track C IN PROGRESS (P2-C1..C3 done; P2-C4 next).
-- Current ticket: **P2-C4** (rerun semantics with corrected data). The Phase 1 live-stack exit gate (Postgres round-trip + `docker compose up` + hub in a browser) is still OPEN — deferred because the Docker daemon is unavailable in the dev session, not because it passed. Commands: /docs/RUNBOOK.md.
-- Note: PostgresRepository + the hub were NOT exercised against the live stack (Docker daemon unavailable across sessions). API + pipeline + orchestrator validated in-process; frontend builds clean; CORS wired but not browser-verified. P2-A1..A4 + P2-B1..B4 + P2-C1..C3 fully validated in-process (103 passed, 1 skipped). Also: out-of-plan real-PDF demo path (RUNBOOK Path D). Run `docker compose up` to clear the gate end-to-end.
+- Current phase: **Phase 2 — Deepen the Tracks: COMPLETE** (Track A P2-A1..A4; Track B P2-B1..B4; Track C P2-C1..C4). Phase 3 (Hardening & Polish) next.
+- Current ticket: **P3-T1** (failure isolation, retry & recovery). The Phase 1 live-stack exit gate (Postgres round-trip + `docker compose up` + hub in a browser) is still OPEN — deferred because the Docker daemon is unavailable in the dev session, not because it passed. Commands: /docs/RUNBOOK.md.
+- Note: PostgresRepository + the hub were NOT exercised against the live stack (Docker daemon unavailable across sessions). API + pipeline + orchestrator validated in-process; frontend builds clean; CORS wired but not browser-verified. All of Phase 2 (P2-A1..A4 + P2-B1..B4 + P2-C1..C4) fully validated in-process (106 passed, 1 skipped). Also: out-of-plan real-PDF demo path (RUNBOOK Path D). Run `docker compose up` to clear the gate end-to-end.
 - Blockers: None for in-process work (OD-1 resolved; OD-2..OD-5 provisional behind interfaces). Live-stack exit gate blocked on Docker availability only.
 - Implementation log: /docs/implementation.md, /docs/implementation-notes.md
 - Dev setup/run: /docs/RUNBOOK.md
@@ -232,7 +232,7 @@ Tickets are grouped by STRATEGY § Tracks. Each traces to a PRD requirement.
   - Files: /backend/orchestrator/**, /backend/api/**
   - Depends on: P2-C3
   - Acceptance criteria covered: PRD FR10 (rerun uses corrected data); ARCHITECTURE §6, §11.
-  - Status: Todo
+  - Status: Complete — `orchestrator.rerun` reuses parse/extract outputs and re-enters from context: `_reconstruct_extraction` rebuilds the extraction from persisted line items + the per-field signals on the `extracted` event, applies the metadata overlay, and marks corrected fields reviewer-verified (confidence 1.0, no longer missing); corrected line matches pinned via `apply_match_overlay`; context→catalog→match→decision recompute. Shared `_resolve_match_decide` tail with `process`. `POST /api/invoices/:id/rerun` + hub "Rerun with corrections" button. A correction that resolves the hold reason now submits on rerun. 106 passed, 1 skipped (+3 rerun tests).
 
 ### Phase 3 — Hardening & Polish
 **Goal**
@@ -307,7 +307,7 @@ Tickets are grouped by STRATEGY § Tracks. Each traces to a PRD requirement.
 17. Phase 3: P3-T1, P3-T4 → P3-T2, P3-T3, P3-T5 → P3-T6 → P3-T7
 
 ## Recommended Next Step
-- Start with: **P2-C1 — list-view filters** (Track C, reviewer hub). Filters for submitted/held/failed/needs-review/low-confidence/mismatched-metadata/unmatched-line-items (PRD §10 Invoice List View, FR9; USERS § Reviewer). Backend query params on `GET /api/invoices` + hub filter controls. Depends on P1-T11 (done).
+- Start with: **P3-T1 — failure isolation, retry & recovery** (Phase 3). Retryable vs terminal failure states; resume from a failed stage without redoing successful upstream work; low-confidence → hold (PRD §14, FR11; ARCHITECTURE §15). Depends on P1-T9, P2-A3 (done). All of Phase 2 (Tracks A/B/C) is complete.
 - Still OPEN — **Phase 1 exit gate (live stack)**: deferred only because the Docker daemon is unavailable in the dev session. Run once Docker is up, before demo:
   1. `docker compose up -d db` then `DATABASE_URL=postgresql+psycopg://invoicescreener:invoicescreener@localhost:5432/invoicescreener pytest tests/integration/test_postgres_repository.py` — un-skips the Postgres round-trip.
   2. `docker compose up` — API lifespan `init_schema` + reflection + the mcp-reference/mock-clinrun services end-to-end.
