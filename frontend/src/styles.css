@@ -47,6 +47,19 @@ header.app-bar h1 { font-size: 1.25rem; margin: 0; }
 }
 .panel h2 { font-size: 0.95rem; margin: 0 0 0.75rem; }
 
+.list-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.75rem; }
+.list-head h2 { margin: 0; }
+.chips { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.chip {
+  background: #f0f3f8; border: 1px solid var(--border); border-radius: 999px;
+  padding: 0.15rem 0.6rem; font-size: 0.76rem; color: var(--text);
+  cursor: pointer; display: inline-flex; align-items: center; gap: 0.35rem;
+}
+.chip:hover:not(:disabled) { background: #e4e9f2; }
+.chip.active { background: #2563eb; border-color: #2563eb; color: #fff; }
+.chip:disabled { opacity: 0.4; cursor: default; }
+.chip-count { font-weight: 600; font-size: 0.72rem; opacity: 0.85; }
+
 .metrics { display: flex; flex-wrap: wrap; gap: 1.5rem; }
 .metric { display: flex; flex-direction: column; }
 .metric-value { font-size: 1.4rem; font-weight: 600; }

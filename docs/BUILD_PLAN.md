@@ -34,9 +34,9 @@
 
 ## Current Status
 - Overall status: In Progress
-- Current phase: Phase 2 — Deepen the Tracks. Track A COMPLETE (P2-A1..A4); **Track B COMPLETE** (P2-B1..B4); Track C next.
-- Current ticket: **P2-C1** (list-view filters). The Phase 1 live-stack exit gate (Postgres round-trip + `docker compose up` + hub in a browser) is still OPEN — deferred because the Docker daemon is unavailable in the dev session, not because it passed. Commands: /docs/RUNBOOK.md.
-- Note: PostgresRepository + the hub were NOT exercised against the live stack (Docker daemon unavailable across sessions). API + pipeline + orchestrator validated in-process; frontend builds clean; CORS wired but not browser-verified. P2-A1..A4 + P2-B1..B4 fully validated in-process (91 passed, 1 skipped). Also: out-of-plan real-PDF demo path (RUNBOOK Path D). Run `docker compose up` to clear the gate end-to-end.
+- Current phase: Phase 2 — Deepen the Tracks. Track A COMPLETE (P2-A1..A4); **Track B COMPLETE** (P2-B1..B4); Track C IN PROGRESS (P2-C1 done; P2-C2 next).
+- Current ticket: **P2-C2** (detail-view full sections). The Phase 1 live-stack exit gate (Postgres round-trip + `docker compose up` + hub in a browser) is still OPEN — deferred because the Docker daemon is unavailable in the dev session, not because it passed. Commands: /docs/RUNBOOK.md.
+- Note: PostgresRepository + the hub were NOT exercised against the live stack (Docker daemon unavailable across sessions). API + pipeline + orchestrator validated in-process; frontend builds clean; CORS wired but not browser-verified. P2-A1..A4 + P2-B1..B4 + P2-C1 fully validated in-process (93 passed, 1 skipped). Also: out-of-plan real-PDF demo path (RUNBOOK Path D). Run `docker compose up` to clear the gate end-to-end.
 - Blockers: None for in-process work (OD-1 resolved; OD-2..OD-5 provisional behind interfaces). Live-stack exit gate blocked on Docker availability only.
 - Implementation log: /docs/implementation.md, /docs/implementation-notes.md
 - Dev setup/run: /docs/RUNBOOK.md
@@ -214,7 +214,7 @@ Tickets are grouped by STRATEGY § Tracks. Each traces to a PRD requirement.
   - Files: /frontend/**, /backend/api (query params)
   - Depends on: P1-T11
   - Acceptance criteria covered: PRD §10 (Invoice List View), FR9; USERS § Reviewer (triage attention).
-  - Status: Todo
+  - Status: Complete — `_filter_tags` derives PRD §10 triage tags (submitted/held/failed/needs_review/low_confidence/mismatched_metadata/unmatched_line_items) per invoice; surfaced in each list row + `GET /api/invoices?filter=` (unknown → 422). Hub renders filter chips (live counts) filtering client-side over the same tags. 93 passed, 1 skipped (+2 API tests).
 - **P2-C2 — Detail view full sections**
   - Objective: Source, extracted metadata (value/confidence/evidence), context (resolved + candidates + mismatch warnings), line-item matching (raw vs normalized + rationale + flags), decision (submit/hold + confidence + rationale + risk flags + submission status).
   - Files: /frontend/**

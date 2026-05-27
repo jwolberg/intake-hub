@@ -66,6 +66,34 @@ def test_process_hold_records_exception(client):
     assert any(e["type"] == "unmatched_line_item" for e in detail["exceptions"])
 
 
+def test_list_view_filters(client):
+    # one submitted, one held (with an unmatched line item)
+    submitted_id = client.post(
+        "/api/invoices/process", json=_sample("inv_clean_001.json")
+    ).json()["id"]
+    held_id = client.post(
+        "/api/invoices/process", json=_sample("inv_hold_unmatched_002.json")
+    ).json()["id"]
+
+    # every row carries triage tags (one source of truth for the chips)
+    rows = {row["id"]: row for row in client.get("/api/invoices").json()}
+    assert "submitted" in rows[submitted_id]["filter_tags"]
+    assert {"held", "needs_review", "unmatched_line_items"} <= set(rows[held_id]["filter_tags"])
+
+    # each filter narrows to the matching invoices
+    def ids(filter_key):
+        return {row["id"] for row in client.get(f"/api/invoices?filter={filter_key}").json()}
+
+    assert ids("submitted") == {submitted_id}
+    assert ids("held") == {held_id}
+    assert ids("needs_review") == {held_id}
+    assert ids("unmatched_line_items") == {held_id}
+
+
+def test_unknown_filter_is_rejected(client):
+    assert client.get("/api/invoices?filter=bogus").status_code == 422
+
+
 def test_detail_404_for_unknown_invoice(client):
     assert client.get("/api/invoices/nope").status_code == 404
 

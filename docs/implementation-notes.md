@@ -616,3 +616,36 @@ not-corrected hold lowering precision; empty repo → all rates `None`) + an API
 (reviewer hub), starting **P2-C1** — list-view filters (submitted/held/failed/
 needs-review/low-confidence/mismatched/unmatched). Phase 1 live-stack gate still
 open (Docker unavailable).
+
+## 2026-05-27 — Phase 2 Track C (P2-C1): list-view filters
+
+**Backend (`backend/api/main.py`).** Added `_filter_tags(invoice, exceptions,
+matches, ctx)` — one source of truth deriving the PRD §10 triage tags per invoice:
+`submitted/held/failed` (status), `needs_review` (held|failed), `low_confidence`
+(any low-confidence exception code, or a *submit* below the 0.75 watch line),
+`mismatched_metadata` (context warning ending in `_mismatch`, or a
+`context_mismatch` exception), `unmatched_line_items` (an unmatched match or the
+`unmatched_line_item` exception). Tags ship in every list row (`filter_tags`) and
+`GET /api/invoices?filter=<key>` narrows by tag membership; an unknown key → 422.
+
+**Decision — low_confidence semantics.** Held invoices store
+`decision_confidence = 0.9` (confidence in *deferring* to a human), so filtering
+held invoices by a low confidence number would be wrong. Instead `low_confidence`
+keys off the *exceptions* the decision stage already emits (low_extraction /
+low_match / context_unresolved / low_confidence / moderate / weak), plus submits
+whose `decision_confidence` cleared the floor but sits under 0.75. This reads the
+real signal rather than a single misleading scalar.
+
+**Frontend.** `InvoiceList` renders filter chips (with live counts + disabled when
+empty) and an "All" chip, filtering **client-side over `filter_tags`** for instant
+response and free counts. The backend `?filter=` param is the authoritative
+server-side filter (same tags, tested) for API consumers; the hub reuses the tags
+rather than refetching per chip. Also added Total to the list columns (PRD §10).
+
+**Tradeoff.** Computing tags means `_summary` now also reads matches per row (it
+already read context + exceptions). Fine at demo scale; if the list ever paginates
+server-side, tags should be precomputed/persisted. Noted, not done (YAGNI).
+
+**Validation:** `ruff` clean; `pytest -q` → **93 passed, 1 skipped** (+2 API tests:
+filters narrow correctly + tags present; unknown filter → 422); frontend builds
+clean. Next: **P2-C2** — detail-view full sections.
