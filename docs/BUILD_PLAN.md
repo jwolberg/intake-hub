@@ -34,9 +34,9 @@
 
 ## Current Status
 - Overall status: In Progress
-- Current phase: Phase 2 — Deepen the Tracks. Track A COMPLETE (P2-A1..A4); Track B in progress (P2-B1, P2-B2 complete).
-- Current ticket: **P2-B3** (audit trail completeness — AI vs human, before/after, reason). The Phase 1 live-stack exit gate (Postgres round-trip + `docker compose up` + hub in a browser) is still OPEN — deferred because the Docker daemon is unavailable in the dev session, not because it passed. Commands: /docs/RUNBOOK.md.
-- Note: PostgresRepository + the hub were NOT exercised against the live stack (Docker daemon unavailable across sessions). API + pipeline + orchestrator validated in-process; frontend builds clean; CORS wired but not browser-verified. P2-A1..A4 + P2-B1..B2 fully validated in-process (82 passed, 1 skipped). Also: out-of-plan real-PDF demo path (RUNBOOK Path D). Run `docker compose up` to clear the gate end-to-end.
+- Current phase: Phase 2 — Deepen the Tracks. Track A COMPLETE (P2-A1..A4); Track B in progress (P2-B1..B3 complete).
+- Current ticket: **P2-B4** (strategy metric instrumentation — auto-submit rate, false-submit rate, hold precision). The Phase 1 live-stack exit gate (Postgres round-trip + `docker compose up` + hub in a browser) is still OPEN — deferred because the Docker daemon is unavailable in the dev session, not because it passed. Commands: /docs/RUNBOOK.md.
+- Note: PostgresRepository + the hub were NOT exercised against the live stack (Docker daemon unavailable across sessions). API + pipeline + orchestrator validated in-process; frontend builds clean; CORS wired but not browser-verified. P2-A1..A4 + P2-B1..B3 fully validated in-process (86 passed, 1 skipped). Also: out-of-plan real-PDF demo path (RUNBOOK Path D). Run `docker compose up` to clear the gate end-to-end.
 - Blockers: None for in-process work (OD-1 resolved; OD-2..OD-5 provisional behind interfaces). Live-stack exit gate blocked on Docker availability only.
 - Implementation log: /docs/implementation.md, /docs/implementation-notes.md
 - Dev setup/run: /docs/RUNBOOK.md
@@ -200,7 +200,7 @@ Tickets are grouped by STRATEGY § Tracks. Each traces to a PRD requirement.
   - Files: /backend/audit/**
   - Depends on: P1-T9
   - Acceptance criteria covered: PRD §17 (auditability), FR10/FR11; ARCHITECTURE §12.
-  - Status: Todo
+  - Status: Complete — `record()` supports before/after/reason (in JSONB details, no schema change); every stage event enriched to §17 (intake/parse/extracted-values/reference-lookup/catalog-retrieval/match-results/decision); actor attribution system/ai/human; terminal events carry reason. Human-correction audit shape provided + tested (routes land P2-C3). 86 passed, 1 skipped; new `tests/unit/test_audit.py` (4) + orchestrator actor/reason assertions.
 - **P2-B4 — Strategy metric instrumentation**
   - Objective: Compute/expose auto-submit rate, false-submit rate, hold precision for the Operations Lead.
   - Files: /backend/api/**, /backend/audit/**, /frontend/**
@@ -307,7 +307,7 @@ Tickets are grouped by STRATEGY § Tracks. Each traces to a PRD requirement.
 17. Phase 3: P3-T1, P3-T4 → P3-T2, P3-T3, P3-T5 → P3-T6 → P3-T7
 
 ## Recommended Next Step
-- Start with: **P2-B3 — audit trail completeness** (Track B). Append-only audit of every stage + human action with actor, action, before/after, reason; AI and human edits distinguishable (PRD §17, FR10/FR11; ARCHITECTURE §12). The orchestrator already records system/AI stage events with an `actor`; P2-B3 fills out before/after + reason and prepares for human-action events (corrections/rerun/escalate land with P2-C3).
+- Start with: **P2-B4 — strategy metric instrumentation** (Track B, finishes decisioning). Compute/expose auto-submit rate, false-submit rate, and hold precision for the Operations Lead (STRATEGY § Key metrics; USERS § Operations Lead). Reads the audit trail + decisions; surfaces via the API and hub. Depends on P2-B1 (done) + P2-B3 (done).
 - Still OPEN — **Phase 1 exit gate (live stack)**: deferred only because the Docker daemon is unavailable in the dev session. Run once Docker is up, before demo:
   1. `docker compose up -d db` then `DATABASE_URL=postgresql+psycopg://invoicescreener:invoicescreener@localhost:5432/invoicescreener pytest tests/integration/test_postgres_repository.py` — un-skips the Postgres round-trip.
   2. `docker compose up` — API lifespan `init_schema` + reflection + the mcp-reference/mock-clinrun services end-to-end.

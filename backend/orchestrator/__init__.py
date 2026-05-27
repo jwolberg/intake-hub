@@ -62,28 +62,38 @@ def process(
 
     invoice = ingest(sample)
     repo.save_invoice(invoice)
-    record(repo, invoice.id, AuditAction.RECEIVED, actor=Actor.SYSTEM)
+    source = sample.get("source", {})
+    record(repo, invoice.id, AuditAction.RECEIVED, actor=Actor.SYSTEM, details={
+        "channel": source.get("channel"),
+        "attachment": source.get("attachment"),
+    })
 
     try:
         parsed = parse(invoice.id, sample)
         repo.set_source_text(invoice.id, parsed.text)
         _advance(repo, invoice, InvoiceStatus.PARSED)
-        record(repo, invoice.id, AuditAction.PARSED, actor=Actor.SYSTEM)
+        record(repo, invoice.id, AuditAction.PARSED, actor=Actor.SYSTEM, details={
+            "format": parsed.format, "sections": parsed.sections,
+        })
 
         extraction = extract(invoice.id, parsed, llm)
         invoice.metadata = extraction.metadata
         repo.replace_line_items(invoice.id, extraction.line_items)
         _advance(repo, invoice, InvoiceStatus.EXTRACTED)
-        record(repo, invoice.id, AuditAction.EXTRACTED,
-               details={"line_items": len(extraction.line_items)})
+        record(repo, invoice.id, AuditAction.EXTRACTED, details={
+            "line_items": len(extraction.line_items),
+            "invoice_number": extraction.metadata.invoice_number,
+            "fields_extracted": len(extraction.field_confidence) - len(extraction.missing_fields),
+            "missing_fields": extraction.missing_fields,
+        })
 
-        ctx = resolve(invoice.id, extraction.metadata, sample.get("source", {}), ref)
+        ctx = resolve(invoice.id, extraction.metadata, source, ref)
         repo.save_context(ctx)
         _advance(repo, invoice, InvoiceStatus.CONTEXT_RESOLVED)
         record(repo, invoice.id, AuditAction.CONTEXT_RESOLVED, details={
             "sponsor_id": ctx.sponsor_id, "study_id": ctx.study_id,
             "site_id": ctx.site_id, "confidence": ctx.confidence,
-            "warnings": ctx.warnings,
+            "warnings": ctx.warnings, "candidates": len(ctx.candidates),
         })
 
         try:
@@ -102,6 +112,7 @@ def process(
         _advance(repo, invoice, InvoiceStatus.CATALOG_MATCHED)
         record(repo, invoice.id, AuditAction.CATALOG_MATCHED, details={
             "catalog_available": catalog_available,
+            "catalog_size": len(catalog),
             "matched": sum(1 for m in matches if m.catalog_item_id),
             "total": len(matches),
         })
@@ -115,8 +126,8 @@ def process(
         else:
             repo.add_exceptions(from_decision(invoice.id, decision))
             _advance(repo, invoice, InvoiceStatus.HELD)
-            record(repo, invoice.id, AuditAction.HELD, details={
-                "rationale": decision.rationale,
+            record(repo, invoice.id, AuditAction.HELD, reason=decision.rationale, details={
+                "confidence": decision.confidence,
                 "risk_flags": [f.model_dump(mode="json") for f in decision.risk_flags],
             })
     except Exception as exc:  # stage failure: isolate, mark failed, never propagate
@@ -132,8 +143,7 @@ def _submit(repo, invoice, metadata, ctx, matches, clinrun, decision) -> None:
         _fail(repo, invoice, "submission_failed", str(exc))
         return
     _advance(repo, invoice, InvoiceStatus.SUBMITTED)
-    record(repo, invoice.id, AuditAction.SUBMITTED, details={
-        "rationale": decision.rationale,
+    record(repo, invoice.id, AuditAction.SUBMITTED, reason=decision.rationale, details={
         "reference_id": result.reference_id,
     })
 
@@ -144,7 +154,7 @@ def _fail(repo: Repository, invoice: Invoice, kind: str, message: str) -> None:
     invoice.updated_at = datetime.now(timezone.utc)
     repo.save_invoice(invoice)
     record(repo, invoice.id, AuditAction.FAILED, actor=Actor.SYSTEM,
-           details={"kind": kind, "error": message})
+           reason=message, details={"kind": kind})
 
 
 def process_all(samples: list[dict], repo: Repository, **clients) -> list[Invoice]:

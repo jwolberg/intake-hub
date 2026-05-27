@@ -549,3 +549,38 @@ checked: mismatch → `context_mismatch`; empty doc → `unresolved_sponsor`,
 **Follow-up:** Track B continues with **P2-B3** (audit trail completeness — every
 stage + human action with actor/action/before-after/reason; AI vs human
 distinguishable). Phase 1 live-stack gate still open (Docker unavailable).
+
+## 2026-05-27 — Phase 2 Track B (P2-B3): audit trail completeness
+
+**`record()` gains `before` / `after` / `reason`** (PRD §17 event fields). They
+fold into the event's JSONB `details` under standard keys — **no schema change**
+(Docker-blocked), `details` is already JSONB. `before`/`after` capture a value
+change (human corrections); `reason` is the rationale/note. `record` stays the
+single audit writer.
+
+**Stage events enriched to §17 completeness.** Every §17 item is now captured with
+specifics: intake (channel/attachment), parse (format/sections), **extracted
+values** (invoice number, field count, missing fields), reference lookup
+(ids/confidence/warnings/#candidates), catalog retrieval (`catalog_size`), match
+results (matched/total), AI decision (reason + risk_flags). Terminal events
+(submitted/held/failed) carry the rationale via `reason=`.
+
+**AI vs human is first-class.** Actor attribution: intake/parse/fail = `system`,
+the model-driven stages (extract/context/match/decide) = `ai`, and corrections
+land as `human`. P2-B3 provides + tests the human-correction audit shape
+(actor=human, before→after, reason); the actual correction/rerun/escalate *routes*
+arrive with P2-C3 and will call `record(actor=Actor.HUMAN, before=…, after=…,
+reason=…)`.
+
+**Hub:** the decision rationale now reads `details.reason` (falls back to the old
+`rationale`/`error` keys for safety).
+
+**Validation:** `ruff` clean; `pytest -q` → **86 passed, 1 skipped**; frontend
+builds clean. Added `tests/unit/test_audit.py` (4: reason folding, clean details
+when no optionals, human before/after/reason, AI-vs-human distinguishability) +
+an orchestrator assertion on actor attribution + terminal reason. Verified the
+full enriched trail end-to-end on the mismatch sample.
+
+**Follow-up:** Track B finishes with **P2-B4** (strategy metric instrumentation —
+auto-submit rate, false-submit rate, hold precision). Phase 1 live-stack gate
+still open (Docker unavailable).

@@ -23,7 +23,8 @@ export default function InvoiceDetail({ detail }) {
   const meta = invoice.metadata ?? {};
   const matchByLine = Object.fromEntries(matches.map((m) => [m.line_item_id, m]));
   const decisionEvent = terminalEvent(audit);
-  const rationale = decisionEvent?.details?.rationale ?? decisionEvent?.details?.error;
+  const d = decisionEvent?.details ?? {};
+  const rationale = d.reason ?? d.rationale ?? d.error;
 
   return (
     <div>

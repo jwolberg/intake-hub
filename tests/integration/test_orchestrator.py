@@ -44,11 +44,19 @@ def test_clean_invoice_processes_to_submitted():
     assert repo.get_exceptions(invoice.id) == []
 
     # audit trail records the full path through the pipeline
-    actions = [e.action.value for e in repo.get_audit(invoice.id)]
+    trail = repo.get_audit(invoice.id)
+    actions = [e.action.value for e in trail]
     assert actions == [
         "received", "parsed", "extracted", "context_resolved",
         "catalog_matched", "submitted",
     ]
+    # actor attribution: intake/parse are system, the AI stages are ai (PRD §17)
+    actors = {e.action.value: e.actor.value for e in trail}
+    assert actors["received"] == "system" and actors["parsed"] == "system"
+    assert actors["extracted"] == "ai" and actors["submitted"] == "ai"
+    # the terminal event carries a reason (PRD §17 reason/note)
+    submitted = next(e for e in trail if e.action.value == "submitted")
+    assert submitted.details.get("reason")
 
 
 def test_unmatched_invoice_processes_to_held():
