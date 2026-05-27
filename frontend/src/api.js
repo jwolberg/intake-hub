@@ -18,6 +18,10 @@ export function getInvoice(id) {
   return getJSON(`/api/invoices/${id}`);
 }
 
+export function getMetrics() {
+  return getJSON("/api/metrics");
+}
+
 export function getHealth() {
   return getJSON("/health");
 }

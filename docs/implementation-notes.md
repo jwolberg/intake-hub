@@ -584,3 +584,35 @@ full enriched trail end-to-end on the mismatch sample.
 **Follow-up:** Track B finishes with **P2-B4** (strategy metric instrumentation —
 auto-submit rate, false-submit rate, hold precision). Phase 1 live-stack gate
 still open (Docker unavailable).
+
+## 2026-05-27 — Phase 2 Track B (P2-B4): strategy metric instrumentation — Track B complete
+
+**`backend/audit/metrics.py`** computes the three STRATEGY guardrail metrics from
+the persisted invoices + audit trail, returned as a typed `WorkflowMetrics`:
+- **auto_submit_rate** = submitted / decided (submitted + held).
+- **false_submit_rate** = submits a human later *corrected/escalated* / submitted.
+- **hold_precision** = holds a human confirmed (corrected/escalated) / holds a
+  human dispositioned (any human event).
+
+**Honest denominators.** A rate is `None` when its denominator is zero, so the
+Operations Lead never sees a fabricated number. `false_submit_rate` and
+`hold_precision` depend on **human outcomes** in the audit trail — they read as
+0.0 / `None` until reviewers act. The correction/escalation routes that emit those
+human events land with **P2-C3**; P2-B3 already defined the human-event audit
+shape, so the metric just reads it. This is why the metric design slots cleanly
+onto the existing trail rather than needing new storage.
+
+**Surfaced two ways** (USERS § Operations Lead watches in aggregate):
+- API: `GET /api/metrics` → `WorkflowMetrics`.
+- Hub: a `MetricsBar` panel on the list view (throughput counts + the three rates,
+  `—` when a rate has no data yet).
+
+**Validation:** `ruff` clean; `pytest -q` → **91 passed, 1 skipped**; frontend
+builds clean. Added `tests/unit/test_metrics.py` (4: throughput + auto-submit rate;
+false-submit + hold-precision from human corrections/escalations; a reviewed-but-
+not-corrected hold lowering precision; empty repo → all rates `None`) + an API test.
+
+**Track B (decisioning & explainability) is complete** (P2-B1..B4). Next: Track C
+(reviewer hub), starting **P2-C1** — list-view filters (submitted/held/failed/
+needs-review/low-confidence/mismatched/unmatched). Phase 1 live-stack gate still
+open (Docker unavailable).

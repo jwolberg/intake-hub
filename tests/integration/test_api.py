@@ -68,3 +68,14 @@ def test_process_hold_records_exception(client):
 
 def test_detail_404_for_unknown_invoice(client):
     assert client.get("/api/invoices/nope").status_code == 404
+
+
+def test_metrics_endpoint(client):
+    client.post("/api/invoices/process", json=_sample("inv_clean_001.json"))
+    client.post("/api/invoices/process", json=_sample("inv_hold_unmatched_002.json"))
+
+    metrics = client.get("/api/metrics").json()
+    assert metrics["total"] == 2
+    assert metrics["submitted"] == 1 and metrics["held"] == 1
+    assert metrics["auto_submit_rate"] == 0.5
+    assert metrics["hold_precision"] is None  # nothing dispositioned yet

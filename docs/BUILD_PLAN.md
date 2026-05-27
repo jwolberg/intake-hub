@@ -34,9 +34,9 @@
 
 ## Current Status
 - Overall status: In Progress
-- Current phase: Phase 2 — Deepen the Tracks. Track A COMPLETE (P2-A1..A4); Track B in progress (P2-B1..B3 complete).
-- Current ticket: **P2-B4** (strategy metric instrumentation — auto-submit rate, false-submit rate, hold precision). The Phase 1 live-stack exit gate (Postgres round-trip + `docker compose up` + hub in a browser) is still OPEN — deferred because the Docker daemon is unavailable in the dev session, not because it passed. Commands: /docs/RUNBOOK.md.
-- Note: PostgresRepository + the hub were NOT exercised against the live stack (Docker daemon unavailable across sessions). API + pipeline + orchestrator validated in-process; frontend builds clean; CORS wired but not browser-verified. P2-A1..A4 + P2-B1..B3 fully validated in-process (86 passed, 1 skipped). Also: out-of-plan real-PDF demo path (RUNBOOK Path D). Run `docker compose up` to clear the gate end-to-end.
+- Current phase: Phase 2 — Deepen the Tracks. Track A COMPLETE (P2-A1..A4); **Track B COMPLETE** (P2-B1..B4); Track C next.
+- Current ticket: **P2-C1** (list-view filters). The Phase 1 live-stack exit gate (Postgres round-trip + `docker compose up` + hub in a browser) is still OPEN — deferred because the Docker daemon is unavailable in the dev session, not because it passed. Commands: /docs/RUNBOOK.md.
+- Note: PostgresRepository + the hub were NOT exercised against the live stack (Docker daemon unavailable across sessions). API + pipeline + orchestrator validated in-process; frontend builds clean; CORS wired but not browser-verified. P2-A1..A4 + P2-B1..B4 fully validated in-process (91 passed, 1 skipped). Also: out-of-plan real-PDF demo path (RUNBOOK Path D). Run `docker compose up` to clear the gate end-to-end.
 - Blockers: None for in-process work (OD-1 resolved; OD-2..OD-5 provisional behind interfaces). Live-stack exit gate blocked on Docker availability only.
 - Implementation log: /docs/implementation.md, /docs/implementation-notes.md
 - Dev setup/run: /docs/RUNBOOK.md
@@ -206,7 +206,7 @@ Tickets are grouped by STRATEGY § Tracks. Each traces to a PRD requirement.
   - Files: /backend/api/**, /backend/audit/**, /frontend/**
   - Depends on: P2-B1, P2-B3
   - Acceptance criteria covered: STRATEGY § Key metrics; USERS § Operations Lead.
-  - Status: Todo
+  - Status: Complete — `backend/audit/metrics.py` computes auto-submit rate, false-submit rate (human-corrected/escalated submits), hold precision (human-confirmed holds) from invoices + audit; rates are `None` when no data (false-submit/hold-precision populate as reviewers act in P2-C3). Surfaced via `GET /api/metrics` + a hub `MetricsBar`. 91 passed, 1 skipped; new `tests/unit/test_metrics.py` (4) + API test.
 
 #### Track C — Reviewer hub (STRATEGY Track 3)
 - **P2-C1 — List view filters**
@@ -307,7 +307,7 @@ Tickets are grouped by STRATEGY § Tracks. Each traces to a PRD requirement.
 17. Phase 3: P3-T1, P3-T4 → P3-T2, P3-T3, P3-T5 → P3-T6 → P3-T7
 
 ## Recommended Next Step
-- Start with: **P2-B4 — strategy metric instrumentation** (Track B, finishes decisioning). Compute/expose auto-submit rate, false-submit rate, and hold precision for the Operations Lead (STRATEGY § Key metrics; USERS § Operations Lead). Reads the audit trail + decisions; surfaces via the API and hub. Depends on P2-B1 (done) + P2-B3 (done).
+- Start with: **P2-C1 — list-view filters** (Track C, reviewer hub). Filters for submitted/held/failed/needs-review/low-confidence/mismatched-metadata/unmatched-line-items (PRD §10 Invoice List View, FR9; USERS § Reviewer). Backend query params on `GET /api/invoices` + hub filter controls. Depends on P1-T11 (done).
 - Still OPEN — **Phase 1 exit gate (live stack)**: deferred only because the Docker daemon is unavailable in the dev session. Run once Docker is up, before demo:
   1. `docker compose up -d db` then `DATABASE_URL=postgresql+psycopg://invoicescreener:invoicescreener@localhost:5432/invoicescreener pytest tests/integration/test_postgres_repository.py` — un-skips the Postgres round-trip.
   2. `docker compose up` — API lifespan `init_schema` + reflection + the mcp-reference/mock-clinrun services end-to-end.

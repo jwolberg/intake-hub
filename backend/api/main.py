@@ -19,6 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
+from backend.audit.metrics import WorkflowMetrics, compute_metrics
 from backend.clients import get_clinrun_client, get_llm_client, get_reference_client
 from backend.config import settings
 from backend.db import get_engine, init_schema
@@ -112,6 +113,12 @@ def process_invoice(sample: dict, repo: RepoDep, clients: ClientsDep) -> dict:
 @app.get("/api/invoices")
 def list_invoices(repo: RepoDep) -> list[dict]:
     return [_summary(inv, repo) for inv in repo.list_invoices()]
+
+
+@app.get("/api/metrics")
+def metrics(repo: RepoDep) -> WorkflowMetrics:
+    """Aggregate strategy metrics for the Operations Lead (STRATEGY § Key metrics)."""
+    return compute_metrics(repo)
 
 
 @app.get("/api/invoices/{invoice_id}")
