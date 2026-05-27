@@ -31,6 +31,7 @@ _ACTIONS = {
     "catalog_unavailable": "Retry catalog fetch or escalate",
     "unmatched_line_item": "Map or reject the unmatched line item(s)",
     "amount_mismatch": "Reconcile the line amount against the catalog price",
+    "quantity_mismatch": "Reconcile the line quantity/total against the catalog price",
     "total_mismatch": "Reconcile line items against the invoice total",
 }
 
@@ -84,6 +85,11 @@ def decide(
         flags.append(RiskFlag(
             type="amount_mismatch", severity=Severity.HIGH,
             message="a line amount disagrees with the catalog price",
+        ))
+    if any(m.quantity_match is False for m in matches):
+        flags.append(RiskFlag(
+            type="quantity_mismatch", severity=Severity.HIGH,
+            message="a line quantity/total disagrees with the catalog price",
         ))
 
     line_total = sum((li.total for li in line_items if li.total is not None), Decimal("0"))

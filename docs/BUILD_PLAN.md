@@ -34,9 +34,9 @@
 
 ## Current Status
 - Overall status: In Progress
-- Current phase: Phase 2 — Deepen the Tracks. Track A in progress (P2-A1, P2-A2, P2-A3 complete).
-- Current ticket: **P2-A4** (hybrid matching: normalize → semantic → LLM adjudication → deterministic verify) finishes Track A. The Phase 1 live-stack exit gate (Postgres round-trip + `docker compose up` + hub in a browser) is still OPEN — deferred because the Docker daemon is unavailable in the dev session, not because it passed. Commands: /docs/RUNBOOK.md.
-- Note: PostgresRepository + the hub were NOT exercised against the live stack (Docker daemon unavailable across sessions). API + pipeline + orchestrator validated in-process; frontend builds clean; CORS wired but not browser-verified. P2-A1/A2/A3 fully validated in-process (46 passed, 1 skipped). Run `docker compose up` to clear the gate end-to-end.
+- Current phase: Phase 2 — Deepen the Tracks. **Track A (interpretation engine) COMPLETE** (P2-A1..A4).
+- Current ticket: **P2-B1** (full decision policy + structured output) starts Track B — consumes the per-field confidence (P2-A1) and context/matching flags from Track A. The Phase 1 live-stack exit gate (Postgres round-trip + `docker compose up` + hub in a browser) is still OPEN — deferred because the Docker daemon is unavailable in the dev session, not because it passed. Commands: /docs/RUNBOOK.md.
+- Note: PostgresRepository + the hub were NOT exercised against the live stack (Docker daemon unavailable across sessions). API + pipeline + orchestrator validated in-process; frontend builds clean; CORS wired but not browser-verified. P2-A1..A4 fully validated in-process (53 passed, 1 skipped). Run `docker compose up` to clear the gate end-to-end.
 - Blockers: None for in-process work (OD-1 resolved; OD-2..OD-5 provisional behind interfaces). Live-stack exit gate blocked on Docker availability only.
 - Implementation log: /docs/implementation.md, /docs/implementation-notes.md
 - Dev setup/run: /docs/RUNBOOK.md
@@ -180,7 +180,7 @@ Tickets are grouped by STRATEGY § Tracks. Each traces to a PRD requirement.
   - Files: /backend/matching/**, /backend/clients (LLMClient)
   - Depends on: P1-T6, P2-A3
   - Acceptance criteria covered: PRD FR5 (simple→large→ambiguous); ARCHITECTURE §9.
-  - Status: Todo
+  - Status: Complete — layered matcher: normalize (filler-word stripping) → token-set candidate ranking (exact/containment boost, floor) → LLM adjudication of ambiguous ties (advisory, deterministic fallback) → deterministic amount + quantity·price verification (downgrades confidence, raises flags). `MatchResult.quantity_match` + ranked `alternates`. Decision holds on `quantity_mismatch` (minimal extension; full policy P2-B1). 53 passed, 1 skipped.
 
 #### Track B — Decisioning & explainability (STRATEGY Track 2)
 - **P2-B1 — Full decision policy + structured output**
@@ -307,7 +307,7 @@ Tickets are grouped by STRATEGY § Tracks. Each traces to a PRD requirement.
 17. Phase 3: P3-T1, P3-T4 → P3-T2, P3-T3, P3-T5 → P3-T6 → P3-T7
 
 ## Recommended Next Step
-- Start with: **P2-A4 — hybrid matching (normalize → semantic → LLM → verify)** (Track A, finishes the interpretation engine). Layered matcher with normalization, candidate generation, LLM adjudication, and deterministic amount/qty verification; alternates + unmatched-material detection (PRD FR5; ARCHITECTURE §9). Depends on P2-A3 (done).
+- Start with: **P2-B1 — full decision policy + structured output** (Track B). Complete the §10 policy with severity levels, `risk_flags`, `required_human_actions`, decision confidence; high-severity always holds; low confidence (incl. low extraction confidence from P2-A1) → hold, never silent submit (PRD FR6, §9, §16; ARCHITECTURE §10). This is where the Track A signals (per-field confidence, context mismatch/ambiguity, match flags) are consolidated into the policy rather than the current minimal per-flag extensions.
 - Still OPEN — **Phase 1 exit gate (live stack)**: deferred only because the Docker daemon is unavailable in the dev session. Run once Docker is up, before demo:
   1. `docker compose up -d db` then `DATABASE_URL=postgresql+psycopg://invoicescreener:invoicescreener@localhost:5432/invoicescreener pytest tests/integration/test_postgres_repository.py` — un-skips the Postgres round-trip.
   2. `docker compose up` — API lifespan `init_schema` + reflection + the mcp-reference/mock-clinrun services end-to-end.

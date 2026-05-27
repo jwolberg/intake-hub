@@ -98,7 +98,7 @@ def process(
             _fail(repo, invoice, "catalog_fetch_failed", str(exc))
             return invoice
 
-        matches = match(extraction.line_items, catalog)
+        matches = match(extraction.line_items, catalog, llm)
         repo.replace_matches(invoice.id, matches)
         _advance(repo, invoice, InvoiceStatus.CATALOG_MATCHED)
         record(repo, invoice.id, AuditAction.CATALOG_MATCHED, details={

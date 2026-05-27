@@ -367,3 +367,46 @@ error → failed not held; batch shares one cache).
 **Follow-up:** Track A finishes with **P2-A4** (hybrid matching: normalize →
 semantic → LLM adjudication → deterministic verify). Phase 1 live-stack gate still
 open (Docker unavailable).
+
+## 2026-05-27 — Phase 2 Track A (P2-A4): hybrid matching — Track A complete
+
+**Replaced the baseline first-match matcher with the layered matcher**
+(ARCHITECTURE.md §9), all four layers:
+1. **Normalization** — lowercase, strip punctuation, collapse whitespace, drop
+   filler words (`fee`, `visit`, `patient`, …) before comparison.
+2. **Candidate generation** — every catalog item scored by token-set (Jaccard)
+   similarity with an exact (1.0) / subset-containment (≥0.8) boost; ranked, kept
+   above a 0.3 floor. No candidate above the floor → **unmatched material line
+   item** (high-severity).
+3. **LLM adjudication** — only for *ambiguous* cases (no confident exact match
+   AND top two within 0.15). The injected `LLMClient` picks the best mapping +
+   rationale. **Advisory**: an empty/unusable response falls back to the
+   deterministic top, so the offline path (Passthrough) stays fully deterministic.
+4. **Deterministic verification** — unit price *and* quantity·catalog_price→total
+   compared with a 0.01 tolerance; a mismatch downgrades confidence (×0.5) and
+   raises `amount_mismatch` / `quantity_mismatch` *regardless* of semantic score.
+
+`MatchResult` now carries `quantity_match` and ranked `alternates` (the losing
+candidates, chosen-item excluded — fixed a bug where a post-adjudication best
+left the chosen item in its own alternates list).
+
+**`match(line_items, catalog, llm=None)`** — `llm` is optional (default → pure
+deterministic). The orchestrator passes the pipeline `llm`; the standalone
+pipeline test omits it. Verified the five samples are unchanged end-to-end:
+clean/body/image → submit, unmatched → held (unmatched_line_item), mismatch →
+held (context_mismatch).
+
+**Minimal decision-stage touch (acknowledged).** Added a `quantity_mismatch` HIGH
+flag mirroring the existing `amount_mismatch` handling, so a quantity discrepancy
+holds rather than silently submits. Full policy/tolerances remain P2-B1.
+
+**Validation:** `ruff` clean; `pytest -q` → **53 passed, 1 skipped**. Added
+`tests/unit/test_matching.py` (7: exact/containment, unmatched, amount mismatch,
+quantity mismatch, LLM adjudication of an ambiguous tie, adjudication fallback,
+large 2000-item catalog).
+
+**Track A (interpretation engine) is complete** (P2-A1..A4). Next: Track B
+(decisioning & explainability), starting **P2-B1** — full decision policy +
+structured output, which will *consume* the per-field confidence (P2-A1) and the
+context/matching flags built across Track A. Phase 1 live-stack gate still open
+(Docker unavailable).
