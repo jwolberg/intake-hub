@@ -34,9 +34,9 @@
 
 ## Current Status
 - Overall status: In Progress
-- Current phase: Phase 2 — Deepen the Tracks. Track A in progress (P2-A1, P2-A2 complete).
-- Current ticket: **P2-A3** (catalog robustness: large/missing/empty/error + cache) is next in Track A. The Phase 1 live-stack exit gate (Postgres round-trip + `docker compose up` + hub in a browser) is still OPEN — deferred because the Docker daemon is unavailable in the dev session, not because it passed. Commands: /docs/RUNBOOK.md.
-- Note: PostgresRepository + the hub were NOT exercised against the live stack (Docker daemon unavailable across sessions). API + pipeline + orchestrator validated in-process; frontend builds clean; CORS wired but not browser-verified. P2-A1/A2 fully validated in-process (37 passed, 1 skipped). Run `docker compose up` to clear the gate end-to-end.
+- Current phase: Phase 2 — Deepen the Tracks. Track A in progress (P2-A1, P2-A2, P2-A3 complete).
+- Current ticket: **P2-A4** (hybrid matching: normalize → semantic → LLM adjudication → deterministic verify) finishes Track A. The Phase 1 live-stack exit gate (Postgres round-trip + `docker compose up` + hub in a browser) is still OPEN — deferred because the Docker daemon is unavailable in the dev session, not because it passed. Commands: /docs/RUNBOOK.md.
+- Note: PostgresRepository + the hub were NOT exercised against the live stack (Docker daemon unavailable across sessions). API + pipeline + orchestrator validated in-process; frontend builds clean; CORS wired but not browser-verified. P2-A1/A2/A3 fully validated in-process (46 passed, 1 skipped). Run `docker compose up` to clear the gate end-to-end.
 - Blockers: None for in-process work (OD-1 resolved; OD-2..OD-5 provisional behind interfaces). Live-stack exit gate blocked on Docker availability only.
 - Implementation log: /docs/implementation.md, /docs/implementation-notes.md
 - Dev setup/run: /docs/RUNBOOK.md
@@ -174,7 +174,7 @@ Tickets are grouped by STRATEGY § Tracks. Each traces to a PRD requirement.
   - Files: /backend/catalog/**
   - Depends on: P1-T5
   - Acceptance criteria covered: PRD FR4, §14 (reliable large-catalog matching); ARCHITECTURE §7.
-  - Status: Todo
+  - Status: Complete — `CatalogCache` protocol + `InMemoryCatalogCache` keyed by (sponsor,study), shared per `process_all` batch (one fetch per scope); missing→hold, transport error→typed `catalog_fetch_failed` retryable failure, empty→[], large passes through. In-memory cache (Postgres `catalog_cache` table impl deferred behind the protocol pending Docker). 46 passed, 1 skipped.
 - **P2-A4 — Hybrid matching (normalize → semantic → LLM → verify)**
   - Objective: Layered matcher with normalization, candidate generation, LLM adjudication, and deterministic amount/qty verification; alternates + unmatched-material detection.
   - Files: /backend/matching/**, /backend/clients (LLMClient)
@@ -307,7 +307,7 @@ Tickets are grouped by STRATEGY § Tracks. Each traces to a PRD requirement.
 17. Phase 3: P3-T1, P3-T4 → P3-T2, P3-T3, P3-T5 → P3-T6 → P3-T7
 
 ## Recommended Next Step
-- Start with: **P2-A3 — catalog robustness (large/missing/empty/error) + cache** (Track A). Graceful handling of large catalogs, missing/empty results, and API errors as typed failures; cache by `(sponsorId, studyId)` (PRD FR4, §14; ARCHITECTURE §7, §12).
+- Start with: **P2-A4 — hybrid matching (normalize → semantic → LLM → verify)** (Track A, finishes the interpretation engine). Layered matcher with normalization, candidate generation, LLM adjudication, and deterministic amount/qty verification; alternates + unmatched-material detection (PRD FR5; ARCHITECTURE §9). Depends on P2-A3 (done).
 - Still OPEN — **Phase 1 exit gate (live stack)**: deferred only because the Docker daemon is unavailable in the dev session. Run once Docker is up, before demo:
   1. `docker compose up -d db` then `DATABASE_URL=postgresql+psycopg://invoicescreener:invoicescreener@localhost:5432/invoicescreener pytest tests/integration/test_postgres_repository.py` — un-skips the Postgres round-trip.
   2. `docker compose up` — API lifespan `init_schema` + reflection + the mcp-reference/mock-clinrun services end-to-end.

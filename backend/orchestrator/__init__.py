@@ -15,10 +15,10 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from backend.audit import record
-from backend.catalog import fetch
+from backend.catalog import CatalogCache, InMemoryCatalogCache, fetch
 from backend.clients import get_clinrun_client, get_llm_client, get_reference_client
 from backend.clients.clinrun import ClinRunClient
-from backend.clients.errors import CatalogNotFound, SubmissionFailed
+from backend.clients.errors import CatalogNotFound, ReferenceUnavailable, SubmissionFailed
 from backend.clients.llm import LLMClient
 from backend.clients.mcp_reference import MCPReferenceClient
 from backend.context import resolve
@@ -54,6 +54,7 @@ def process(
     llm: LLMClient | None = None,
     ref: MCPReferenceClient | None = None,
     clinrun: ClinRunClient | None = None,
+    catalog_cache: CatalogCache | None = None,
 ) -> Invoice:
     """Run one invoice end-to-end to a terminal state, persisting as it goes."""
     llm = llm or get_llm_client()
@@ -87,10 +88,15 @@ def process(
         })
 
         try:
-            catalog = fetch(ctx, ref)
+            catalog = fetch(ctx, ref, cache=catalog_cache)
             catalog_available = True
         except CatalogNotFound:
+            # scope known but no catalog → deliberate hold (catalog_unavailable)
             catalog, catalog_available = [], False
+        except ReferenceUnavailable as exc:
+            # transport/API error → retryable failure, not a hold (PRD §15)
+            _fail(repo, invoice, "catalog_fetch_failed", str(exc))
+            return invoice
 
         matches = match(extraction.line_items, catalog)
         repo.replace_matches(invoice.id, matches)
@@ -151,7 +157,12 @@ def _fail(repo: Repository, invoice: Invoice, kind: str, message: str) -> None:
 
 
 def process_all(samples: list[dict], repo: Repository, **clients) -> list[Invoice]:
-    """Process many invoices; a failure in one never stops the others (PRD §14)."""
+    """Process many invoices; a failure in one never stops the others (PRD §14).
+
+    A single catalog cache is shared across the batch (unless the caller passes
+    one) so invoices for the same sponsor/study fetch the catalog once.
+    """
+    clients.setdefault("catalog_cache", InMemoryCatalogCache())
     results: list[Invoice] = []
     for sample in samples:
         try:

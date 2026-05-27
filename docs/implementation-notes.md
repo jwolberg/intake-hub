@@ -321,3 +321,49 @@ Manual run: clean/body/image → no warnings; mismatch → `sponsor_mismatch`.
 
 **Follow-up:** Track A continues with **P2-A3** (catalog robustness: large/missing/
 empty/error + cache). The Phase 1 live-stack gate remains open (Docker unavailable).
+
+## 2026-05-27 — Phase 2 Track A (P2-A3): catalog robustness + cache
+
+**The typed errors already existed** (`CatalogNotFound` = hold reason,
+`ReferenceUnavailable` = retryable transport failure — defined in P0-T4). P2-A3
+makes the catalog stage *use* the distinction and adds caching.
+
+**Catalog cache by `(sponsor_id, study_id)`** (the item deferred from P1-T5;
+ARCHITECTURE.md §7, §12). Added a `CatalogCache` protocol + `InMemoryCatalogCache`
+in the catalog package; `fetch(ctx, ref, cache=None)` returns a cache hit before
+calling the reference. The orchestrator shares **one cache per `process_all`
+batch**, so a batch of same-study invoices fetches the catalog once (verified:
+3 Northwind invoices → 1 `get_catalog` call). Only successful fetches are cached —
+a transient `ReferenceUnavailable` is never cached, so a retry re-hits the source.
+
+**Decision: in-memory cache, not the `catalog_cache` table, for now.** A persistent
+repo-backed cache would need Postgres validation, which is blocked by the Docker
+gap. The in-memory cache lives behind the `CatalogCache` protocol, so a
+Postgres-backed implementation drops in later without touching callers. Noted as
+a follow-up; the `catalog_cache` table already exists (P0-T3) and stays unused
+until then.
+
+**Robustness, per PRD FR4/§14/§15 catalog-failure:**
+- **Missing catalog** (`CatalogNotFound`) → orchestrator holds (`catalog_unavailable`),
+  unchanged.
+- **Transport/API error** (`ReferenceUnavailable`) → orchestrator now catches it
+  *specifically* and marks the invoice `failed` with a typed `catalog_fetch_failed`
+  exception (retryable), instead of falling through to the generic `stage_failure`.
+  This realises §15 "mark catalog stage as failed; provide retry option" with a
+  specific reason. (General retry/recovery across all stages is still P3-T1.)
+- **Empty catalog** (scope known, zero items) returns `[]` — matching flags every
+  line unmatched; not conflated with a missing catalog.
+- **Large catalog** passes straight through (verified with a 2000-item fixture).
+
+**Minimal orchestrator touch (acknowledged).** Threading the cache + the explicit
+`ReferenceUnavailable` branch are small orchestrator edits, in service of P2-A3's
+"API errors as typed failures" objective. P3-T1 owns the full retry/recovery model.
+
+**Validation:** `ruff` clean; `pytest -q` → **46 passed, 1 skipped**. Added
+`tests/unit/test_catalog.py` (7: unresolved, missing, transport-error, empty,
+large, cache-hit, error-not-cached) + 2 orchestrator tests (catalog transport
+error → failed not held; batch shares one cache).
+
+**Follow-up:** Track A finishes with **P2-A4** (hybrid matching: normalize →
+semantic → LLM adjudication → deterministic verify). Phase 1 live-stack gate still
+open (Docker unavailable).
