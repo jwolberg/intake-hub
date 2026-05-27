@@ -63,6 +63,24 @@ def test_clean_invoice_submits():
     assert result.accepted is True
 
 
+def test_email_body_invoice_submits():
+    """An invoice delivered in the email body (no attachment) flows to submit."""
+    invoice, extraction, _ctx, matches, decision = _run(_load("inv_body_003.json"))
+
+    assert len(extraction.line_items) == 2
+    assert all(m.catalog_item_id is not None for m in matches)
+    assert decision.decision is Decision.SUBMIT
+
+
+def test_image_attachment_invoice_submits():
+    """A scanned-image attachment flows to submit just like a PDF."""
+    _invoice, extraction, _ctx, matches, decision = _run(_load("inv_image_004.json"))
+
+    assert len(extraction.line_items) == 3
+    assert all(m.catalog_item_id is not None for m in matches)
+    assert decision.decision is Decision.SUBMIT
+
+
 def test_unmatched_invoice_holds():
     invoice, _extraction, _ctx, matches, decision = _run(_load("inv_hold_unmatched_002.json"))
 

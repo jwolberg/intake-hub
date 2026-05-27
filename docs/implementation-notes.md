@@ -224,3 +224,52 @@ but the FastAPI app had no CORS — the browser would block every hub request. A
 `http://localhost:5173,http://127.0.0.1:5173`). Caught by documenting the flow,
 not by a test (no browser in the dev session); worth a smoke check during the
 live-stack validation gate.
+
+## 2026-05-27 — Phase 2 Track A (P2-A1): robust multi-format extraction + evidence
+
+**Live-stack exit gate still pending — Docker unavailable again this session**
+(`docker info` → daemon down). Rather than block the build on an environment I
+can't fix, proceeded to the next substantive ticket (P2-A1), which is fully
+validated in-process. The Postgres round-trip + `docker compose up` + browser hub
+check remain the open Phase 1 exit gate; re-run per `RUNBOOK.md` when Docker is up.
+
+**Parser now detects format + locates the payload.** `parse` looks for the
+invoice content as a parsed attachment (`document`) or inline (`body`), records
+the `format` (`pdf` / `image` / `email_body` / `attachment` / `unknown`) on a new
+`ParsedDocument.format` field, and lists which `sections` were present. A
+structured payload is still serialised to JSON for the offline extractor; a
+free-text body passes through verbatim (offline extraction then marks its fields
+uncertain — honest, per PRD §4 non-goal).
+
+**Extraction now captures per-field confidence + source evidence + missing
+marking** (ARCHITECTURE.md §8: "confidence captured per field/item … so the hub
+can highlight exactly which value is uncertain"). New `ExtractionResult` fields:
+`field_confidence`, `field_evidence`, `missing_fields`.
+- **Two field shapes accepted.** A field may be flat (`"vendor_name": "Acme"`) or
+  annotated (`{"value": ..., "confidence": ..., "evidence": ...}`). The annotated
+  shape lets a real provider (OD-2) supply its own confidence; the offline path
+  derives it — present **and** corroborated in the parsed source text → 0.95,
+  merely present → 0.9, missing/empty → 0.0 and listed in `missing_fields`.
+- **Evidence cites the format**, e.g. `email body: "Riverside Clinical Research"`,
+  so the hub (P2-C2) can show where each value came from.
+- **Line items preserve source text** (`raw_source_text`, FR2) and get a
+  confidence: complete (description + total) → 0.9, partial → 0.6.
+
+**Decision: per-field signals are produced here but not yet persisted or surfaced.**
+P2-A1's scope is `parser`/`extraction` (per the build plan). Threading
+`field_confidence`/`missing_fields` into the decision policy (low extraction
+confidence → hold, PRD §16) is **P2-B1**; persisting + showing value/confidence/
+evidence in the hub is **P2-C2**. The orchestrator passes the richer
+`ExtractionResult` through unchanged for now.
+
+**Samples added:** `inv_body_003.json` (email-body delivery, no attachment →
+SUBMIT) and `inv_image_004.json` (scanned-image attachment → SUBMIT) — exercise
+the PDF/image/body variants the ticket calls for.
+
+**Validation:** `ruff` clean; `pytest -q` → **31 passed, 1 skipped** (the Postgres
+round-trip). Added `tests/unit/test_extraction.py` (7 tests: format detection,
+per-field confidence/evidence, missing marking, line-item source text, annotated
+confidence, partial-item confidence) + 2 pipeline tests (body + image → submit).
+
+**Follow-up:** P2-A2 (context ranking, candidates & mismatch detection) is the
+next Track A ticket; or run the live-stack gate once Docker is available.

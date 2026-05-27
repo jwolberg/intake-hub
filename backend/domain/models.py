@@ -28,12 +28,18 @@ def _new_id(prefix: str) -> str:
 
 
 class ParsedDocument(BaseModel):
-    """Output of the parser stage: raw text + source metadata (PRD §7 Step 2)."""
+    """Output of the parser stage: raw text + source metadata (PRD §7 Step 2).
+
+    ``format`` records where the invoice content came from (PDF/image attachment
+    or email body) so extraction can cite it as source evidence (PRD §7 Step 1,
+    §10 detail view).
+    """
 
     invoice_id: str
     source: dict = Field(default_factory=dict)
     text: str = ""
     sections: list[str] = Field(default_factory=list)
+    format: str = "unknown"
 
 
 class LineItem(BaseModel):
@@ -70,10 +76,19 @@ class InvoiceMetadata(BaseModel):
 
 
 class ExtractionResult(BaseModel):
-    """Output of the extraction stage (PRD FR2): header + line items."""
+    """Output of the extraction stage (PRD FR2): header + line items.
+
+    Confidence and source evidence are captured *per field*, not just per call,
+    so the reviewer hub can highlight exactly which value is uncertain
+    (ARCHITECTURE.md §8). ``missing_fields`` lists header fields the extractor
+    could not populate, marking uncertainty explicitly (PRD FR2).
+    """
 
     metadata: InvoiceMetadata = Field(default_factory=InvoiceMetadata)
     line_items: list[LineItem] = Field(default_factory=list)
+    field_confidence: dict[str, float] = Field(default_factory=dict)
+    field_evidence: dict[str, str] = Field(default_factory=dict)
+    missing_fields: list[str] = Field(default_factory=list)
 
 
 class ContextCandidate(BaseModel):

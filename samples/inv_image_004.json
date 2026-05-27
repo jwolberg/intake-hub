@@ -1,0 +1,26 @@
+{
+  "source": {
+    "channel": "email",
+    "subject": "Invoice INV-1004 — Riverside Clinical Research",
+    "sender": "billing@riverside-cr.example",
+    "attachment": "INV-1004.png"
+  },
+  "document": {
+    "metadata": {
+      "invoice_number": "INV-1004",
+      "invoice_date": "2026-05-24",
+      "vendor_name": "Riverside Clinical Research",
+      "sponsor_name": "Northwind Therapeutics",
+      "protocol_number": "NWT-101",
+      "study_name": "NW-CARDIO-1",
+      "site_identifier": "Riverside Clinical Research",
+      "currency": "USD",
+      "total_amount": "900.00"
+    },
+    "line_items": [
+      {"raw_description": "Patient screening visit", "quantity": "1", "unit_price": "300.00", "total": "300.00"},
+      {"raw_description": "Randomization visit", "quantity": "1", "unit_price": "450.00", "total": "450.00"},
+      {"raw_description": "Pharmacy dispensing fee", "quantity": "2", "unit_price": "75.00", "total": "150.00"}
+    ]
+  }
+}

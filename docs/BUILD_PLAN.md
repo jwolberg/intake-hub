@@ -34,10 +34,10 @@
 
 ## Current Status
 - Overall status: In Progress
-- Current phase: Phase 1 — MVP Vertical Slice COMPLETE (P1-T1..T11). Walking skeleton runs intake → … → decision → hub.
-- Current ticket: Phase 1 exit gate — validate the live stack (Postgres round-trip + `docker compose up` + hub in a browser), then Phase 2. Commands: /docs/RUNBOOK.md.
-- Note: PostgresRepository + the hub were NOT exercised against the live stack here (Docker daemon unavailable in the dev session). API + pipeline + orchestrator are validated in-process; the frontend builds clean. CORS is now wired (hub→API cross-origin) but not browser-verified. Run `docker compose up` to validate end-to-end.
-- Blockers: None (OD-1 resolved; OD-2..OD-5 provisional behind interfaces)
+- Current phase: Phase 2 — Deepen the Tracks. Track A started (P2-A1 complete).
+- Current ticket: **P2-A2** (context ranking, candidates & mismatch detection) is next in Track A. The Phase 1 live-stack exit gate (Postgres round-trip + `docker compose up` + hub in a browser) is still OPEN — deferred because the Docker daemon is unavailable in the dev session, not because it passed. Commands: /docs/RUNBOOK.md.
+- Note: PostgresRepository + the hub were NOT exercised against the live stack (Docker daemon unavailable across sessions). API + pipeline + orchestrator validated in-process; frontend builds clean; CORS wired but not browser-verified. P2-A1 extraction/parser fully validated in-process (31 passed, 1 skipped). Run `docker compose up` to clear the gate end-to-end.
+- Blockers: None for in-process work (OD-1 resolved; OD-2..OD-5 provisional behind interfaces). Live-stack exit gate blocked on Docker availability only.
 - Implementation log: /docs/implementation.md, /docs/implementation-notes.md
 - Dev setup/run: /docs/RUNBOOK.md
 
@@ -162,7 +162,7 @@ Tickets are grouped by STRATEGY § Tracks. Each traces to a PRD requirement.
   - Files: /backend/extraction/**, /backend/parser/**
   - Depends on: P1-T3
   - Acceptance criteria covered: PRD FR2, §15 (easy/medium/large scenarios); STRATEGY Track "Interpretation engine".
-  - Status: Todo
+  - Status: Complete — parser detects format (PDF/image/email-body) + locates payload; extraction captures per-field confidence + source evidence + explicit missing-field marking, preserves line-item source text, and accepts annotated `{value,confidence,evidence}` fields. Samples added for body + image variants. 31 passed, 1 skipped. (Persisting/surfacing per-field signals = P2-C2; feeding low-confidence→hold = P2-B1.)
 - **P2-A2 — Context ranking, candidates & mismatch detection**
   - Objective: Return ranked candidates; flag close-second as ambiguity; detect invoice-vs-reference contradictions (e.g., sponsor A but protocol maps to sponsor B).
   - Files: /backend/context/**
@@ -307,12 +307,11 @@ Tickets are grouped by STRATEGY § Tracks. Each traces to a PRD requirement.
 17. Phase 3: P3-T1, P3-T4 → P3-T2, P3-T3, P3-T5 → P3-T6 → P3-T7
 
 ## Recommended Next Step
-- Start with: **Phase 1 exit gate — validate the live stack** (then begin Phase 2, Track A).
-- What it is: Phase 1 is feature-complete and validated in-process, but three things have only ever run with stubs/in-memory because the Docker daemon was down this session. Before deepening tracks, prove the real stack once:
+- Start with: **P2-A2 — context ranking, candidates & mismatch detection** (Track A). Builds on the resolved-context stage to return ranked candidates, flag close-second ambiguity, and detect invoice-vs-reference contradictions (PRD FR3, FR8).
+- Still OPEN — **Phase 1 exit gate (live stack)**: deferred only because the Docker daemon is unavailable in the dev session. Run once Docker is up, before demo:
   1. `docker compose up -d db` then `DATABASE_URL=postgresql+psycopg://invoicescreener:invoicescreener@localhost:5432/invoicescreener pytest tests/integration/test_postgres_repository.py` — un-skips the Postgres round-trip.
   2. `docker compose up` — API lifespan `init_schema` + reflection + the mcp-reference/mock-clinrun services end-to-end.
   3. Open the hub (`:5173`), POST a sample to `/api/invoices/process`, confirm it lists + detail renders.
-- Then **P2-A1** (robust multi-format extraction) begins Phase 2.
 
 ## Deferred / Out of Scope
 - PRD §4 Non-Goals: perfect OCR/document intelligence; supporting every invoice format; replacing finance/compliance workflows; production-scale email ingestion; full ClinRun production integration (mock used instead); guaranteed 100% match accuracy in ambiguous cases.
