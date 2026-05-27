@@ -22,6 +22,7 @@ AGENTS.md
 
 # node
 node_modules
+dist/
 
 # dev editor configs
 /.idea/*
