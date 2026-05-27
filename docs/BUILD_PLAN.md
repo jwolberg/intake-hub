@@ -35,10 +35,11 @@
 ## Current Status
 - Overall status: In Progress
 - Current phase: Phase 1 — MVP Vertical Slice COMPLETE (P1-T1..T11). Walking skeleton runs intake → … → decision → hub.
-- Current ticket: Phase 1 exit gate — validate the live stack (Postgres round-trip + `docker compose up` + hub in a browser), then Phase 2.
-- Note: PostgresRepository + the hub were NOT exercised against the live stack here (Docker daemon unavailable in the dev session). API + pipeline + orchestrator are validated in-process; the frontend builds clean. Run `docker compose up` to validate end-to-end.
+- Current ticket: Phase 1 exit gate — validate the live stack (Postgres round-trip + `docker compose up` + hub in a browser), then Phase 2. Commands: /docs/RUNBOOK.md.
+- Note: PostgresRepository + the hub were NOT exercised against the live stack here (Docker daemon unavailable in the dev session). API + pipeline + orchestrator are validated in-process; the frontend builds clean. CORS is now wired (hub→API cross-origin) but not browser-verified. Run `docker compose up` to validate end-to-end.
 - Blockers: None (OD-1 resolved; OD-2..OD-5 provisional behind interfaces)
 - Implementation log: /docs/implementation.md, /docs/implementation-notes.md
+- Dev setup/run: /docs/RUNBOOK.md
 
 ---
 
