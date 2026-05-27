@@ -92,12 +92,21 @@ class ExtractionResult(BaseModel):
 
 
 class ContextCandidate(BaseModel):
-    """A ranked sponsor/study/site candidate (ARCHITECTURE.md §7)."""
+    """A ranked sponsor/study/site candidate (ARCHITECTURE.md §7).
+
+    Carries the reference's *canonical* names alongside the ids so the context
+    stage can detect invoice-vs-reference contradictions (PRD FR8, §15) and the
+    hub can show the candidate conflict (PRD §10).
+    """
 
     sponsor_id: str | None = None
     study_id: str | None = None
     site_id: str | None = None
     score: float
+    sponsor_name: str | None = None
+    study_name: str | None = None
+    protocol_number: str | None = None
+    site_name: str | None = None
 
 
 class ResolvedContext(BaseModel):

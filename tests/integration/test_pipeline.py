@@ -89,3 +89,15 @@ def test_unmatched_invoice_holds():
 
     exceptions = from_decision(invoice.id, decision)
     assert any(e.type == "unmatched_line_item" and e.severity.value == "high" for e in exceptions)
+
+
+def test_mismatched_metadata_invoice_holds():
+    """Invoice names Sponsor A but protocol maps to Sponsor B → hold (§15)."""
+    invoice, _extraction, ctx, _matches, decision = _run(_load("inv_hold_mismatch_005.json"))
+
+    assert "sponsor_mismatch" in ctx.warnings
+    assert decision.decision is Decision.HOLD
+    assert any(f.type == "context_mismatch" for f in decision.risk_flags)
+
+    exceptions = from_decision(invoice.id, decision)
+    assert any(e.type == "context_mismatch" for e in exceptions)

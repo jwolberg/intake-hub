@@ -75,6 +75,10 @@ class StubMCPReferenceClient:
                         study_id=site["study_id"],
                         site_id=site_id,
                         score=score,
+                        sponsor_name=sponsor["name"],
+                        study_name=study["name"],
+                        protocol_number=study["protocol"],
+                        site_name=site["name"],
                     )
                 )
         candidates.sort(key=lambda c: c.score, reverse=True)

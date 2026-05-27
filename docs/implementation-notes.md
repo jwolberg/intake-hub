@@ -273,3 +273,51 @@ confidence, partial-item confidence) + 2 pipeline tests (body + image → submit
 
 **Follow-up:** P2-A2 (context ranking, candidates & mismatch detection) is the
 next Track A ticket; or run the live-stack gate once Docker is available.
+
+## 2026-05-27 — Phase 2 Track A (P2-A2): context ranking, candidates & mismatch detection
+
+**Candidates now carry canonical names.** `ContextCandidate` gained
+`sponsor_name`/`study_name`/`protocol_number`/`site_name`, populated by the stub
+reference client from the fixtures. This is what makes invoice-vs-reference
+mismatch detection possible and gives the hub (P2-C2) meaningful candidate rows.
+Backward-compatible (new optional fields); the HTTP client + stub server pick
+them up for free via `model_dump`.
+
+**Two failure modes are now surfaced as warning codes** (PRD FR3, FR8, §15):
+- **Ambiguity** — a near-tied runner-up (within 0.1). `ambiguous_context` when the
+  runner-up is a *different sponsor/study* (the clues disagree about who the
+  invoice is for); `multiple_site_candidates` when it's a sibling *site* under the
+  same study (the existing code, now reached only for true site ties).
+- **Mismatch** — the invoice's stated sponsor/study/protocol/site contradicts the
+  reference data for the resolved candidate. Detected by comparing invoice values
+  against the top candidate's canonical names with a containment test
+  (`_conflicts`), which tolerates harmless variation ("Riverside Clinical
+  Research" vs "…- West") but catches real contradictions ("Acme Biosciences" vs
+  "Northwind Therapeutics").
+
+**Decision: warnings stay `list[str]` of stable codes**, not a structured model.
+The decision stage matches them by membership, the orchestrator audits them, and
+the hub `.join()`s them — all keep working unchanged. The specific conflicting
+*values* are visible in `ctx.candidates` (now named). A structured/typed warning
++ richer hub display is deferred to the exception-taxonomy (P2-B2) and detail-view
+(P2-C2) tickets — keeping P2-A2 to its `/backend/context` scope.
+
+**Minimal decision-stage extension (acknowledged cross-ticket touch).** To keep
+the §15 ambiguous/mismatched scenarios actually *holding* (never a silent submit),
+the decision stage now raises `context_ambiguity` on any ambiguity warning and a
+new `context_mismatch` flag on any mismatch warning. This generalises the
+pre-existing single-code (`multiple_site_candidates`) check rather than building
+the full P2-B1 severity model, which still owns the complete policy + tolerances.
+
+**Sample added:** `inv_hold_mismatch_005.json` — the canonical §15 case: invoice
+names sponsor "Acme Biosciences" but protocol NWT-101 / study NW-CARDIO-1 / site
+Riverside map to Northwind. Resolves to Northwind (score 0.9) and flags
+`sponsor_mismatch` → HOLD with a `context_mismatch` exception.
+
+**Validation:** `ruff` clean; `pytest -q` → **37 passed, 1 skipped**. Added
+`tests/unit/test_context.py` (5: ranked candidates, sponsor mismatch, sibling-site
+ambiguity, no-match, lone-sponsor-clue) + 1 pipeline test (mismatch → hold).
+Manual run: clean/body/image → no warnings; mismatch → `sponsor_mismatch`.
+
+**Follow-up:** Track A continues with **P2-A3** (catalog robustness: large/missing/
+empty/error + cache). The Phase 1 live-stack gate remains open (Docker unavailable).

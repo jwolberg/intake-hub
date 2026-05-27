@@ -1,0 +1,25 @@
+{
+  "source": {
+    "channel": "email",
+    "subject": "Invoice INV-1005 — Riverside Clinical Research",
+    "sender": "billing@riverside-cr.example",
+    "attachment": "INV-1005.pdf"
+  },
+  "document": {
+    "metadata": {
+      "invoice_number": "INV-1005",
+      "invoice_date": "2026-05-25",
+      "vendor_name": "Riverside Clinical Research",
+      "sponsor_name": "Acme Biosciences",
+      "protocol_number": "NWT-101",
+      "study_name": "NW-CARDIO-1",
+      "site_identifier": "Riverside Clinical Research",
+      "currency": "USD",
+      "total_amount": "720.00"
+    },
+    "line_items": [
+      {"raw_description": "Patient screening visit", "quantity": "2", "unit_price": "300.00", "total": "600.00"},
+      {"raw_description": "ECG", "quantity": "1", "unit_price": "120.00", "total": "120.00"}
+    ]
+  }
+}

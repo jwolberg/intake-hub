@@ -26,11 +26,18 @@ _MIN_CONTEXT_CONFIDENCE = 0.6
 
 _ACTIONS = {
     "context_unresolved": "Confirm the correct sponsor/study/site",
-    "context_ambiguity": "Confirm the correct site before submission",
+    "context_ambiguity": "Confirm the correct sponsor/study/site before submission",
+    "context_mismatch": "Reconcile the invoice metadata against the reference data",
     "catalog_unavailable": "Retry catalog fetch or escalate",
     "unmatched_line_item": "Map or reject the unmatched line item(s)",
     "amount_mismatch": "Reconcile the line amount against the catalog price",
     "total_mismatch": "Reconcile line items against the invoice total",
+}
+
+# Context warning codes (emitted by the context stage) grouped by decision flag.
+_AMBIGUITY_WARNINGS = {"ambiguous_context", "multiple_site_candidates"}
+_MISMATCH_WARNINGS = {
+    "sponsor_mismatch", "study_mismatch", "protocol_mismatch", "site_mismatch",
 }
 
 
@@ -49,10 +56,17 @@ def decide(
             type="context_unresolved", severity=Severity.HIGH,
             message="sponsor/study/site not confidently resolved",
         ))
-    if "multiple_site_candidates" in ctx.warnings:
+    if any(w in _AMBIGUITY_WARNINGS for w in ctx.warnings):
         flags.append(RiskFlag(
             type="context_ambiguity", severity=Severity.HIGH,
-            message="multiple plausible sites matched the invoice",
+            message="multiple plausible sponsor/study/site candidates matched",
+        ))
+    mismatches = [w for w in ctx.warnings if w in _MISMATCH_WARNINGS]
+    if mismatches:
+        flags.append(RiskFlag(
+            type="context_mismatch", severity=Severity.HIGH,
+            message="invoice metadata conflicts with reference data: "
+                    + ", ".join(sorted(mismatches)),
         ))
     if not catalog_available:
         flags.append(RiskFlag(
