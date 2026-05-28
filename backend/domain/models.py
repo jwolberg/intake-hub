@@ -16,7 +16,14 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
-from .enums import Actor, AuditAction, Decision, InvoiceStatus, Severity
+from .enums import (
+    Actor,
+    AuditAction,
+    CitationStatus,
+    Decision,
+    InvoiceStatus,
+    Severity,
+)
 
 
 def _utcnow() -> datetime:
@@ -54,6 +61,25 @@ class WordBox(BaseModel):
     index: int
     text: str
     bbox: BoundingBox
+
+
+class Citation(BaseModel):
+    """A source-anchored citation linking an extracted value to the page image.
+
+    The vision extractor (P4-T3) cites the OCR ``word_indices`` that back a value;
+    ``bbox`` is left ``None`` until the resolver (P4-T4) unions those words' boxes
+    into one rectangle, so a value with no backing words yields no highlight (the
+    no-hallucination guarantee, spec §3). ``target_id`` keys the citation to an
+    extracted thing — ``"metadata.<field>"`` or ``"line_item.<id>.<attr>"``.
+    ``word_indices`` are 0-based within ``page_number`` (OCR is page-scoped).
+    """
+
+    page_number: int
+    target_id: str
+    quote: str
+    word_indices: list[int] = Field(default_factory=list)
+    bbox: BoundingBox | None = None
+    status: CitationStatus = CitationStatus.EXTRACTED
 
 
 class ParsedDocument(BaseModel):
@@ -118,6 +144,9 @@ class ExtractionResult(BaseModel):
     field_confidence: dict[str, float] = Field(default_factory=dict)
     field_evidence: dict[str, str] = Field(default_factory=dict)
     missing_fields: list[str] = Field(default_factory=list)
+    # Source-anchored citations (vision extraction, P4-T3); empty on the text
+    # path. bbox is resolved from word_indices by P4-T4.
+    citations: list[Citation] = Field(default_factory=list)
 
 
 class ContextCandidate(BaseModel):

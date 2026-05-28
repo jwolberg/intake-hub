@@ -33,6 +33,12 @@ from .mcp_reference import (
     MCPReferenceClient,
     StubMCPReferenceClient,
 )
+from .vision import (
+    OfflineVisionLLMClient,
+    StubVisionLLMClient,
+    VisionLLMClient,
+    locate_value,
+)
 
 __all__ = [
     "CatalogNotFound",
@@ -43,6 +49,7 @@ __all__ = [
     "LLMClient",
     "MCPReferenceClient",
     "OCRClient",
+    "OfflineVisionLLMClient",
     "PassthroughLLMClient",
     "ReferenceClientError",
     "ReferenceUnavailable",
@@ -50,13 +57,17 @@ __all__ = [
     "StubLLMClient",
     "StubMCPReferenceClient",
     "StubOCRClient",
+    "StubVisionLLMClient",
     "SubmissionFailed",
     "SubmissionResult",
     "TesseractOCRClient",
+    "VisionLLMClient",
     "get_clinrun_client",
     "get_llm_client",
     "get_ocr_client",
     "get_reference_client",
+    "get_vision_llm_client",
+    "locate_value",
     "parse_json_or_raise",
 ]
 
@@ -90,3 +101,13 @@ def get_ocr_client() -> OCRClient:
     Swapping in ``TesseractOCRClient`` (OD-6) is a one-line change here.
     """
     return StubOCRClient()
+
+
+def get_vision_llm_client() -> VisionLLMClient:
+    """Default vision LLM client: the offline stand-in (``OfflineVisionLLMClient``).
+
+    Synthesizes word-index citations by string-matching extracted values against
+    the OCR words — no model, no network (spec §7). Wiring a real vision provider
+    (OD-7) is a one-line change here.
+    """
+    return OfflineVisionLLMClient()

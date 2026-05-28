@@ -44,6 +44,21 @@ class Severity(str, Enum):
     HIGH = "high"
 
 
+class CitationStatus(str, Enum):
+    """Status of a source-anchored citation (Visual Document Review spec §3-§4).
+
+    ``extracted`` = value confidently anchored to OCR words; ``uncertain`` =
+    anchored but low confidence (gates a clean review); ``unreadable`` = a value
+    was extracted but no OCR words back it (so no highlight box); ``missing`` =
+    no value was extracted for the field.
+    """
+
+    EXTRACTED = "extracted"
+    UNCERTAIN = "uncertain"
+    UNREADABLE = "unreadable"
+    MISSING = "missing"
+
+
 class Actor(str, Enum):
     """Who produced an audit event (PRD §17)."""
 

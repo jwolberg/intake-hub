@@ -1,10 +1,18 @@
 """Shared domain types and enums (the cross-stage contract)."""
 
-from .enums import Actor, AuditAction, Decision, InvoiceStatus, Severity
+from .enums import (
+    Actor,
+    AuditAction,
+    CitationStatus,
+    Decision,
+    InvoiceStatus,
+    Severity,
+)
 from .models import (
     AuditEvent,
     BoundingBox,
     CatalogItem,
+    Citation,
     ContextCandidate,
     DecisionResult,
     ExceptionRecord,
@@ -25,6 +33,8 @@ __all__ = [
     "AuditEvent",
     "BoundingBox",
     "CatalogItem",
+    "Citation",
+    "CitationStatus",
     "ContextCandidate",
     "Decision",
     "DecisionResult",

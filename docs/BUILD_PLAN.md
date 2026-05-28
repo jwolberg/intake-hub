@@ -34,8 +34,8 @@
 
 ## Current Status
 - Overall status: In Progress
-- Current phase: **Phase 2 — Deepen the Tracks: COMPLETE** (Track A P2-A1..A4; Track B P2-B1..B4; Track C P2-C1..C4). Phase 3 (Hardening & Polish) next.
-- Current ticket: **P3-T1** (failure isolation, retry & recovery). The Phase 1 live-stack exit gate is **CLEARED** (2026-05-27): Postgres round-trip test passes against the live DB, `docker compose up` brings up the full stack (`/health` → `db: up`), and the hub serves at `http://127.0.0.1:5173` with working CORS. Remaining: a human visual click-through of the hub UI. Commands: /docs/RUNBOOK.md.
+- Current phase: **Phase 4 — Visual Document Review: IN PROGRESS** (P4-T1, P4-T2, P4-T3 done). Phase 2 complete; Phase 3 (Hardening & Polish) still open and independent.
+- Current ticket: **P4-T4** (citation → bbox resolution + persistence + detail payload). P4-T3 (vision extraction with word-index citations) is done: `extract_vision` produces `Citation`s carrying `word_indices` + `status` (bbox unresolved). The Phase 1 live-stack exit gate is **CLEARED** (2026-05-27): Postgres round-trip passes against the live DB, `docker compose up` brings up the full stack, hub serves at `http://127.0.0.1:5173`. Remaining there: a human visual click-through of the hub UI. Commands: /docs/RUNBOOK.md.
 - Note: All of Phase 2 (P2-A1..A4 + P2-B1..B4 + P2-C1..C4) validated in-process (106 passed, 1 skipped) **and** exercised end-to-end against the live Postgres stack (process → filters → detail → QC corrections → rerun → metrics). The skipped test is the Postgres round-trip, which passes when run with a live `DATABASE_URL`. Dev test also fixed a metric-bucketing bug (rates now key off the AI's first/autonomous decision, robust to rerun). Also: out-of-plan real-PDF demo path (RUNBOOK Path D).
 - Blockers: None for in-process work (OD-1 resolved; OD-2..OD-5 provisional behind interfaces). Live-stack exit gate blocked on Docker availability only.
 - Implementation log: /docs/implementation.md, /docs/implementation-notes.md
@@ -339,7 +339,13 @@ hallucinated).
   - Files: /backend/clients/** (LLM vision), /backend/extraction/** (prompts/schema), /backend/domain/**
   - Depends on: P4-T2, P1-T3/P2-A1
   - Acceptance criteria covered: PRD FR2 (source-anchored evidence); §8; OD-7.
-  - Status: Todo
+  - Status: Done — `backend/clients/vision.py` (`VisionLLMClient` +
+    `OfflineVisionLLMClient` offline default + `StubVisionLLMClient` + pure
+    `locate_value` matcher; `get_vision_llm_client()`); `Citation`/`CitationStatus`
+    domain types + `ExtractionResult.citations`; `extraction.extract_vision`
+    builds schema-validated citations (word_indices + status; bbox unresolved
+    until P4-T4). Offline stand-in synthesizes indices by string-matching values
+    to OCR words (spec §7). 136 tests pass.
 - **P4-T4 — Citation → bounding-box resolution + persistence**
   - Objective: Resolve `word_indices` → union `bbox` via OCR boxes (drop out-of-range); persist per-field/line `Citation {page, target_id, quote, bbox, status}`; surface in the detail payload (`pages`, `citations`).
   - Files: /backend/extraction/** (resolver), /backend/db/**, /backend/api/**, /backend/domain/**
@@ -382,8 +388,8 @@ hallucinated).
 18. Phase 4 (new scope, doc change applied — unblocked): P4-T1 → P4-T2 → P4-T3 → P4-T4 → P4-T5 → P4-T6 (P4-T6 also needs P2-C3/C4, done)
 
 ## Recommended Next Step
-- **PICK UP HERE (next session) → P4-T3 — Vision extraction with word-index citations.** Phase 4 is in progress on branch `p2-track-c-reviewer-hub`: **P4-T1 (rasterization + image serving) and P4-T2 (OCR word boxes) are DONE.** T3 extends `LLMClient` with a vision method (or adds `VisionLLMClient`) that takes a page image + the OCR word list (from `get_ocr_client()`/`StubOCRClient`) and returns fields/line items each carrying `word_indices` + a `status`; schema-validated. **Critical:** keep an **offline deterministic stand-in** that synthesizes `word_indices` by string-matching each extracted value against the OCR words (the network/model-free analogue of the model emitting indices, spec §7), so the suite stays green with no provider. Then T4 resolves indices→bbox + persists, T5 renders the overlay, T6 wires confirm/correct. Depends on P4-T2 (done), P1-T3/P2-A1 (done). Files: `/backend/clients/**` (LLM vision), `/backend/extraction/**` (prompts/schema), `/backend/domain/**`. Read `docs/specs/visual-document-review.md` §3–§4 + §7 and the two newest `docs/implementation-notes.md` entries (P4-T1, P4-T2) first.
-  - Useful context already in place: `WordBox`/`BoundingBox` domain types; `get_ocr_client()` (offline `StubOCRClient` reads the controlled PDFs' text layer); `render_pages()` + the `/pages` + `/pages/:n/image` endpoints; OCR `index` is **0-based per page** and citations are page-scoped.
+- **PICK UP HERE (next session) → P4-T4 — Citation → bounding-box resolution + persistence.** Phase 4 is in progress on branch `p2-track-c-reviewer-hub`: **P4-T1 (rasterization + image serving), P4-T2 (OCR word boxes), and P4-T3 (vision extraction with word-index citations) are DONE.** T4 resolves each citation's `word_indices` → a union `bbox` via the page's OCR boxes (drop out-of-range indices defensively, `min x/y` / `max x+w`/`y+h`), persists per-field/line `Citation {page, target_id, quote, bbox, status}`, and surfaces them in the detail payload (`pages` + `citations`, grouped by page). Wire `extract_vision` into the orchestrator (it currently calls the text-path `extract`): rasterize via `render_pages()`, OCR via `get_ocr_client()`, vision-extract via `get_vision_llm_client()`, then resolve+persist citations. Per OD-9, persist alongside the existing per-field signals on the `extracted` audit event (no new table until Postgres is exercised). Depends on P4-T3 (done). Files: `/backend/extraction/**` (resolver), `/backend/api/**`, `/backend/orchestrator/**`, `/backend/domain/**`. Read `docs/specs/visual-document-review.md` §3–§4 + §7 and the newest `docs/implementation-notes.md` entry (P4-T3) first.
+  - Useful context already in place: `Citation`/`CitationStatus` domain types + `ExtractionResult.citations`; `extract_vision(invoice_id, parsed, words, image, vision)` produces citations with `word_indices`/`status`/`page` and `bbox=None`; `WordBox`/`BoundingBox`; `get_ocr_client()`/`get_vision_llm_client()` (offline stand-ins); `render_pages()` + the `/pages` + `/pages/:n/image` endpoints; OCR `index` is **0-based per page** and citations are page-scoped (each citation carries its `page_number`).
 - **P3 (failure isolation, retry & recovery) still open and independent** if priorities shift: **P3-T1** — retryable vs terminal failure states; resume from a failed stage without redoing upstream work; low-confidence → hold (PRD §14, FR11; ARCHITECTURE §15). Depends on P1-T9, P2-A3 (done). All of Phase 2 is complete.
 - Still OPEN — **Phase 1 exit gate (live stack)**: deferred only because the Docker daemon is unavailable in the dev session. Run once Docker is up, before demo:
   1. `docker compose up -d db` then `DATABASE_URL=postgresql+psycopg://invoicescreener:invoicescreener@localhost:5432/invoicescreener pytest tests/integration/test_postgres_repository.py` — un-skips the Postgres round-trip.

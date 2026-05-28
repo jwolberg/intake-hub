@@ -908,3 +908,60 @@ page"); citations are page-scoped, so `word_indices` index into that page's list
 
 **Validation:** `ruff` clean; full suite **122 passed, 1 skipped** (+7 OCR tests).
 No network/model/Tesseract.
+
+## 2026-05-28 — P4-T3 Vision extraction with word-index citations (Phase 4)
+
+Extends the LLM seam with a *vision* method and produces source-anchored
+citations: each extracted value carries the OCR `word_indices` that back it
+(never coordinates), so P4-T4 can union real OCR geometry into a highlight box
+that cannot be hallucinated (spec §3).
+
+**What landed**
+- `backend/domain/` — `Citation {page_number, target_id, quote, word_indices,
+  bbox|None, status}` + `CitationStatus` enum (extracted/uncertain/unreadable/
+  missing); `ExtractionResult.citations`. `bbox` stays `None` until P4-T4.
+- `backend/clients/vision.py` — `VisionLLMClient` protocol
+  (`complete_vision_json(system, user, image, words)`); `OfflineVisionLLMClient`
+  (offline default, OD-7); `StubVisionLLMClient` (scripted tests);
+  `locate_value()` (pure word matcher). `get_vision_llm_client()` factory +
+  re-exports in `clients/__init__.py`.
+- `backend/extraction/` — `extract_vision(invoice_id, parsed, words, image,
+  vision)`; factored the shared header loop into `_build_metadata`; citations
+  built + schema-validated by `_build_citations`/`_citation_from_cell`.
+
+**Decisions / deviations (not pre-specified)**
+- **Offline stand-in synthesizes indices by string-matching, not a model
+  (spec §7).** `OfflineVisionLLMClient` reads the values embedded in the prompt
+  (the parser renders the doc as JSON, like the text path's
+  `PassthroughLLMClient`) and matches each against the OCR words via
+  `locate_value` — a contiguous-window match per page, falling back to best
+  per-token coverage. Normalization strips case/punctuation so `INV-1001` and
+  `$1,234.00` anchor cleanly. A real vision provider drops in behind
+  `VisionLLMClient` with no other change (OD-7).
+- **Client emits `page` per annotation.** OCR `index` is 0-based *per page*
+  (P4-T2), so an index alone is ambiguous across pages. The matcher returns
+  `(page, indices)` and citations carry both. (Sample PDFs are single-page, so
+  page is always 1 today, but the contract is multipage-correct.)
+- **Status = anchoring (client) refined by confidence (extraction).** The client
+  sets `extracted`/`unreadable`/`missing` from whether OCR words back the value;
+  `extract_vision` downgrades anchored-but-low-confidence (<0.7) to `uncertain`
+  (which will gate a clean review in T5/T6). No backing words → `unreadable`
+  (→ no box), enforced regardless of what the client claimed.
+- **One citation per line item (`raw_description`).** Enough to demonstrate
+  line-item highlighting; more attributes (qty/total) can be cited later without
+  schema change. Line-item annotation rides under a `description_citation` key so
+  it doesn't pollute the `LineItem` fields.
+- **No orchestrator wiring / persistence yet.** Per the spec, T3 produces
+  citations-with-indices on `ExtractionResult`; resolving indices→`bbox`,
+  persisting, and surfacing in the detail payload is **P4-T4**. The text path
+  (`extract`) is unchanged, so non-rasterizable invoices and all prior tests are
+  unaffected. Repeated/duplicated values (e.g. vendor == site text) anchor to the
+  first occurrence — acceptable for the offline analogue; a real model
+  disambiguates by position.
+- **Schema gate:** malformed `status` or non-integer `word_indices` raise
+  `ValueError` (invalid model output is a failure, never passed downstream —
+  ARCHITECTURE.md §8).
+
+**Validation:** `ruff` clean; full suite **136 passed, 1 skipped** (+14 vision
+tests: word matcher, offline client, citations + status edge cases). No
+network/model.
