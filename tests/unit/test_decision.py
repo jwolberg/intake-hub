@@ -86,12 +86,16 @@ def test_low_extraction_confidence_holds():
     assert "low_extraction_confidence" in _flag_types(result)
 
 
-def test_moderate_extraction_confidence_is_medium_and_submits():
+def test_moderate_extraction_confidence_holds_below_floor():
+    # The submit floor is 0.8: a moderately-confident extraction (0.5-0.8) no
+    # longer auto-submits — it holds for review, so "submitted" implies the AI
+    # was confident. The moderate signal is still recorded alongside the overall
+    # low-confidence hold.
     result = decide(_extraction(item_conf=0.7), _resolved_ctx(),
                     [_good_match()], catalog_available=True)
-    assert result.decision is Decision.SUBMIT  # medium is visibility-only
-    medium = [f for f in result.risk_flags if f.severity is Severity.MEDIUM]
-    assert any(f.type == "moderate_extraction_confidence" for f in medium)
+    assert result.decision is Decision.HOLD
+    assert "moderate_extraction_confidence" in _flag_types(result)
+    assert "low_confidence" in _flag_types(result)
 
 
 def test_weak_match_is_medium_and_submits():

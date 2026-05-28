@@ -1230,3 +1230,31 @@ submitted/held/failed at a glance.
 indigo pills, Space Grotesk headings/metrics, gradient header underline, indigo
 "View source"/QC buttons; status badges still green/amber/red. `npm run build`
 clean; backend untouched.
+
+## 2026-05-28 — Decision policy: hold below 0.8 + honest hold confidence (user-requested)
+
+Reviewer feedback: a 60%-confidence invoice marked "submitted" reads as a
+contradiction and makes the confidence number look useless. Two coupled changes
+to `backend/decision/__init__.py` fix that:
+
+1. **Submit floor raised `0.5 → 0.8`** (`_DECISION_FLOOR`). An invoice now
+   auto-submits only when the weakest-link confidence is ≥ 0.8; below that it
+   holds for review (the `low_confidence` HIGH flag fires). So "submitted" now
+   implies the AI was confident; low-confidence invoices land in Held / Needs
+   review where a reviewer expects them.
+2. **Hold confidence = the real weakest-link `decision_confidence`** (was a fixed
+   `_HOLD_CONFIDENCE = 0.9`, now removed). A held invoice now reports the AI's
+   actual certainty, so the number *explains* the hold: INV-1006 reads
+   **HOLD @ 60%** (held because uncertain), while a structurally-held invoice
+   (unmatched line / metadata mismatch) reads **HOLD @ 90%** — high confidence in
+   the extraction, held for a separate reason carried in `risk_flags`. Confidence
+   and hold-reason are now two distinct, honest signals.
+
+**Tradeoff (intended):** auto-submit rate drops (more holds) — the demo set goes
+from 1 submit / 60%-submit to 1 submit / 3 holds. The threshold (0.8) is the tunable
+knob; lower it to auto-submit more aggressively.
+
+**Validation:** `ruff` clean; full suite **150 passed, 1 skipped**
+(`test_decision` updated: moderate confidence now holds; the submit-confidence
+weakest-link test is unaffected). Verified live on the offline demo stack — list
+reads SUBMIT@90 / HOLD@90 / HOLD@90 / HOLD@60.

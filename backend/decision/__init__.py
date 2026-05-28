@@ -12,8 +12,10 @@ The policy is data-driven and severity-graded (PRD §16):
 It consumes every prior stage's confidence: context resolution, per-field
 extraction confidence (P2-A1), and line-item match confidence. Low confidence
 anywhere resolves toward a hold — a submit is never silent when the model is
-unsure. ``decision_confidence`` on a submit is the combined (weakest-link) stage
-confidence; on a hold it reflects confidence in deferring to a human.
+unsure. ``decision_confidence`` is the combined (weakest-link) stage confidence —
+the AI's certainty in what it extracted/matched — for both submit and hold, so a
+low value *explains* a hold (held because uncertain) and is honest in the UI. The
+hold *reason* is a separate signal carried in ``risk_flags``.
 """
 
 from __future__ import annotations
@@ -39,13 +41,11 @@ _EXTRACTION_HOLD = 0.5
 _EXTRACTION_WATCH = 0.8
 _MATCH_HOLD = 0.5
 _MATCH_WATCH = 0.85
-_DECISION_FLOOR = 0.5  # overall floor → never a silent submit below this
+_DECISION_FLOOR = 0.8  # submit only when confident; below this → hold for review
 
 # Header fields that must be present to submit (PRD FR8, §16).
 _CRITICAL_FIELDS = {"invoice_number": "missing_invoice_number",
                     "total_amount": "missing_total"}
-
-_HOLD_CONFIDENCE = 0.9  # confidence that deferring to a human is correct
 
 _ACTIONS = {
     "unresolved_sponsor": "Confirm the correct sponsor/study/site",
@@ -158,7 +158,7 @@ def decide(
     if high:
         return DecisionResult(
             decision=Decision.HOLD,
-            confidence=_HOLD_CONFIDENCE,
+            confidence=decision_confidence,
             rationale="; ".join(f.message for f in high),
             risk_flags=flags,
             required_human_actions=[_ACTIONS[f.type] for f in high if f.type in _ACTIONS],
