@@ -797,3 +797,24 @@ actions. Remaining: a human visual click-through of the hub UI in a browser.
 to `[::1]:5173`; since macOS resolves `localhost`→IPv6 first, `http://localhost:5173`
 hits *that* app, not ours. Use `http://127.0.0.1:5173` (or stop the other server)
 to reach the InvoiceScreener hub.
+
+## 2026-05-27 — Reviewer hub restyle to ClinRun look (user-requested)
+
+Adopted the **colour, font, and sizing** of the ClinRun dashboard (per a provided
+screenshot); **layout unchanged** (no JSX/structure edits). All changes in
+`frontend/src/styles.css` + `frontend/index.html`:
+- **Colour:** teal brand/action (`--primary #159a9c`) replaces the old blue
+  (links, active filter chip, QC buttons); green "Active"-style positive
+  (`--submit #3f9d54`) for submit/submitted badges; amber hold, red failed, soft
+  slate text on light-gray panels — all via the `:root` token set.
+- **Font:** `Open Sans` (400/600/700) loaded from Google Fonts in `index.html`,
+  with `system-ui` fallback if the CDN is unreachable.
+- **Sizing:** base `font-size: 13px` for the compact enterprise density; the
+  existing rem-based type/spacing scales down proportionally, so layout structure
+  is preserved.
+
+**Tradeoff / assumption.** Open Sans is a close match to the screenshot's
+neutral humanist sans (the exact face wasn't specified); the system-ui fallback
+keeps the hub usable offline. Pulls one external CDN dependency (fonts only).
+Frontend builds clean; verified in-browser against the live stack (list + detail
+both pick up the teal/green palette + Open Sans).

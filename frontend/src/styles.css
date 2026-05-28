@@ -1,22 +1,29 @@
 :root {
-  --bg: #f7f8fa;
+  /* Palette adopted from the ClinRun dashboard: teal brand/action, green
+     "Active"-style positive, soft slate text on light-gray panels. Colour,
+     font, and sizing only — layout is unchanged. */
+  --primary: #159a9c;
+  --primary-hover: #0f7d7f;
+  --bg: #f4f6f8;
   --panel: #ffffff;
-  --border: #e3e6ea;
-  --text: #1f2430;
-  --muted: #6b7280;
-  --submit: #0a7d3c;
-  --submit-bg: #e6f4ec;
-  --hold: #b3541e;
-  --hold-bg: #fbeee2;
-  --failed: #b3261e;
-  --failed-bg: #fbe6e4;
+  --border: #e4e7eb;
+  --text: #3a4147;
+  --muted: #7b828a;
+  --row-hover: #f2f6f6;
+  --submit: #3f9d54;
+  --submit-bg: #e9f5ed;
+  --hold: #b5731b;
+  --hold-bg: #fbf0df;
+  --failed: #c0392b;
+  --failed-bg: #fbeae8;
 }
 
 * { box-sizing: border-box; }
 
 body {
   margin: 0;
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family: "Open Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 13px;
   color: var(--text);
   background: var(--bg);
 }
@@ -33,7 +40,7 @@ header.app-bar h1 { font-size: 1.25rem; margin: 0; }
 .api-status { font-size: 0.8rem; color: var(--muted); }
 
 .link-btn {
-  background: none; border: none; color: #2563eb;
+  background: none; border: none; color: var(--primary);
   cursor: pointer; padding: 0; font-size: 0.85rem;
 }
 .link-btn:hover { text-decoration: underline; }
@@ -51,12 +58,12 @@ header.app-bar h1 { font-size: 1.25rem; margin: 0; }
 .list-head h2 { margin: 0; }
 .chips { display: flex; flex-wrap: wrap; gap: 0.4rem; }
 .chip {
-  background: #f0f3f8; border: 1px solid var(--border); border-radius: 999px;
+  background: #eef1f4; border: 1px solid var(--border); border-radius: 999px;
   padding: 0.15rem 0.6rem; font-size: 0.76rem; color: var(--text);
   cursor: pointer; display: inline-flex; align-items: center; gap: 0.35rem;
 }
-.chip:hover:not(:disabled) { background: #e4e9f2; }
-.chip.active { background: #2563eb; border-color: #2563eb; color: #fff; }
+.chip:hover:not(:disabled) { background: #e3e8ec; }
+.chip.active { background: var(--primary); border-color: var(--primary); color: #fff; }
 .chip:disabled { opacity: 0.4; cursor: default; }
 .chip-count { font-weight: 600; font-size: 0.72rem; opacity: 0.85; }
 
@@ -69,7 +76,7 @@ table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
 th, td { text-align: left; padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--border); }
 th { color: var(--muted); font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.02em; }
 tbody tr { cursor: pointer; }
-tbody tr:hover { background: #f0f3f8; }
+tbody tr:hover { background: var(--row-hover); }
 
 .badge {
   display: inline-block; padding: 0.1rem 0.5rem; border-radius: 999px;
@@ -78,7 +85,7 @@ tbody tr:hover { background: #f0f3f8; }
 .badge.submit, .badge.submitted { color: var(--submit); background: var(--submit-bg); }
 .badge.hold, .badge.held { color: var(--hold); background: var(--hold-bg); }
 .badge.failed { color: var(--failed); background: var(--failed-bg); }
-.badge.neutral { color: var(--muted); background: #eef0f3; }
+.badge.neutral { color: var(--muted); background: #eef1f4; }
 
 .kv { display: grid; grid-template-columns: 180px 1fr; gap: 0.3rem 1rem; font-size: 0.88rem; }
 .kv dt { color: var(--muted); }
@@ -93,12 +100,12 @@ tbody tr:hover { background: #f0f3f8; }
 
 .subhead { font-size: 0.82rem; color: var(--muted); margin: 0.9rem 0 0.4rem; text-transform: uppercase; letter-spacing: 0.03em; }
 .evidence { font-style: italic; max-width: 320px; }
-.preview { background: #f0f3f8; border: 1px solid var(--border); border-radius: 6px; padding: 0.75rem; font-size: 0.78rem; white-space: pre-wrap; max-height: 320px; overflow: auto; margin-top: 0.5rem; }
+.preview { background: #eef1f4; border: 1px solid var(--border); border-radius: 6px; padding: 0.75rem; font-size: 0.78rem; white-space: pre-wrap; max-height: 320px; overflow: auto; margin-top: 0.5rem; }
 
 /* Severity badges (PRD §16) + confidence colour coding. */
 .sev-high { display: inline-block; color: var(--failed); background: var(--failed-bg); border-radius: 4px; padding: 0.05rem 0.4rem; margin-right: 0.3rem; font-weight: 600; }
 .sev-medium { display: inline-block; color: var(--hold); background: var(--hold-bg); border-radius: 4px; padding: 0.05rem 0.4rem; margin-right: 0.3rem; font-weight: 600; }
-.sev-low { display: inline-block; color: var(--muted); background: #eef0f3; border-radius: 4px; padding: 0.05rem 0.4rem; margin-right: 0.3rem; }
+.sev-low { display: inline-block; color: var(--muted); background: #eef1f4; border-radius: 4px; padding: 0.05rem 0.4rem; margin-right: 0.3rem; }
 .conf-low { color: var(--failed); font-weight: 600; }
 .conf-mid { color: var(--hold); }
 .conf-high { color: var(--submit); }
@@ -106,10 +113,10 @@ tbody tr:hover { background: #f0f3f8; }
 /* QC action controls (PRD §10 QC Actions). */
 .qc-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-top: 0.6rem; }
 .qc-actions button, .small-btn {
-  background: #2563eb; color: #fff; border: none; border-radius: 6px;
+  background: var(--primary); color: #fff; border: none; border-radius: 6px;
   padding: 0.35rem 0.8rem; font-size: 0.82rem; cursor: pointer;
 }
-.qc-actions button:hover:not(:disabled), .small-btn:hover:not(:disabled) { background: #1d4ed8; }
+.qc-actions button:hover:not(:disabled), .small-btn:hover:not(:disabled) { background: var(--primary-hover); }
 .qc-actions button:disabled, .small-btn:disabled { opacity: 0.5; cursor: default; }
 .qc-actions button.danger { background: var(--failed); }
 .qc-actions button.danger:hover:not(:disabled) { background: #911d17; }
