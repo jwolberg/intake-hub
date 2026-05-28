@@ -15,7 +15,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy import text
@@ -30,6 +30,7 @@ from backend.db import get_engine, init_schema
 from backend.db.repository import Repository, get_repository
 from backend.domain import Actor, AuditAction, Decision, InvoiceMetadata, InvoiceStatus
 from backend.orchestrator import process, rerun
+from backend.parser.raster import RenderedPage, is_rasterizable, render_pages
 
 logger = logging.getLogger("invoicescreener.api")
 
@@ -231,6 +232,55 @@ def _require_detail(invoice_id: str, repo: Repository) -> dict:
 @app.get("/api/invoices/{invoice_id}")
 def get_invoice(invoice_id: str, repo: RepoDep) -> dict:
     return _require_detail(invoice_id, repo)
+
+
+# --- page images (PRD §10 Original invoice preview; P4-T1) ------------------
+# The original document is rendered to page rasters on demand so the reviewer
+# hub can show the source image (and, later, overlay extracted-field highlights).
+# The source is located via the path recorded on the RECEIVED audit event; an
+# invoice with no rasterizable source (e.g. an email-body invoice) simply has no
+# page images — `/pages` returns [] and `/pages/:n/image` 404s.
+
+
+def _source_image_path(invoice_id: str, repo: Repository) -> str | None:
+    """Path to the invoice's original file, if it exists and is rasterizable."""
+    received = latest_details(repo.get_audit(invoice_id), AuditAction.RECEIVED)
+    path = received.get("attachment_path")
+    if not path or not is_rasterizable(path):
+        return None
+    return path
+
+
+def _rendered_pages(invoice_id: str, repo: Repository) -> list[RenderedPage]:
+    """Render the invoice's source pages, or [] when there is nothing to render."""
+    _get_invoice_or_404(invoice_id, repo)
+    path = _source_image_path(invoice_id, repo)
+    if path is None:
+        return []
+    try:
+        return render_pages(path)
+    except (FileNotFoundError, ValueError):
+        # Source recorded but unreadable/unsupported: no preview, not a crash.
+        return []
+
+
+@app.get("/api/invoices/{invoice_id}/pages")
+def list_pages(invoice_id: str, repo: RepoDep) -> list[dict]:
+    """Page count + raster dimensions for the invoice's source (PRD §10)."""
+    return [
+        {"page_number": p.page_number, "width": p.width, "height": p.height}
+        for p in _rendered_pages(invoice_id, repo)
+    ]
+
+
+@app.get("/api/invoices/{invoice_id}/pages/{page_number}/image")
+def get_page_image(invoice_id: str, page_number: int, repo: RepoDep) -> Response:
+    """The rendered raster (PNG) for a 1-based page of the invoice's source."""
+    pages = _rendered_pages(invoice_id, repo)
+    page = next((p for p in pages if p.page_number == page_number), None)
+    if page is None:
+        raise HTTPException(status_code=404, detail="page image not found")
+    return Response(content=page.image_png, media_type="image/png")
 
 
 # --- human QC actions (PRD FR10, §13; ARCHITECTURE.md §11) ------------------

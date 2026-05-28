@@ -818,3 +818,53 @@ neutral humanist sans (the exact face wasn't specified); the system-ui fallback
 keeps the hub usable offline. Pulls one external CDN dependency (fonts only).
 Frontend builds clean; verified in-browser against the live stack (list + detail
 both pick up the teal/green palette + Open Sans).
+
+## 2026-05-27 — P4-T1 Page rasterization + image serving (Phase 4)
+
+First Visual Document Review ticket. Renders an invoice's original source
+(PDF/image) to per-page PNGs and serves them, so later tickets can overlay
+extracted-field highlights.
+
+**What landed**
+- `backend/parser/raster.py` — `render_pages(source, dpi=150) -> list[RenderedPage]`
+  (`{page_number, width, height, image_png}`) + `is_rasterizable()`. Results
+  cached per (resolved path, mtime, dpi) so serving `/pages` then `/pages/:n/image`
+  rasterizes once.
+- `backend/api/main.py` — `GET /api/invoices/:id/pages` (count + dims) and
+  `GET /api/invoices/:id/pages/:n/image` (PNG, 1-based page). Source located via
+  the path on the RECEIVED audit event.
+- `backend/orchestrator/__init__.py` — RECEIVED audit details now also carry
+  `attachment_path` (additive, JSONB; no schema change) so the endpoints can find
+  the source file.
+- `backend/requirements.txt` — added `PyMuPDF` (OD-8).
+
+**Decisions / deviations (not pre-specified)**
+- **One render backend (PyMuPDF), not two.** Spec §4.1 implied PyMuPDF for PDFs +
+  Pillow for images. MuPDF opens an image as a one-page document, so a single
+  `fitz.open()` path covers both — avoids adding Pillow as a *runtime* dep (it is
+  only present transitively via the `reportlab` dev dep today). Swapping backends
+  (`pdf2image`+poppler fallback) touches only `raster.py`.
+- **Render logic lives in `parser/raster.py`, not a `clients/` seam.** The build
+  plan listed `clients/** (render lib)`; ARCHITECTURE §4.1 maps it to
+  `parser/raster.py`. Kept it in the parser with a *lazy* `import fitz` (mirroring
+  `parser/pdf.py`'s lazy `pypdf`), so the 24 MB dep stays off the offline import
+  path and the existing offline suite is unaffected.
+- **Source located via `attachment_path` on the RECEIVED event.** Smallest
+  additive change; the `process_pdf` CLI and PDF pipeline tests already supply it.
+  Invoices without a rasterizable source (email-body, or JSON-only samples) return
+  `[]` from `/pages` and 404 from the image route — correct: they have no original
+  document image. Detail-payload `pages`/`citations` integration is deferred to
+  P4-T4/T5 per the spec (T1 is rasterization + serving only).
+- **On-demand rendering (+ small LRU), not persisted rasters.** Stateless and
+  simplest at demo scale (single-page PDFs); a stored/cached blob can come later
+  if needed.
+
+**Risks / follow-ups**
+- **Path handling:** `attachment_path` is operator-supplied at intake (CLI/sample),
+  not an end-user upload, so the current demo trusts it. If invoice upload becomes
+  user-facing, constrain rasterization to an allowlisted uploads root to avoid
+  path traversal. Flagged, not addressed (out of T1 scope).
+- PyMuPDF/SWIG emits harmless `DeprecationWarning`s under pytest.
+
+**Validation:** `ruff check` clean on changed files; full suite **115 passed, 1
+skipped** (was 106/1; +6 raster unit + 3 page-endpoint tests). No network/model.

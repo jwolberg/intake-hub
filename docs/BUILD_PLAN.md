@@ -327,7 +327,7 @@ hallucinated).
   - Files: /backend/parser/** (raster), /backend/api/**, /backend/clients/** (render lib)
   - Depends on: P1-T2, P2-A1 (+ RUNBOOK Path D PDFs)
   - Acceptance criteria covered: PRD §10 (Original invoice preview/download); OD-8.
-  - Status: Todo
+  - Status: Done — `backend/parser/raster.py` (`render_pages`, PyMuPDF/OD-8, one backend for PDF + image); `GET /api/invoices/:id/pages` + `/pages/:n/image`; source located via `attachment_path` on the RECEIVED audit event. 115 tests pass.
 - **P4-T2 — OCR word-box extraction**
   - Objective: `OCRClient` protocol (Tesseract default, `StubOCRClient` for offline) producing per-word boxes with normalized [0,1] coords + indices per page; `WordBox`/`BoundingBox` domain types.
   - Files: /backend/ocr/**, /backend/clients/**, /backend/domain/**

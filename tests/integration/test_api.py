@@ -117,6 +117,46 @@ def test_detail_404_for_unknown_invoice(client):
     assert client.get("/api/invoices/nope").status_code == 404
 
 
+# --- page images (P4-T1) ----------------------------------------------------
+
+_PDF = SAMPLES / "pdf" / "inv_clean_001.pdf"
+
+
+def test_pages_and_image_for_rasterizable_source(client):
+    # Attach the committed PDF so the page-image endpoints have a source to render.
+    sample = _sample("inv_clean_001.json")
+    sample["source"]["attachment_path"] = str(_PDF)
+    invoice_id = client.post("/api/invoices/process", json=sample).json()["id"]
+
+    pages = client.get(f"/api/invoices/{invoice_id}/pages").json()
+    assert len(pages) == 1
+    assert pages[0]["page_number"] == 1
+    assert pages[0]["width"] > 0 and pages[0]["height"] > 0
+
+    img = client.get(f"/api/invoices/{invoice_id}/pages/1/image")
+    assert img.status_code == 200
+    assert img.headers["content-type"] == "image/png"
+    assert img.content.startswith(b"\x89PNG\r\n\x1a\n")
+
+    # out-of-range page → 404
+    assert client.get(f"/api/invoices/{invoice_id}/pages/2/image").status_code == 404
+
+
+def test_pages_empty_for_body_only_invoice(client):
+    # An email-body invoice has no original file: no preview, gracefully.
+    invoice_id = client.post(
+        "/api/invoices/process", json=_sample("inv_body_003.json")
+    ).json()["id"]
+
+    assert client.get(f"/api/invoices/{invoice_id}/pages").json() == []
+    assert client.get(f"/api/invoices/{invoice_id}/pages/1/image").status_code == 404
+
+
+def test_pages_404_for_unknown_invoice(client):
+    assert client.get("/api/invoices/nope/pages").status_code == 404
+    assert client.get("/api/invoices/nope/pages/1/image").status_code == 404
+
+
 # --- human QC actions (P2-C3) -----------------------------------------------
 
 def _process(client, name):

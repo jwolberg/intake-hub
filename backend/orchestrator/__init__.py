@@ -72,6 +72,9 @@ def process(
         "subject": source.get("subject"),
         "sender": source.get("sender"),
         "attachment": source.get("attachment"),
+        # Path to the original file (when supplied), so the page-image endpoints
+        # can rasterize the source for the reviewer overlay (P4-T1).
+        "attachment_path": source.get("attachment_path"),
     })
 
     try:
