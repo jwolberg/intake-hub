@@ -285,6 +285,79 @@ Tickets are grouped by STRATEGY § Tracks. Each traces to a PRD requirement.
   - Acceptance criteria covered: PRD § Code Quality Expectations (demo clarity); ARCHITECTURE §17.
   - Status: Todo
 
+### Phase 4 — Visual Document Review (Image + Bounding-Box Overlay)
+Full spec: **`/docs/specs/visual-document-review.md`**. Adapts the OCR →
+vision-extraction → SVG-overlay pattern from the OpenEMR `oe-module-clinical-copilot`
+reference module (word-index citations: the model cites OCR word indices, the
+server resolves them to normalized boxes, so highlights are verifiable, never
+hallucinated).
+
+**Goal**
+- A reviewer sees the original document page image with the AI's extracted fields
+  and line items highlighted as rectangles tied to the detail view (hover/click a
+  field ↔ its box), uncertain fields visually distinct and gating clean approval —
+  turning post-decision QC from "trust the text" into "verify against the source."
+
+**⚠ Scope & doc change** (per Update Rules — new scope requires an input-doc change)
+- This **narrows PRD §4's "no perfect OCR/document intelligence" non-goal**: we add
+  real OCR + vision extraction but only with **human-verifiable, source-anchored
+  highlights** (imperfect extraction is caught by a reviewer, not trusted blindly),
+  initially on the controlled-format real PDFs (RUNBOOK Path D). On approval, amend
+  PRD §4 (narrowed wording) + §10 (image/overlay elements) and ARCHITECTURE (OCR +
+  vision components, citation data model). Still out of scope: accuracy guarantees
+  on arbitrary scans, handwriting, multi-language OCR, redaction/PHI.
+- **Open decisions:** OD-6 OCR engine (Tesseract, behind `OCRClient` + offline
+  stub); OD-7 vision provider (extends OD-2, offline stand-in default); OD-8 raster
+  lib (PyMuPDF provisional); OD-9 citation persistence (detail/audit payload first,
+  table later). New deps (Tesseract, raster lib, vision client) isolated behind
+  client interfaces + stubbed for offline tests.
+
+**Exit Criteria**
+- Opening a rasterizable invoice shows the page image(s) in the Source section with
+  per-field/line bounding-box highlights computed from real OCR geometry; uncertain
+  fields must be confirmed/rejected (reusing P2-C3 QC + P2-C4 rerun, recorded as
+  human audit events) before a clean "reviewed"; the **offline suite still passes
+  with no network/model** (stub OCR + offline extraction stand-in synthesize
+  citations for the controlled sample PDFs).
+
+**Tickets**
+- **P4-T1 — Page rasterization + image serving**
+  - Objective: Render each source page (PDF/image) to a normalized raster; serve via `GET /api/invoices/:id/pages/:n/image` + `GET /api/invoices/:id/pages` (count + dims).
+  - Files: /backend/parser/** (raster), /backend/api/**, /backend/clients/** (render lib)
+  - Depends on: P1-T2, P2-A1 (+ RUNBOOK Path D PDFs)
+  - Acceptance criteria covered: PRD §10 (Original invoice preview/download); OD-8.
+  - Status: Todo
+- **P4-T2 — OCR word-box extraction**
+  - Objective: `OCRClient` protocol (Tesseract default, `StubOCRClient` for offline) producing per-word boxes with normalized [0,1] coords + indices per page; `WordBox`/`BoundingBox` domain types.
+  - Files: /backend/ocr/**, /backend/clients/**, /backend/domain/**
+  - Depends on: P4-T1
+  - Acceptance criteria covered: PRD §7 Step 2 (extended); OD-6.
+  - Status: Todo
+- **P4-T3 — Vision extraction with word-index citations**
+  - Objective: Extend `LLMClient` (vision method / `VisionLLMClient`) to take page image + OCR word list and return fields/line items each with `word_indices` + `status`; schema-validated; keep an **offline deterministic stand-in** (string-match values → OCR words).
+  - Files: /backend/clients/** (LLM vision), /backend/extraction/** (prompts/schema), /backend/domain/**
+  - Depends on: P4-T2, P1-T3/P2-A1
+  - Acceptance criteria covered: PRD FR2 (source-anchored evidence); §8; OD-7.
+  - Status: Todo
+- **P4-T4 — Citation → bounding-box resolution + persistence**
+  - Objective: Resolve `word_indices` → union `bbox` via OCR boxes (drop out-of-range); persist per-field/line `Citation {page, target_id, quote, bbox, status}`; surface in the detail payload (`pages`, `citations`).
+  - Files: /backend/extraction/** (resolver), /backend/db/**, /backend/api/**, /backend/domain/**
+  - Depends on: P4-T3
+  - Acceptance criteria covered: PRD §10 (Source evidence), FR9; ARCHITECTURE §12; OD-9.
+  - Status: Todo
+- **P4-T5 — Reviewer overlay UI (image + SVG boxes)**
+  - Objective: In the detail Source section, render the page image + an SVG overlay (`viewBox="0 0 1 1"`, `preserveAspectRatio="none"`) with a status-coloured `<rect>` per citation; two-way linking (field ↔ box) and multi-page support.
+  - Files: /frontend/**
+  - Depends on: P4-T4
+  - Acceptance criteria covered: PRD §10 (Invoice Detail View), FR9; USERS § Reviewer.
+  - Status: Todo
+- **P4-T6 — Confirm / correct / approve from the overlay**
+  - Objective: Confirm/reject uncertain fields and correct values/line matches from the highlighted view, reusing the P2-C3 QC routes (+ P2-C4 rerun); uncertain fields gate a clean "reviewed"; all actions recorded as human audit events.
+  - Files: /frontend/**, /backend/api/** (reuse P2-C3 routes; optional confirm endpoint)
+  - Depends on: P4-T5, P2-C3, P2-C4
+  - Acceptance criteria covered: PRD FR10, §10 (QC actions); ARCHITECTURE §11, §17; USERS § Reviewer + § Exception Handler.
+  - Status: Todo
+
 ---
 
 ## Dependency Order
@@ -305,9 +378,11 @@ Tickets are grouped by STRATEGY § Tracks. Each traces to a PRD requirement.
 15. P1-T11  ← MVP vertical slice complete
 16. Phase 2 (Track A: P2-A1→A4) ∥ (Track B: P2-B1→B4) ∥ (Track C: P2-C1→C4), respecting per-ticket deps
 17. Phase 3: P3-T1, P3-T4 → P3-T2, P3-T3, P3-T5 → P3-T6 → P3-T7
+18. Phase 4 (new scope, gated on the PRD §4 doc change): P4-T1 → P4-T2 → P4-T3 → P4-T4 → P4-T5 → P4-T6 (P4-T6 also needs P2-C3/C4, done)
 
 ## Recommended Next Step
 - Start with: **P3-T1 — failure isolation, retry & recovery** (Phase 3). Retryable vs terminal failure states; resume from a failed stage without redoing successful upstream work; low-confidence → hold (PRD §14, FR11; ARCHITECTURE §15). Depends on P1-T9, P2-A3 (done). All of Phase 2 (Tracks A/B/C) is complete.
+- **Phase 4 — Visual Document Review** is now specced (`/docs/specs/visual-document-review.md`) and added below. It is **new scope gated on a PRD §4 doc change** (narrowing the OCR non-goal); start it only after that amendment is accepted. It can run in parallel with Phase 3 (its only Phase-2/3 dependency, P2-C3/C4, is done).
 - Still OPEN — **Phase 1 exit gate (live stack)**: deferred only because the Docker daemon is unavailable in the dev session. Run once Docker is up, before demo:
   1. `docker compose up -d db` then `DATABASE_URL=postgresql+psycopg://invoicescreener:invoicescreener@localhost:5432/invoicescreener pytest tests/integration/test_postgres_repository.py` — un-skips the Postgres round-trip.
   2. `docker compose up` — API lifespan `init_schema` + reflection + the mcp-reference/mock-clinrun services end-to-end.
@@ -316,6 +391,7 @@ Tickets are grouped by STRATEGY § Tracks. Each traces to a PRD requirement.
 ## Deferred / Out of Scope
 - PRD §4 Non-Goals: perfect OCR/document intelligence; supporting every invoice format; replacing finance/compliance workflows; production-scale email ingestion; full ClinRun production integration (mock used instead); guaranteed 100% match accuracy in ambiguous cases.
   - **Out-of-plan addition (2026-05-27, user-requested):** a *controlled-format* real-PDF demo path (`samples/generate_pdfs.py` → `backend/parser/pdf.py` + `backend/tools/process_pdf.py`, RUNBOOK Path D). We render the PDFs ourselves, so this does not claim to parse arbitrary invoices — the OCR/arbitrary-document non-goal stands. See implementation-notes 2026-05-27 "EXTRA".
+  - **Phase 4 (2026-05-27, user-requested) revisits the OCR non-goal:** the new Visual Document Review phase (`/docs/specs/visual-document-review.md`) **narrows** "no perfect OCR/document intelligence" — it adds real OCR + vision extraction but only with human-verifiable, source-anchored highlights, initially on the controlled PDFs above. The non-goal is not repealed (no accuracy guarantee on arbitrary scans); it is scoped down. Requires the PRD §4 amendment before implementation starts.
 - Authentication/authorization beyond basic operator access — not a PRD functional requirement; not planned for this scope.
 - Real MCP reference API and real ClinRun backend — wired only if provided (OD-4, OD-5); otherwise stub/mock.
 - Async job orchestration (OD-3) — MVP may run synchronously; revisited only if Phase 3 performance requires it.
