@@ -1193,3 +1193,40 @@ confidence column should then vary by the model's own certainty.
 
 **Validation:** `ruff` clean; full suite **150 passed, 1 skipped** (+2 client
 tests). Offline path unchanged.
+
+## 2026-05-28 — Hub re-skin to the Ledger Run brand (user-requested)
+
+Researched the live ledgerrun.com (Wix-rendered, so I read computed styles +
+a screenshot via the browser) and re-skinned the hub to its brand. The earlier
+teal/green skin was based on an old ClinRun *app dashboard* screenshot; the
+public brand is **indigo + iridescent**, so this realigns to it. User picked the
+"brand-aligned, data-dense" direction + Space Grotesk (free stand-in for the
+brand's paid PP Object Sans).
+
+**Brand signals captured (real computed values):** primary indigo `#283BC9`;
+near-navy text `#1A1F36`; canvas `#F6F5F5` / panels white / hairline borders;
+display type PP Object Sans (→ Space Grotesk); pill buttons (`radius 99px`);
+signature soft iridescent radial gradient (lavender→mint→lime→peach→pink→indigo).
+
+**What changed (CSS/HTML only — no JSX/layout, density preserved):**
+- `index.html` — load Space Grotesk (400/500/600/700) instead of Open Sans.
+- `styles.css` — retoken to the brand palette (indigo `--primary`, navy `--text`,
+  `#F6F5F5` canvas, hairline `--border`, `--display`/`--body` font vars,
+  `--brand-gradient`); display font on the app title, panel headings, metric
+  values, badges; **pill** action buttons (QC/small/view-source); a 3px
+  iridescent `border-image` underline on the header as the single brand accent;
+  panels rounded to 10px; overlay highlight fill + row-link tint moved from teal
+  to indigo. **Kept** the green/amber/red status semantics + 13px compact tables
+  for triage.
+
+**Decisions/tradeoffs.** Space Grotesk substitutes for PP Object Sans (paid
+Pangram Pangram face) — swap in the real font via `@font-face` if licensed. The
+iridescent gradient is used **once** (header underline) so it signals the brand
+without hurting data density; status chips stay semantic-coloured rather than
+going monochrome like the marketing site, since a reviewer must distinguish
+submitted/held/failed at a glance.
+
+**Browser-verified** (dev hub → uvicorn): list + detail render on-brand —
+indigo pills, Space Grotesk headings/metrics, gradient header underline, indigo
+"View source"/QC buttons; status badges still green/amber/red. `npm run build`
+clean; backend untouched.

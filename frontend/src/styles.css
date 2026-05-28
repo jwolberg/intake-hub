@@ -1,28 +1,36 @@
 :root {
-  /* Palette adopted from the ClinRun dashboard: teal brand/action, green
-     "Active"-style positive, soft slate text on light-gray panels. Colour,
-     font, and sizing only — layout is unchanged. */
-  --primary: #159a9c;
-  --primary-hover: #0f7d7f;
-  --bg: #f4f6f8;
+  /* Palette adopted from the Ledger Run brand (ledgerrun.com): deep indigo
+     action colour, near-navy text on white panels over a very light neutral
+     canvas, pill controls, and a soft iridescent gradient used as a sparing
+     brand accent. Status colours keep their green/amber/red semantics so a
+     reviewer can triage submitted/held/failed at a glance. */
+  --primary: #6978e3;       /* brand indigo (softened) */
+  --primary-hover: #5563cf;
+  --bg: #f6f5f5;            /* brand canvas */
   --panel: #ffffff;
-  --border: #e4e7eb;
-  --text: #3a4147;
-  --muted: #7b828a;
-  --row-hover: #f2f6f6;
-  --submit: #3f9d54;
-  --submit-bg: #e9f5ed;
+  --border: #e9e9ec;        /* hairline */
+  --text: #1a1f36;          /* brand near-navy */
+  --muted: #6b7280;
+  --row-hover: #f3f4fb;     /* faint indigo tint */
+  --submit: #2f9e57;
+  --submit-bg: #e7f5ec;
   --hold: #b5731b;
   --hold-bg: #fbf0df;
   --failed: #c0392b;
   --failed-bg: #fbeae8;
+  /* Display type: Space Grotesk stands in for the brand's PP Object Sans. */
+  --display: "Space Grotesk", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --body: -apple-system, "Helvetica Neue", Arial, system-ui, sans-serif;
+  /* Brand signature gradient — used sparingly (header accent only). */
+  --brand-gradient: linear-gradient(90deg, #283bc9 0%, #4d8af0 24%, #2fb9a6 48%,
+    #bada55 68%, #faaa63 84%, #f08cc0 100%);
 }
 
 * { box-sizing: border-box; }
 
 body {
   margin: 0;
-  font-family: "Open Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family: var(--body);
   font-size: 13px;
   color: var(--text);
   background: var(--bg);
@@ -35,8 +43,15 @@ header.app-bar {
   align-items: baseline;
   justify-content: space-between;
   margin-bottom: 1.25rem;
+  padding-bottom: 0.85rem;
+  /* Iridescent brand underline (the marketing site's signature gradient). */
+  border-bottom: 3px solid transparent;
+  border-image: var(--brand-gradient) 1;
 }
-header.app-bar h1 { font-size: 1.25rem; margin: 0; }
+header.app-bar h1 {
+  font-family: var(--display); font-weight: 700; letter-spacing: -0.01em;
+  font-size: 1.3rem; margin: 0;
+}
 .api-status { font-size: 0.8rem; color: var(--muted); }
 
 .link-btn {
@@ -48,11 +63,14 @@ header.app-bar h1 { font-size: 1.25rem; margin: 0; }
 .panel {
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 10px;
   padding: 1rem 1.25rem;
   margin-bottom: 1rem;
 }
-.panel h2 { font-size: 0.95rem; margin: 0 0 0.75rem; }
+.panel h2 {
+  font-family: var(--display); font-weight: 600; letter-spacing: -0.01em;
+  font-size: 1rem; margin: 0 0 0.75rem;
+}
 
 .list-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.75rem; }
 .list-head h2 { margin: 0; }
@@ -69,7 +87,7 @@ header.app-bar h1 { font-size: 1.25rem; margin: 0; }
 
 .metrics { display: flex; flex-wrap: wrap; gap: 1.5rem; }
 .metric { display: flex; flex-direction: column; }
-.metric-value { font-size: 1.4rem; font-weight: 600; }
+.metric-value { font-family: var(--display); font-size: 1.5rem; font-weight: 600; letter-spacing: -0.01em; }
 .metric-label { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; }
 
 table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
@@ -80,6 +98,7 @@ tbody tr:hover { background: var(--row-hover); }
 
 .badge {
   display: inline-block; padding: 0.1rem 0.5rem; border-radius: 999px;
+  font-family: var(--display);
   font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;
 }
 .badge.submit, .badge.submitted { color: var(--submit); background: var(--submit-bg); }
@@ -113,14 +132,14 @@ tbody tr:hover { background: var(--row-hover); }
 /* QC action controls (PRD §10 QC Actions). */
 .qc-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-top: 0.6rem; }
 .qc-actions button, .small-btn {
-  background: var(--primary); color: #fff; border: none; border-radius: 6px;
-  padding: 0.35rem 0.8rem; font-size: 0.82rem; cursor: pointer;
+  background: var(--primary); color: #fff; border: none; border-radius: 999px;
+  padding: 0.4rem 0.9rem; font-size: 0.82rem; font-weight: 500; cursor: pointer;
 }
 .qc-actions button:hover:not(:disabled), .small-btn:hover:not(:disabled) { background: var(--primary-hover); }
 .qc-actions button:disabled, .small-btn:disabled { opacity: 0.5; cursor: default; }
 .qc-actions button.danger { background: var(--failed); }
 .qc-actions button.danger:hover:not(:disabled) { background: #911d17; }
-.small-btn { padding: 0.2rem 0.5rem; font-size: 0.75rem; }
+.small-btn { padding: 0.25rem 0.7rem; font-size: 0.75rem; border-radius: 999px; }
 .note-input { width: 100%; margin-top: 0.6rem; min-height: 3rem; font-family: inherit;
   font-size: 0.84rem; padding: 0.5rem; border: 1px solid var(--border); border-radius: 6px; resize: vertical; }
 .reason-input { flex: 1; min-width: 200px; padding: 0.35rem 0.5rem; font-size: 0.82rem;
@@ -150,10 +169,10 @@ tbody tr:hover { background: var(--row-hover); }
 .cite-confirmed { stroke: var(--submit); }
 .cite-unreadable, .cite-missing { stroke: var(--failed); }
 .cite-rect:hover, .cite-rect.is-highlight { stroke-width: 2.5px; }
-.cite-extracted.is-highlight, .cite-extracted:hover { fill: rgba(21, 154, 156, 0.22); }
+.cite-extracted.is-highlight, .cite-extracted:hover { fill: rgba(105, 120, 227, 0.20); }
 .cite-uncertain.is-highlight, .cite-uncertain:hover { fill: rgba(181, 115, 27, 0.22); }
 /* The field row whose box is hovered (and vice versa). */
-.row-linked > td { background: var(--submit-bg); }
+.row-linked > td { background: #e8eafb; }
 
 /* "View source" side panel — docked right, non-modal so the field ↔ box
    highlighting stays interactive while the source sits alongside. */
@@ -175,8 +194,8 @@ tbody tr:hover { background: var(--row-hover); }
 .detail-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .detail-head h2 { margin: 0; }
 .view-source-btn {
-  flex: none; background: var(--primary); color: #fff; border: none; border-radius: 6px;
-  padding: 0.45rem 0.9rem; font-size: 0.85rem; font-weight: 600; cursor: pointer; white-space: nowrap;
+  flex: none; background: var(--primary); color: #fff; border: none; border-radius: 999px;
+  padding: 0.45rem 1rem; font-size: 0.85rem; font-weight: 600; cursor: pointer; white-space: nowrap;
 }
 .view-source-btn:hover:not(:disabled) { background: var(--primary-hover); }
 .view-source-btn:disabled { opacity: 0.5; cursor: default; }
