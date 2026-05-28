@@ -81,6 +81,7 @@ class AuditAction(str, Enum):
     FAILED = "failed"
     REVIEWED = "reviewed"
     CORRECTED = "corrected"
+    CONFIRMED = "confirmed"
     RERUN = "rerun"
     ESCALATED = "escalated"
     NOTE = "note"

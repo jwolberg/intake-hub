@@ -34,8 +34,8 @@
 
 ## Current Status
 - Overall status: In Progress
-- Current phase: **Phase 4 — Visual Document Review: IN PROGRESS** (P4-T1..T5 done; only P4-T6 left). Phase 2 complete; Phase 3 (Hardening & Polish) still open and independent.
-- Current ticket: **P4-T6** (confirm / correct / approve from the overlay). P4-T5 (reviewer overlay UI) is done and browser-verified: the detail Source section renders the page image with status-coloured highlight boxes, two-way linked to the fields/line items. The Phase 1 live-stack exit gate is **CLEARED** (2026-05-27): Postgres round-trip passes against the live DB, `docker compose up` brings up the full stack, hub serves at `http://127.0.0.1:5173`. Remaining there: a human visual click-through of the hub UI. Commands: /docs/RUNBOOK.md.
+- Current phase: **Phase 4 — Visual Document Review: COMPLETE** (P4-T1..T6 all done, browser-verified). Phase 2 complete. **Phase 3 (Hardening & Polish) is the only remaining open phase** and is independent.
+- Current ticket: **P3-T1** (failure isolation, retry & recovery) — next recommended; all of Phase 4 is shipped. The Phase 1 live-stack exit gate is **CLEARED** (2026-05-27): Postgres round-trip passes against the live DB, `docker compose up` brings up the full stack, hub serves at `http://127.0.0.1:5173`. Remaining there: a human visual click-through of the hub UI. Commands: /docs/RUNBOOK.md.
 - Note: All of Phase 2 (P2-A1..A4 + P2-B1..B4 + P2-C1..C4) validated in-process (106 passed, 1 skipped) **and** exercised end-to-end against the live Postgres stack (process → filters → detail → QC corrections → rerun → metrics). The skipped test is the Postgres round-trip, which passes when run with a live `DATABASE_URL`. Dev test also fixed a metric-bucketing bug (rates now key off the AI's first/autonomous decision, robust to rerun). Also: out-of-plan real-PDF demo path (RUNBOOK Path D).
 - Blockers: None for in-process work (OD-1 resolved; OD-2..OD-5 provisional behind interfaces). Live-stack exit gate blocked on Docker availability only.
 - Implementation log: /docs/implementation.md, /docs/implementation-notes.md
@@ -375,7 +375,13 @@ hallucinated).
   - Files: /frontend/**, /backend/api/** (reuse P2-C3 routes; optional confirm endpoint)
   - Depends on: P4-T5, P2-C3, P2-C4
   - Acceptance criteria covered: PRD FR10, §10 (QC actions); ARCHITECTURE §11, §17; USERS § Reviewer + § Exception Handler.
-  - Status: Todo
+  - Status: Done — `AuditAction.CONFIRMED` + `POST /api/invoices/:id/citations/confirm`
+    records a human confirm event keyed to a citation `target_id`; the hub adds a
+    "Uncertain fields to verify" panel and **gates Mark reviewed** until every
+    `uncertain` citation is confirmed or corrected (reject == correct via the
+    existing P2-C3 inputs; P2-C4 rerun reused). Confirmed boxes render green.
+    Browser-verified end-to-end on a seeded uncertain-line scenario (gate blocks →
+    Confirm → human audit event + gate releases). 148 tests pass; build clean.
 
 ---
 
@@ -400,9 +406,8 @@ hallucinated).
 18. Phase 4 (new scope, doc change applied — unblocked): P4-T1 → P4-T2 → P4-T3 → P4-T4 → P4-T5 → P4-T6 (P4-T6 also needs P2-C3/C4, done)
 
 ## Recommended Next Step
-- **PICK UP HERE (next session) → P4-T6 — Confirm / correct / approve from the overlay (final Phase 4 ticket).** Phase 4 on branch `p2-track-c-reviewer-hub`: **P4-T1..T5 are DONE** (the reviewer overlay renders + is browser-verified). T6 lets a reviewer **confirm or reject** uncertain citations and **correct** values/line matches directly from the highlighted view, reusing the existing P2-C3 QC routes (`corrections/metadata`, `corrections/line-item`, `reviewed`, `escalate`, `note`) + P2-C4 `rerun`; **uncertain citations (status `uncertain`) must be confirmed/rejected before a clean "reviewed"** is allowed, and every action records a **human** audit event (FR10; ARCHITECTURE §11/§17). Suggested approach: from each `uncertain` box/field offer confirm (→ records a human "reviewed"/confirm audit event for that field) or correct (→ the existing metadata/line correction inputs, which already exist in the detail), then gate the top-level "Mark reviewed" button while any `uncertain` citation is unconfirmed. An optional dedicated confirm endpoint is allowed but not required (a NOTE/REVIEWED event keyed to the target_id may suffice). Files: `/frontend/**` (overlay confirm/reject controls + gating) and optionally `/backend/api/**` (a confirm route). Depends on P4-T5 (done), P2-C3/P2-C4 (done). Read `docs/specs/visual-document-review.md` §5 (acceptance) + §4.5 and the newest `docs/implementation-notes.md` entry (P4-T5) first. **Verify in a browser** (offline runner pattern in the P4-T5 notes: in-memory repo + stub clients seeding the controlled PDF; ports 8011 + `127.0.0.1:5173` to dodge the stray local server).
-  - Useful context already in place: detail `citations[]` carry `status` ∈ extracted/uncertain/unreadable/missing + `target_id` (`metadata.<field>` / `line_item.<id>.raw_description`); the overlay already two-way-links boxes ↔ rows; correcting a value + `rerun` (P2-C4) recomputes downstream and can flip hold→submit; a correction that resolves a hold is already exercised by the rerun tests.
-- **P3 (failure isolation, retry & recovery) still open and independent** if priorities shift: **P3-T1** — retryable vs terminal failure states; resume from a failed stage without redoing upstream work; low-confidence → hold (PRD §14, FR11; ARCHITECTURE §15). Depends on P1-T9, P2-A3 (done). All of Phase 2 is complete.
+- **Phase 4 (Visual Document Review) is COMPLETE** — P4-T1..T6 all shipped and browser-verified on branch `p2-track-c-reviewer-hub`. The only remaining open phase is **Phase 3 — Hardening & Polish**.
+- **PICK UP HERE (next session) → P3-T1 — Failure isolation, retry & recovery.** Retryable vs terminal failure states; resume from a failed stage without redoing successful upstream work; low-confidence → hold (PRD §14, FR11; ARCHITECTURE §15). Files: `/backend/orchestrator/**`, `/backend/clients/**`. Depends on P1-T9, P2-A3 (done). Note the current orchestrator already isolates per-invoice failures (`_fail` marks `failed` + an exception, never propagates) and distinguishes retryable `catalog_fetch_failed` from deliberate holds; P3-T1 formalizes retry/resume (e.g. re-enter from the failed stage, bounded retries for transient client errors) and adds the explicit low-confidence→hold guard end-to-end. Then P3-T2 (scenario suite over the eight PRD §18 scenarios), P3-T3 (unit/integration coverage), P3-T4 (observability), P3-T5 (performance), P3-T6 (demo seed set), P3-T7 (docs/README).
 - Still OPEN — **Phase 1 exit gate (live stack)**: deferred only because the Docker daemon is unavailable in the dev session. Run once Docker is up, before demo:
   1. `docker compose up -d db` then `DATABASE_URL=postgresql+psycopg://invoicescreener:invoicescreener@localhost:5432/invoicescreener pytest tests/integration/test_postgres_repository.py` — un-skips the Postgres round-trip.
   2. `docker compose up` — API lifespan `init_schema` + reflection + the mcp-reference/mock-clinrun services end-to-end.

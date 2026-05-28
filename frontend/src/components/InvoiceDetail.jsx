@@ -10,6 +10,7 @@ import { useRef, useState } from "react";
 
 import {
   addNote,
+  confirmCitation,
   correctLineItem,
   correctMetadata,
   escalateInvoice,
@@ -34,6 +35,22 @@ const META_FIELDS = [
   ["tax", "Tax"],
   ["payment_terms", "Payment terms"],
 ];
+
+const META_LABELS = Object.fromEntries(META_FIELDS);
+
+// Human label for a citation target_id (e.g. "metadata.vendor_name" → "Vendor",
+// "line_item.<id>.raw_description" → "Line item").
+function targetLabel(targetId, lineItems) {
+  if (targetId.startsWith("metadata.")) {
+    return META_LABELS[targetId.slice("metadata.".length)] ?? targetId;
+  }
+  const m = targetId.match(/^line_item\.(.+)\.raw_description$/);
+  if (m) {
+    const li = lineItems.find((l) => l.id === m[1]);
+    return li ? `Line: ${li.raw_description}` : "Line item";
+  }
+  return targetId;
+}
 
 function pct(v) {
   return v == null ? "—" : `${Math.round(v * 100)}%`;
@@ -74,13 +91,16 @@ function submissionStatus(invoice, event) {
 // preserveAspectRatio="none" — no scaling math, the browser maps the unit square
 // onto the rendered image. A citation with no resolved bbox is not drawn (no
 // hallucinated highlight, spec §3). Hovering a box ↔ its field is two-way.
-function SourceOverlay({ invoiceId, pages, citations, hovered, setHovered, scrollToRow }) {
+function SourceOverlay({ invoiceId, pages, citations, resolved, hovered, setHovered, scrollToRow }) {
   if (!pages?.length) return null;
   const byPage = {};
   for (const c of citations ?? []) {
     if (!c.bbox) continue; // unanchored: no box
     (byPage[c.page_number] ??= []).push(c);
   }
+  // An uncertain box the reviewer has confirmed/corrected reads as resolved.
+  const statusClass = (c) =>
+    c.status === "uncertain" && resolved?.has(c.target_id) ? "confirmed" : c.status;
 
   return (
     <div className="pages">
@@ -102,7 +122,7 @@ function SourceOverlay({ invoiceId, pages, citations, hovered, setHovered, scrol
                 <rect
                   key={c.target_id}
                   data-target-id={c.target_id}
-                  className={`cite-rect cite-${c.status}${
+                  className={`cite-rect cite-${statusClass(c)}${
                     hovered === c.target_id ? " is-highlight" : ""
                   }`}
                   x={c.bbox.x}
@@ -155,6 +175,20 @@ export default function InvoiceDetail({ detail, onAction, setError }) {
   const pages = detail.pages ?? [];
   const citations = detail.citations ?? [];
 
+  // Uncertain citations gate a clean review (P4-T6): each must be confirmed
+  // against the page image or corrected (a correction supplies a verified value).
+  const confirmedTargets = new Set(
+    audit.filter((e) => e.action === "confirmed").map((e) => e.details?.target_id),
+  );
+  const correctedTargets = new Set([
+    ...Object.keys(overlay).map((k) => `metadata.${k}`),
+    ...Object.keys(matchOverlay).map((id) => `line_item.${id}.raw_description`),
+  ]);
+  const resolvedTargets = new Set([...confirmedTargets, ...correctedTargets]);
+  const uncertain = citations.filter((c) => c.status === "uncertain");
+  const pendingUncertain = uncertain.filter((c) => !resolvedTargets.has(c.target_id));
+  const reviewBlocked = pendingUncertain.length > 0;
+
   function scrollToRow(targetId) {
     rootRef.current
       ?.querySelector(`[data-row="${targetId}"]`)
@@ -199,6 +233,10 @@ export default function InvoiceDetail({ detail, onAction, setError }) {
     setMetaReason("");
   }
 
+  function confirmField(targetId) {
+    run(confirmCitation(invoice.id, targetId, note || null));
+  }
+
   function saveLine(lineId) {
     const edit = lineEdits[lineId] ?? {};
     run(
@@ -227,7 +265,15 @@ export default function InvoiceDetail({ detail, onAction, setError }) {
       <div className="panel">
         <h2>QC actions</h2>
         <div className="qc-actions">
-          <button disabled={busy} onClick={() => run(markReviewed(invoice.id, note || null))}>
+          <button
+            disabled={busy || reviewBlocked}
+            title={
+              reviewBlocked
+                ? "Confirm or correct the uncertain fields below first"
+                : undefined
+            }
+            onClick={() => run(markReviewed(invoice.id, note || null))}
+          >
             Mark reviewed
           </button>
           <button disabled={busy} onClick={() => run(rerunInvoice(invoice.id))}>
@@ -257,6 +303,62 @@ export default function InvoiceDetail({ detail, onAction, setError }) {
           onChange={(e) => setNote(e.target.value)}
         />
       </div>
+
+      {/* Verify uncertain fields (P4-T6) — confirm against the page image or
+          correct; gates a clean "reviewed". */}
+      {uncertain.length > 0 && (
+        <div className="panel">
+          <h2>
+            Uncertain fields to verify{" "}
+            {reviewBlocked ? (
+              <span className="flag sev-medium">{pendingUncertain.length} pending</span>
+            ) : (
+              <span className="flag sev-low">all verified</span>
+            )}
+          </h2>
+          <p className="muted small">
+            These values were extracted with low confidence. Confirm each against its
+            highlighted box on the page, or correct it below — required before a clean
+            review.
+          </p>
+          <table>
+            <thead>
+              <tr><th>Field</th><th>Extracted value</th><th>State</th><th /></tr>
+            </thead>
+            <tbody>
+              {uncertain.map((c) => {
+                const corrected = correctedTargets.has(c.target_id);
+                const confirmed = confirmedTargets.has(c.target_id);
+                const done = corrected || confirmed;
+                return (
+                  <tr key={c.target_id} {...rowLink(c.target_id)}>
+                    <td className="muted">{targetLabel(c.target_id, line_items)}</td>
+                    <td>{c.quote}</td>
+                    <td>
+                      {done ? (
+                        <span className="flag sev-low">
+                          {corrected ? "corrected" : "confirmed"}
+                        </span>
+                      ) : (
+                        <span className="flag sev-medium">needs review</span>
+                      )}
+                    </td>
+                    <td>
+                      <button
+                        className="small-btn"
+                        disabled={busy || done}
+                        onClick={() => confirmField(c.target_id)}
+                      >
+                        Confirm
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {exceptions.length > 0 && (
         <div className="panel">
@@ -334,6 +436,7 @@ export default function InvoiceDetail({ detail, onAction, setError }) {
               invoiceId={invoice.id}
               pages={pages}
               citations={citations}
+              resolved={resolvedTargets}
               hovered={hovered}
               setHovered={setHovered}
               scrollToRow={scrollToRow}

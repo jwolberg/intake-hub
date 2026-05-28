@@ -66,3 +66,11 @@ export function addNote(id, note) {
 export function rerunInvoice(id) {
   return postJSON(`/api/invoices/${id}/rerun`, {});
 }
+
+// Confirm an uncertain source-anchored field against the page image (P4-T6).
+export function confirmCitation(id, targetId, reason) {
+  return postJSON(`/api/invoices/${id}/citations/confirm`, {
+    target_id: targetId,
+    reason,
+  });
+}

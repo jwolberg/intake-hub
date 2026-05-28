@@ -328,6 +328,34 @@ def test_rerun_unknown_invoice_404(client):
     assert client.post("/api/invoices/nope/rerun", json={}).status_code == 404
 
 
+# --- confirm citation (P4-T6) -----------------------------------------------
+
+
+def test_confirm_citation_records_human_event(client):
+    sample = _sample("inv_clean_001.json")
+    sample["source"]["attachment_path"] = str(_PDF)
+    invoice_id = client.post("/api/invoices/process", json=sample).json()["id"]
+
+    resp = client.post(
+        f"/api/invoices/{invoice_id}/citations/confirm",
+        json={"target_id": "metadata.invoice_number", "reason": "matches the page"},
+    )
+    assert resp.status_code == 200
+    detail = resp.json()
+
+    confirmed = [e for e in detail["audit"] if e["action"] == "confirmed"][-1]
+    assert confirmed["actor"] == "human"
+    assert confirmed["details"]["target_id"] == "metadata.invoice_number"
+    assert confirmed["details"]["reason"] == "matches the page"
+
+
+def test_confirm_citation_unknown_invoice_404(client):
+    resp = client.post(
+        "/api/invoices/nope/citations/confirm", json={"target_id": "metadata.x"}
+    )
+    assert resp.status_code == 404
+
+
 def test_metrics_endpoint(client):
     client.post("/api/invoices/process", json=_sample("inv_clean_001.json"))
     client.post("/api/invoices/process", json=_sample("inv_hold_unmatched_002.json"))

@@ -147,6 +147,7 @@ tbody tr:hover { background: var(--row-hover); }
   pointer-events: all; cursor: pointer; transition: fill 0.1s ease; }
 .cite-extracted { stroke: var(--primary); }
 .cite-uncertain { stroke: var(--hold); stroke-dasharray: 4 2; }
+.cite-confirmed { stroke: var(--submit); }
 .cite-unreadable, .cite-missing { stroke: var(--failed); }
 .cite-rect:hover, .cite-rect.is-highlight { stroke-width: 2.5px; }
 .cite-extracted.is-highlight, .cite-extracted:hover { fill: rgba(21, 154, 156, 0.22); }

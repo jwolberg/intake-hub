@@ -1075,3 +1075,51 @@ overlay is T6.
 
 **Validation:** `npm run build` clean; backend suite unaffected (146 passed, 1
 skipped). Verified live in a browser per the above.
+
+## 2026-05-28 — P4-T6 Confirm / correct / approve from the overlay (Phase 4 DONE)
+
+Closes Phase 4: uncertain source-anchored fields must be verified against the
+page image (confirm) or corrected before a clean "reviewed", and confirmations
+are recorded as human audit events.
+
+**What landed**
+- `backend/domain/enums.py` — new `AuditAction.CONFIRMED` (the `action` column is
+  free-form TEXT, so no migration; metrics treat it like any human review action).
+- `backend/api/main.py` — `POST /api/invoices/:id/citations/confirm`
+  `{target_id, reason?}` records a human CONFIRMED event keyed to the citation's
+  `target_id` (FR10, §17), returns the refreshed detail.
+- `frontend/src/api.js` — `confirmCitation(id, targetId, reason)`.
+- `frontend/src/components/InvoiceDetail.jsx` — a "Uncertain fields to verify"
+  panel lists every `uncertain` citation (label + extracted value + state +
+  Confirm button); the top-level **Mark reviewed** button is **gated** while any
+  uncertain citation is neither confirmed nor corrected. A confirmed/corrected
+  uncertain box renders green (`cite-confirmed`) in the overlay.
+- `frontend/src/styles.css` — `.cite-confirmed` (solid teal).
+
+**Decisions (not pre-specified)**
+- **Reject == correct (no separate reject action).** Rejecting an uncertain value
+  means it is wrong, so the reviewer uses the existing P2-C3 correction inputs —
+  a correction (CORRECTED overlay) already resolves the gate. So T6 only adds a
+  *confirm* path; correction is reused, not duplicated.
+- **Gating is client-side** over data already in the detail payload: uncertain =
+  `citations[].status === "uncertain"`; resolved = a CONFIRMED audit event for the
+  `target_id` **or** a metadata/line correction overlay for it. No server-side
+  "reviewed" guard was added — the backend stays a thin recorder; the hub enforces
+  the workflow (consistent with the rest of the QC surface).
+- **CONFIRMED is metrics-neutral.** On a held invoice any human action already
+  counts as "reviewed" (only correct/escalate counts as "hold confirmed needed"),
+  so a confirm behaves like REVIEWED/NOTE — it does not distort hold precision or
+  false-submit rate (checked against `audit/metrics.py`).
+
+**Browser verification (offline, no Docker).** Seeded the controlled clean PDF
+(all citations high-confidence) plus a variant with a line-item total removed so
+that line extracts at 0.6 → an **uncertain** citation. In the hub: the held
+invoice showed the ECG box dashed-amber, the verify panel "1 pending", and **Mark
+reviewed disabled**; clicking **Confirm** recorded a human `confirmed` event (seen
+in the timeline), turned the box green, flipped the panel to "all verified", and
+**enabled Mark reviewed**. (Ports: stray local servers held 5173/5174/8000, so the
+dev server landed on 5175 and the API on 8011 — needed `CORS_ORIGINS` to include
+the actual hub origin; see the 2026-05-27 env note.)
+
+**Validation:** `ruff` clean; backend suite **148 passed, 1 skipped** (+2 confirm
+endpoint tests); `npm run build` clean; full confirm→gate flow verified live.

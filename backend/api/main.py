@@ -314,6 +314,11 @@ class ReviewNote(BaseModel):
     note: str | None = None
 
 
+class CitationConfirm(BaseModel):
+    target_id: str
+    reason: str | None = None
+
+
 class EscalateBody(BaseModel):
     reason: str | None = None
 
@@ -378,6 +383,23 @@ def correct_line_item(invoice_id: str, body: LineItemCorrection, repo: RepoDep) 
         before=before, after=after, reason=body.reason,
     )
     _set_status(repo, invoice, InvoiceStatus.CORRECTED)
+    return _require_detail(invoice_id, repo)
+
+
+@app.post("/api/invoices/{invoice_id}/citations/confirm")
+def confirm_citation(invoice_id: str, body: CitationConfirm, repo: RepoDep) -> dict:
+    """Confirm an uncertain source-anchored field/line against the page image (P4-T6).
+
+    Records a human-attributed CONFIRMED audit event keyed to the citation's
+    ``target_id`` (PRD FR10, §17). The reviewer hub gates a clean "reviewed" until
+    every uncertain citation is either confirmed here or corrected (P2-C3) — so an
+    uncertain extraction is verified against the source, not trusted blindly.
+    """
+    _get_invoice_or_404(invoice_id, repo)
+    record(
+        repo, invoice_id, AuditAction.CONFIRMED, actor=Actor.HUMAN,
+        details={"target_id": body.target_id}, reason=body.reason,
+    )
     return _require_detail(invoice_id, repo)
 
 
