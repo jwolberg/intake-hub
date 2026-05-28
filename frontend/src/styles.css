@@ -170,3 +170,13 @@ tbody tr:hover { background: var(--row-hover); }
 .drawer-body { padding: 1rem; overflow: auto; }
 .source-drawer .page-frame { max-width: 100%; }
 .source-drawer .pages { display: block; }
+
+/* Prominent "View source" action in the detail header. */
+.detail-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.detail-head h2 { margin: 0; }
+.view-source-btn {
+  flex: none; background: var(--primary); color: #fff; border: none; border-radius: 6px;
+  padding: 0.45rem 0.9rem; font-size: 0.85rem; font-weight: 600; cursor: pointer; white-space: nowrap;
+}
+.view-source-btn:hover:not(:disabled) { background: var(--primary-hover); }
+.view-source-btn:disabled { opacity: 0.5; cursor: default; }

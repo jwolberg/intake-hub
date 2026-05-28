@@ -293,7 +293,7 @@ export default function InvoiceDetail({ detail, onAction, setError }) {
 
   return (
     <div ref={rootRef}>
-      <div className="panel">
+      <div className="panel detail-head">
         <h2>
           {effective("invoice_number") ?? invoice.id}{" "}
           <span className={`badge ${invoice.decision ?? "neutral"}`}>
@@ -301,6 +301,14 @@ export default function InvoiceDetail({ detail, onAction, setError }) {
           </span>{" "}
           <span className={`badge ${invoice.status}`}>{invoice.status}</span>
         </h2>
+        <button
+          className="view-source-btn"
+          disabled={!hasSource}
+          title={hasSource ? undefined : "No original document for this invoice"}
+          onClick={() => setSourceOpen(true)}
+        >
+          View source ↗
+        </button>
       </div>
 
       {/* QC Actions (PRD §10/FR10) — every action records a human audit event. */}
