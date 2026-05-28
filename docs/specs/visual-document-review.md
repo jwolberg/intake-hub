@@ -1,7 +1,8 @@
 # Spec — Visual Document Review (Image + Bounding-Box Overlay Extraction)
 
-Status: Proposed (new scope — see § Scope & Doc Change). Target: **Phase 4** in
-`/docs/BUILD_PLAN.md`.
+Status: **Approved / unblocked** (2026-05-27) — the gating PRD §4/§10 +
+ARCHITECTURE §4/§8/§12/§13 amendments are applied. Target: **Phase 4** in
+`/docs/BUILD_PLAN.md` (start at P4-T1).
 
 ## 1. Problem & user value
 
@@ -39,9 +40,11 @@ documents changes") it must be recorded as a deliberate requirement change:
   extraction with **human-verifiable, source-anchored highlights** so that
   imperfect extraction is caught by a reviewer rather than trusted blindly.* The
   controlled-format real-PDF demo path (RUNBOOK Path D) is the initial substrate.
-- Recommended doc edits when this phase is approved: amend PRD §4 to the narrowed
-  wording above, and add the new Source/overlay elements to PRD §10. ARCHITECTURE
-  gains the OCR + vision-extraction components and the citation data model.
+- **Doc edits applied (2026-05-27):** PRD §4 narrowed to the wording above; PRD §10
+  Source + Extracted-Metadata gained the page-image/overlay + visual-highlight
+  elements; ARCHITECTURE §4 (the `ocr` module + parser/extraction notes), §8
+  (vision extraction + word-index citations), §12 (the `Citation`/`BoundingBox`
+  data model), and §13 (page-image endpoints) updated. Phase 4 is unblocked.
 
 **In scope:** page rasterization + serving; OCR word boxes; vision extraction
 that cites OCR word indices; server-side resolution to normalized bounding boxes;

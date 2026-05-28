@@ -298,14 +298,15 @@ hallucinated).
   field ↔ its box), uncertain fields visually distinct and gating clean approval —
   turning post-decision QC from "trust the text" into "verify against the source."
 
-**⚠ Scope & doc change** (per Update Rules — new scope requires an input-doc change)
+**✅ Scope & doc change — APPLIED (2026-05-27)** (per Update Rules — new scope requires an input-doc change)
 - This **narrows PRD §4's "no perfect OCR/document intelligence" non-goal**: we add
   real OCR + vision extraction but only with **human-verifiable, source-anchored
   highlights** (imperfect extraction is caught by a reviewer, not trusted blindly),
-  initially on the controlled-format real PDFs (RUNBOOK Path D). On approval, amend
-  PRD §4 (narrowed wording) + §10 (image/overlay elements) and ARCHITECTURE (OCR +
-  vision components, citation data model). Still out of scope: accuracy guarantees
-  on arbitrary scans, handwriting, multi-language OCR, redaction/PHI.
+  initially on the controlled-format real PDFs (RUNBOOK Path D). The gating doc
+  changes are **done**: PRD §4 (narrowed wording) + §10 (image/overlay elements)
+  and ARCHITECTURE §4/§8/§12/§13 (OCR + vision components, citation data model,
+  page endpoints). **Phase 4 is unblocked.** Still out of scope: accuracy
+  guarantees on arbitrary scans, handwriting, multi-language OCR, redaction/PHI.
 - **Open decisions:** OD-6 OCR engine (Tesseract, behind `OCRClient` + offline
   stub); OD-7 vision provider (extends OD-2, offline stand-in default); OD-8 raster
   lib (PyMuPDF provisional); OD-9 citation persistence (detail/audit payload first,
@@ -378,11 +379,11 @@ hallucinated).
 15. P1-T11  ← MVP vertical slice complete
 16. Phase 2 (Track A: P2-A1→A4) ∥ (Track B: P2-B1→B4) ∥ (Track C: P2-C1→C4), respecting per-ticket deps
 17. Phase 3: P3-T1, P3-T4 → P3-T2, P3-T3, P3-T5 → P3-T6 → P3-T7
-18. Phase 4 (new scope, gated on the PRD §4 doc change): P4-T1 → P4-T2 → P4-T3 → P4-T4 → P4-T5 → P4-T6 (P4-T6 also needs P2-C3/C4, done)
+18. Phase 4 (new scope, doc change applied — unblocked): P4-T1 → P4-T2 → P4-T3 → P4-T4 → P4-T5 → P4-T6 (P4-T6 also needs P2-C3/C4, done)
 
 ## Recommended Next Step
 - Start with: **P3-T1 — failure isolation, retry & recovery** (Phase 3). Retryable vs terminal failure states; resume from a failed stage without redoing successful upstream work; low-confidence → hold (PRD §14, FR11; ARCHITECTURE §15). Depends on P1-T9, P2-A3 (done). All of Phase 2 (Tracks A/B/C) is complete.
-- **Phase 4 — Visual Document Review** is now specced (`/docs/specs/visual-document-review.md`) and added below. It is **new scope gated on a PRD §4 doc change** (narrowing the OCR non-goal); start it only after that amendment is accepted. It can run in parallel with Phase 3 (its only Phase-2/3 dependency, P2-C3/C4, is done).
+- **Phase 4 — Visual Document Review** is specced (`/docs/specs/visual-document-review.md`) and **unblocked** — the gating PRD §4/§10 + ARCHITECTURE amendments were applied 2026-05-27. It can run in parallel with Phase 3 (its only Phase-2/3 dependency, P2-C3/C4, is done). First ticket: **P4-T1 — page rasterization + image serving**.
 - Still OPEN — **Phase 1 exit gate (live stack)**: deferred only because the Docker daemon is unavailable in the dev session. Run once Docker is up, before demo:
   1. `docker compose up -d db` then `DATABASE_URL=postgresql+psycopg://invoicescreener:invoicescreener@localhost:5432/invoicescreener pytest tests/integration/test_postgres_repository.py` — un-skips the Postgres round-trip.
   2. `docker compose up` — API lifespan `init_schema` + reflection + the mcp-reference/mock-clinrun services end-to-end.
@@ -391,7 +392,7 @@ hallucinated).
 ## Deferred / Out of Scope
 - PRD §4 Non-Goals: perfect OCR/document intelligence; supporting every invoice format; replacing finance/compliance workflows; production-scale email ingestion; full ClinRun production integration (mock used instead); guaranteed 100% match accuracy in ambiguous cases.
   - **Out-of-plan addition (2026-05-27, user-requested):** a *controlled-format* real-PDF demo path (`samples/generate_pdfs.py` → `backend/parser/pdf.py` + `backend/tools/process_pdf.py`, RUNBOOK Path D). We render the PDFs ourselves, so this does not claim to parse arbitrary invoices — the OCR/arbitrary-document non-goal stands. See implementation-notes 2026-05-27 "EXTRA".
-  - **Phase 4 (2026-05-27, user-requested) revisits the OCR non-goal:** the new Visual Document Review phase (`/docs/specs/visual-document-review.md`) **narrows** "no perfect OCR/document intelligence" — it adds real OCR + vision extraction but only with human-verifiable, source-anchored highlights, initially on the controlled PDFs above. The non-goal is not repealed (no accuracy guarantee on arbitrary scans); it is scoped down. Requires the PRD §4 amendment before implementation starts.
+  - **Phase 4 (2026-05-27, user-requested) revisits the OCR non-goal:** the new Visual Document Review phase (`/docs/specs/visual-document-review.md`) **narrows** "no perfect OCR/document intelligence" — it adds real OCR + vision extraction but only with human-verifiable, source-anchored highlights, initially on the controlled PDFs above. The non-goal is not repealed (no accuracy guarantee on arbitrary scans); it is scoped down. PRD §4/§10 + ARCHITECTURE amended 2026-05-27 — Phase 4 is unblocked.
 - Authentication/authorization beyond basic operator access — not a PRD functional requirement; not planned for this scope.
 - Real MCP reference API and real ClinRun backend — wired only if provided (OD-4, OD-5); otherwise stub/mock.
 - Async job orchestration (OD-3) — MVP may run synchronously; revisited only if Phase 3 performance requires it.

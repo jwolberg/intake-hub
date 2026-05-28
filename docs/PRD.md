@@ -43,7 +43,14 @@ Build an AI-first workflow that can process sample clinical trial site invoices 
 
 This project is not expected to:
 
-- Build perfect OCR or document intelligence.
+- Guarantee perfect OCR or document intelligence on arbitrary documents.
+  *(Narrowed 2026-05-27 to unblock Phase 4 — Visual Document Review,
+  `/docs/specs/visual-document-review.md`. The system now performs OCR + vision
+  extraction and overlays the page image with **human-verifiable,
+  source-anchored highlights** (see §10), initially on controlled-format PDFs. It
+  still makes **no accuracy guarantee on arbitrary or low-quality scans,
+  handwriting, or multi-language documents** — imperfect extraction is surfaced
+  for a reviewer to catch, never trusted blindly.)*
 - Support every possible invoice format globally.
 - Replace all finance or compliance workflows.
 - Build a production-scale email ingestion system.
@@ -547,6 +554,11 @@ The detail view should include sections for:
 - Received timestamp
 - Attachment name
 - Original invoice preview or download link
+- Rendered page image(s) of the document with **bounding-box highlights** for each
+  extracted field/line item, anchored to where the value appears on the page
+  (Phase 4 — Visual Document Review). Highlights are status-coded (extracted /
+  uncertain / unreadable) and computed from real OCR geometry, so a field with no
+  backing OCR text shows no box. *(See `/docs/specs/visual-document-review.md`.)*
 
 **Extracted Metadata**
 
@@ -554,8 +566,11 @@ Display extracted fields with:
 
 - Value
 - Confidence
-- Source evidence
-- Editable correction field
+- Source evidence — both the text snippet and, when available, a **visual
+  highlight** on the page image; hovering/selecting a field highlights its box and
+  selecting a box focuses the field (Phase 4).
+- Editable correction field — uncertain fields are visually distinct and must be
+  confirmed or corrected (reusing the QC actions below) before a clean "reviewed".
 
 **Context Resolution**
 

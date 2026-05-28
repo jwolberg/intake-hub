@@ -105,8 +105,9 @@ testable and depends only on shared domain types, not on sibling modules.
 | Module | Responsibility | Key inputs | Key outputs |
 | --- | --- | --- | --- |
 | `intake` | Receive/simulate emails, register a workflow record, store source metadata | Email / sample file | `Invoice` record (status `received`) |
-| `parser` | Extract raw text + structure from PDF/image/body | Attachment, body | Parsed document text + sections |
-| `extraction` | LLM-driven structured extraction of metadata + line items | Parsed text | `InvoiceMetadata`, `LineItem[]`, confidences |
+| `parser` | Extract raw text + structure from PDF/image/body; **(Phase 4)** rasterize pages to normalized images | Attachment, body | Parsed document text + sections; **page rasters + dims** |
+| `ocr` *(Phase 4)* | Per-word boxes with normalized `[0,1]` coords + indices per page, behind an `OCRClient` (Tesseract default, offline stub) | Page raster | `WordBox[]` |
+| `extraction` | LLM-driven structured extraction of metadata + line items; **(Phase 4)** vision extraction citing OCR word indices | Parsed text; **page image + `WordBox[]`** | `InvoiceMetadata`, `LineItem[]`, confidences; **`Citation[]`** |
 | `context` | Resolve sponsor/study/site via MCP reference API | Extracted metadata, sender | `ResolvedContext` + candidates + warnings |
 | `catalog` | Fetch sponsor+study-scoped catalog; cache it | Resolved sponsor/study | `CatalogItem[]` |
 | `matching` | Match line items to catalog items | `LineItem[]`, `CatalogItem[]` | `MatchResult[]` |
@@ -122,6 +123,13 @@ testable and depends only on shared domain types, not on sibling modules.
 orchestrator's contract, never sideways. `matching` does not import `context`; it
 receives `ResolvedContext` and `CatalogItem[]` as inputs. This keeps each stage
 unit-testable in isolation and mockable for integration tests.
+
+**Phase 4 — Visual Document Review** (`/docs/specs/visual-document-review.md`) adds
+the `ocr` module and extends `parser` (rasterization) and `extraction` (vision)
+without disturbing the dependency rule: OCR runs on the parser's page rasters,
+vision extraction consumes the image + `WordBox[]`, and everything downstream of
+extraction (`context` … `decision`, QC, rerun, metrics) is unchanged — `Citation[]`
+is additive metadata on the extraction output.
 
 ## 5. Pipeline Data Flow
 
@@ -218,6 +226,16 @@ provider (OpenAI or equivalent) is a configuration detail.
   without live model calls.
 - **Matching is hybrid, not pure LLM.** See §9 — the LLM assists semantic mapping,
   but deterministic amount/quantity checks gate the final match decision.
+- **Vision extraction (Phase 4).** The `LLMClient` gains a vision path (or a
+  `VisionLLMClient`) that receives the rendered page image **plus the OCR word
+  list** (each word tagged with an integer index). For each field/line it returns a
+  value, a `status` (`extracted`/`uncertain`/`unreadable`/`missing`), and a
+  `citation` carrying **`word_indices`** — indices into the OCR word list, **never
+  raw coordinates**. The server resolves those indices to a bounding box from real
+  OCR geometry (§12), so the model cannot hallucinate a highlight; it can only
+  point at words that exist. The offline default stays deterministic: a stub
+  matches extracted values to OCR words to synthesize citations without a live
+  vision model (testing strategy §18). See `/docs/specs/visual-document-review.md`.
 
 ## 9. Matching Strategy
 
@@ -296,6 +314,15 @@ Design notes:
   and for the AI-vs-human distinction.
 - **`exceptions` carry type + severity + message**, so the hub can filter by
   exception kind and the decision engine can reason over them.
+- **Citations (Phase 4).** Each extracted field/line item may carry a `Citation`
+  `{page_number, target_id, quote, bbox, status}`, where `bbox` is a
+  `BoundingBox {x, y, width, height}` in normalized `[0,1]` page space (resolved
+  server-side from the union of cited OCR `WordBox` geometry). `target_id` keys the
+  citation to its extracted thing (`metadata.<field>` or `line_item.<id>.<attr>`),
+  reusing the per-field signal shape from the extraction output. Provisional
+  persistence (OD-9): surface citations + page dims in the detail payload alongside
+  the existing extraction signals; promote to a `citations` table only if querying
+  demands it. See `/docs/specs/visual-document-review.md`.
 
 ## 13. API Surface
 
@@ -312,6 +339,8 @@ The API layer is a thin translation of orchestrator/state into JSON. Endpoints
 | `/api/invoices/:id/rerun` | POST | Re-run with original or corrected data |
 | `/api/invoices/:id/reviewed` | POST | Mark reviewed post-decision |
 | `/api/invoices/:id/escalate` | POST | Escalate for manual handling |
+| `/api/invoices/:id/pages` | GET | *(Phase 4)* Page count + raster dimensions |
+| `/api/invoices/:id/pages/:n/image` | GET | *(Phase 4)* Rendered page raster (PNG/JPEG) for the overlay |
 
 The hub reads list/detail and triggers QC actions; it does no business logic of its
 own — all decisioning lives server-side and is merely surfaced.
