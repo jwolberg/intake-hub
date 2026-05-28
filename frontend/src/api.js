@@ -2,7 +2,12 @@
 // invoices the AI has decided on; the POST helpers drive the post-decision human
 // QC actions (PRD FR10): correct, review, escalate, note, rerun.
 
-const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+export const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+
+// URL of a rendered page raster (1-based) for the Source overlay (P4-T5).
+export function pageImageUrl(id, pageNumber) {
+  return `${API_URL}/api/invoices/${id}/pages/${pageNumber}/image`;
+}
 
 async function getJSON(path) {
   const resp = await fetch(`${API_URL}${path}`);

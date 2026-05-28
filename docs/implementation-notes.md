@@ -1027,3 +1027,51 @@ payload — so the reviewer overlay (P4-T5) has real boxes to draw.
 **Validation:** `ruff` clean; full suite **146 passed, 1 skipped** (+6 citation
 unit + 2 detail-payload API; fixed the JSON-path regression the format check
 introduced). No network/model.
+
+## 2026-05-28 — P4-T5 Reviewer overlay UI (image + SVG boxes) (Phase 4)
+
+Frontend-only. The detail Source section now renders the page image(s) with the
+AI's source-anchored highlight boxes drawn over them, two-way linked to the
+fields/line items.
+
+**What landed**
+- `frontend/src/api.js` — exported `API_URL` + `pageImageUrl(id, n)`.
+- `frontend/src/components/InvoiceDetail.jsx` — `SourceOverlay` renders each page
+  raster inside a positioned frame with an `<svg viewBox="0 0 1 1"
+  preserveAspectRatio="none">` overlay; one `<rect>` per citation that has a
+  resolved `bbox` (citations with `bbox === null` are skipped — no hallucinated
+  box), coloured by `status` (extracted = teal, uncertain = dashed amber).
+  Citations grouped by `page_number` for multi-page. Two-way linking via a shared
+  `hovered` target_id: metadata rows + line-item rows carry `data-row` + hover
+  handlers (a `rowLink` helper), the matching rect gets `is-highlight`, and
+  clicking a rect scrolls its field into view.
+- `frontend/src/styles.css` — `.page-frame`/`.page-image`/`.page-overlay` +
+  `.cite-*` rect styles (`vector-effect: non-scaling-stroke` so stroke width is
+  px-constant regardless of the unit-square viewBox) + `.row-linked` row
+  highlight, all from the existing ClinRun palette tokens.
+
+**Decisions (not pre-specified)**
+- **No scaling math** — boxes are normalized `[0,1]` and the SVG uses
+  `viewBox="0 0 1 1"` + `preserveAspectRatio="none"`, so a `<rect>` takes the bbox
+  verbatim and the browser maps the unit square onto the rendered image at any
+  size (spec §3/§4.5).
+- **Overlay is pointer-transparent except the rects** (`pointer-events` only on
+  `.cite-rect`) so the page image stays selectable and only the boxes are
+  interactive.
+- **Reused the existing detail payload** (`pages` + `citations` from P4-T4); no
+  new endpoint. Page image bytes come from the existing `/pages/:n/image` route.
+
+**Browser verification (offline, no Docker).** Ran the app with an in-memory repo
++ stub clients (throwaway runner, not committed) seeding the controlled PDF, and
+the Vite dev server, then drove it with agent-browser: the INV-1001 detail shows
+the page image with **13 teal highlight boxes** over the header/line text;
+hovering a box highlights its field row (and fills the box) and vice versa.
+(Default API/hub ports 8000/`localhost:5173` collide with a stray local server on
+this machine — used 8011 + `127.0.0.1`; see the earlier 2026-05-27 env note.)
+
+**Follow-up (P4-T6):** uncertain boxes are already visually distinct (dashed
+amber); gating a clean "reviewed" on confirming them + confirm/correct from the
+overlay is T6.
+
+**Validation:** `npm run build` clean; backend suite unaffected (146 passed, 1
+skipped). Verified live in a browser per the above.

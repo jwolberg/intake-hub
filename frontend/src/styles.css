@@ -131,3 +131,25 @@ tbody tr:hover { background: var(--row-hover); }
 .timeline { list-style: none; padding: 0; margin: 0; font-size: 0.84rem; }
 .timeline li { padding: 0.25rem 0; border-bottom: 1px dashed var(--border); display: flex; gap: 0.6rem; }
 .timeline .ts { color: var(--muted); min-width: 200px; }
+
+/* Source page image + bounding-box overlay (Visual Document Review, P4-T5). */
+.overlay-hint { margin: 0.2rem 0 0.6rem; }
+.pages { display: flex; flex-wrap: wrap; gap: 1rem; }
+.page { margin: 0; }
+.page-frame { position: relative; display: inline-block; max-width: 420px;
+  border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.page-image { display: block; width: 100%; height: auto; }
+/* The overlay sits exactly over the image; viewBox="0 0 1 1" maps the unit
+   square onto it (preserveAspectRatio="none"), so rect coords are the [0,1]
+   bbox verbatim. pointer-events on rects only, so the image stays selectable. */
+.page-overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.cite-rect { fill: transparent; stroke-width: 1.5px; vector-effect: non-scaling-stroke;
+  pointer-events: all; cursor: pointer; transition: fill 0.1s ease; }
+.cite-extracted { stroke: var(--primary); }
+.cite-uncertain { stroke: var(--hold); stroke-dasharray: 4 2; }
+.cite-unreadable, .cite-missing { stroke: var(--failed); }
+.cite-rect:hover, .cite-rect.is-highlight { stroke-width: 2.5px; }
+.cite-extracted.is-highlight, .cite-extracted:hover { fill: rgba(21, 154, 156, 0.22); }
+.cite-uncertain.is-highlight, .cite-uncertain:hover { fill: rgba(181, 115, 27, 0.22); }
+/* The field row whose box is hovered (and vice versa). */
+.row-linked > td { background: var(--submit-bg); }

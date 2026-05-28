@@ -6,7 +6,7 @@
 // and the decision (submit/hold + confidence + rationale + risk flags +
 // submission status) — plus the human QC actions (correct/review/escalate/note).
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import {
   addNote,
@@ -14,6 +14,7 @@ import {
   correctMetadata,
   escalateInvoice,
   markReviewed,
+  pageImageUrl,
   rerunInvoice,
 } from "../api.js";
 
@@ -68,6 +69,65 @@ function submissionStatus(invoice, event) {
   return "Pending";
 }
 
+// Page image(s) + an SVG overlay of source-anchored highlight boxes (P4-T5).
+// Boxes are normalized to [0,1] so the SVG uses viewBox="0 0 1 1" with
+// preserveAspectRatio="none" — no scaling math, the browser maps the unit square
+// onto the rendered image. A citation with no resolved bbox is not drawn (no
+// hallucinated highlight, spec §3). Hovering a box ↔ its field is two-way.
+function SourceOverlay({ invoiceId, pages, citations, hovered, setHovered, scrollToRow }) {
+  if (!pages?.length) return null;
+  const byPage = {};
+  for (const c of citations ?? []) {
+    if (!c.bbox) continue; // unanchored: no box
+    (byPage[c.page_number] ??= []).push(c);
+  }
+
+  return (
+    <div className="pages">
+      {pages.map((page) => (
+        <figure className="page" key={page.page_number}>
+          <div className="page-frame">
+            <img
+              className="page-image"
+              src={pageImageUrl(invoiceId, page.page_number)}
+              alt={`Invoice page ${page.page_number}`}
+            />
+            <svg
+              className="page-overlay"
+              viewBox="0 0 1 1"
+              preserveAspectRatio="none"
+              aria-hidden="true"
+            >
+              {(byPage[page.page_number] ?? []).map((c) => (
+                <rect
+                  key={c.target_id}
+                  data-target-id={c.target_id}
+                  className={`cite-rect cite-${c.status}${
+                    hovered === c.target_id ? " is-highlight" : ""
+                  }`}
+                  x={c.bbox.x}
+                  y={c.bbox.y}
+                  width={c.bbox.width}
+                  height={c.bbox.height}
+                  onMouseEnter={() => setHovered(c.target_id)}
+                  onMouseLeave={() => setHovered(null)}
+                  onClick={() => {
+                    setHovered(c.target_id);
+                    scrollToRow(c.target_id);
+                  }}
+                >
+                  <title>{`${c.quote} (${c.status})`}</title>
+                </rect>
+              ))}
+            </svg>
+          </div>
+          <figcaption className="muted small">Page {page.page_number}</figcaption>
+        </figure>
+      ))}
+    </div>
+  );
+}
+
 export default function InvoiceDetail({ detail, onAction, setError }) {
   const { invoice, source, extraction, line_items, context, matches, exceptions, audit } =
     detail;
@@ -88,6 +148,28 @@ export default function InvoiceDetail({ detail, onAction, setError }) {
   const [lineEdits, setLineEdits] = useState({});
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
+  // Source-overlay ↔ field two-way linking (P4-T5): the target_id currently
+  // highlighted, shared between the SVG boxes and the metadata / line-item rows.
+  const [hovered, setHovered] = useState(null);
+  const rootRef = useRef(null);
+  const pages = detail.pages ?? [];
+  const citations = detail.citations ?? [];
+
+  function scrollToRow(targetId) {
+    rootRef.current
+      ?.querySelector(`[data-row="${targetId}"]`)
+      ?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  // Props that make a row light up in sync with its highlight box.
+  function rowLink(targetId) {
+    return {
+      "data-row": targetId,
+      className: hovered === targetId ? "row-linked" : undefined,
+      onMouseEnter: () => setHovered(targetId),
+      onMouseLeave: () => setHovered(null),
+    };
+  }
 
   // Run a QC action; the route returns the refreshed detail, which onAction applies.
   function run(promise) {
@@ -130,7 +212,7 @@ export default function InvoiceDetail({ detail, onAction, setError }) {
   }
 
   return (
-    <div>
+    <div ref={rootRef}>
       <div className="panel">
         <h2>
           {effective("invoice_number") ?? invoice.id}{" "}
@@ -242,6 +324,22 @@ export default function InvoiceDetail({ detail, onAction, setError }) {
           <dt>Channel</dt><dd>{source?.channel ?? invoice.source ?? "—"}</dd>
           <dt>Attachment</dt><dd>{source?.attachment ?? "—"}</dd>
         </dl>
+        {pages.length > 0 && (
+          <>
+            <p className="muted small overlay-hint">
+              Hover an extracted field or line item to locate it on the page; click a
+              box to jump to its field.
+            </p>
+            <SourceOverlay
+              invoiceId={invoice.id}
+              pages={pages}
+              citations={citations}
+              hovered={hovered}
+              setHovered={setHovered}
+              scrollToRow={scrollToRow}
+            />
+          </>
+        )}
         {detail.source_text && (
           <details>
             <summary className="muted">Original invoice preview</summary>
@@ -269,7 +367,7 @@ export default function InvoiceDetail({ detail, onAction, setError }) {
               const isMissing = missing.has(key) || value == null || value === "";
               const corrected = key in overlay;
               return (
-                <tr key={key}>
+                <tr key={key} {...rowLink(`metadata.${key}`)}>
                   <td className="muted">{label}</td>
                   <td>
                     {corrected ? (
@@ -383,7 +481,7 @@ export default function InvoiceDetail({ detail, onAction, setError }) {
                 ? matchOverlay[li.id].catalog_description ?? matchOverlay[li.id].catalog_item_id
                 : m?.catalog_description;
               return (
-                <tr key={li.id}>
+                <tr key={li.id} {...rowLink(`line_item.${li.id}.raw_description`)}>
                   <td>
                     {li.raw_description}
                     {li.normalized_description && (
