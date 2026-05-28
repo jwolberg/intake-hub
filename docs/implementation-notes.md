@@ -1123,3 +1123,23 @@ the actual hub origin; see the 2026-05-27 env note.)
 
 **Validation:** `ruff` clean; backend suite **148 passed, 1 skipped** (+2 confirm
 endpoint tests); `npm run build` clean; full confirm→gate flow verified live.
+
+## 2026-05-28 — "View source" side panel (UI refinement, user-requested)
+
+Moved the original-document view out of the inline Source panel into a dismissible
+right-hand **drawer** opened by a **View source ↗** button.
+
+- `InvoiceDetail.jsx` — `SourceDrawer` (a fixed right `aside`) hosts the page
+  image + highlight overlay (or the text preview / an empty-state when there is no
+  rasterizable source); the Source panel keeps the metadata + the button (disabled
+  when there is nothing to show). `styles.css` — `.source-drawer` etc.
+- **Non-modal on purpose.** No backdrop, so the reviewer can still hover the
+  metadata/line rows while the source sits alongside — the box ↔ field
+  two-way highlighting (shared `hovered` state) stays live across the drawer.
+  Reuses the existing `SourceOverlay` verbatim, so all P4-T5/T6 behaviour
+  (status colours, click-to-scroll, uncertain gating) is unchanged, just relocated.
+
+**Browser-verified** (offline runner): View source opens the drawer with the
+page image + 13 boxes for the controlled PDF; hovering the Vendor row highlights
+its box inside the drawer; a body-only invoice shows the text preview instead of
+an image. `npm run build` clean; backend untouched.

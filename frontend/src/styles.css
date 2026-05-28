@@ -154,3 +154,19 @@ tbody tr:hover { background: var(--row-hover); }
 .cite-uncertain.is-highlight, .cite-uncertain:hover { fill: rgba(181, 115, 27, 0.22); }
 /* The field row whose box is hovered (and vice versa). */
 .row-linked > td { background: var(--submit-bg); }
+
+/* "View source" side panel — docked right, non-modal so the field ↔ box
+   highlighting stays interactive while the source sits alongside. */
+.source-drawer {
+  position: fixed; top: 0; right: 0; bottom: 0;
+  width: min(540px, 92vw); background: var(--panel, #fff);
+  border-left: 1px solid var(--border); box-shadow: -8px 0 24px rgba(0, 0, 0, 0.12);
+  z-index: 50; display: flex; flex-direction: column;
+}
+.drawer-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0.75rem 1rem; border-bottom: 1px solid var(--border);
+}
+.drawer-body { padding: 1rem; overflow: auto; }
+.source-drawer .page-frame { max-width: 100%; }
+.source-drawer .pages { display: block; }

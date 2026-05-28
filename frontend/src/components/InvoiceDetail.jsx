@@ -148,6 +148,46 @@ function SourceOverlay({ invoiceId, pages, citations, resolved, hovered, setHove
   );
 }
 
+// "View source" side panel: the original document (page image + highlight
+// overlay, or text preview) docked on the right. Non-modal so the reviewer can
+// still hover the fields/line items — the box ↔ field highlighting stays live
+// while the source sits alongside.
+function SourceDrawer({ open, onClose, invoiceId, source, pages, citations, resolved,
+                        sourceText, hovered, setHovered, scrollToRow }) {
+  if (!open) return null;
+  return (
+    <aside className="source-drawer" aria-label="Original source">
+      <div className="drawer-head">
+        <strong>Original source{source?.attachment ? ` — ${source.attachment}` : ""}</strong>
+        <button className="small-btn" onClick={onClose}>Close ✕</button>
+      </div>
+      <div className="drawer-body">
+        {pages.length > 0 ? (
+          <>
+            <p className="muted small">
+              Hover an extracted field or line item to locate it; click a box to jump
+              to its field.
+            </p>
+            <SourceOverlay
+              invoiceId={invoiceId}
+              pages={pages}
+              citations={citations}
+              resolved={resolved}
+              hovered={hovered}
+              setHovered={setHovered}
+              scrollToRow={scrollToRow}
+            />
+          </>
+        ) : sourceText ? (
+          <pre className="preview">{sourceText}</pre>
+        ) : (
+          <p className="muted">No original document image for this invoice.</p>
+        )}
+      </div>
+    </aside>
+  );
+}
+
 export default function InvoiceDetail({ detail, onAction, setError }) {
   const { invoice, source, extraction, line_items, context, matches, exceptions, audit } =
     detail;
@@ -171,9 +211,11 @@ export default function InvoiceDetail({ detail, onAction, setError }) {
   // Source-overlay ↔ field two-way linking (P4-T5): the target_id currently
   // highlighted, shared between the SVG boxes and the metadata / line-item rows.
   const [hovered, setHovered] = useState(null);
+  const [sourceOpen, setSourceOpen] = useState(false);
   const rootRef = useRef(null);
   const pages = detail.pages ?? [];
   const citations = detail.citations ?? [];
+  const hasSource = pages.length > 0 || Boolean(detail.source_text);
 
   // Uncertain citations gate a clean review (P4-T6): each must be confirmed
   // against the page image or corrected (a correction supplies a verified value).
@@ -417,37 +459,28 @@ export default function InvoiceDetail({ detail, onAction, setError }) {
         )}
       </div>
 
-      {/* Source (PRD §10). */}
+      {/* Source (PRD §10) — metadata inline; the original document opens in a
+          side panel via "View source" so it can sit alongside the fields. */}
       <div className="panel">
-        <h2>Source</h2>
+        <h2>
+          Source{" "}
+          <button
+            className="small-btn"
+            disabled={!hasSource}
+            title={hasSource ? undefined : "No original document for this invoice"}
+            onClick={() => setSourceOpen(true)}
+          >
+            View source ↗
+          </button>
+        </h2>
         <dl className="kv">
           <dt>Subject</dt><dd>{source?.subject ?? "—"}</dd>
           <dt>Sender</dt><dd>{source?.sender ?? "—"}</dd>
           <dt>Channel</dt><dd>{source?.channel ?? invoice.source ?? "—"}</dd>
           <dt>Attachment</dt><dd>{source?.attachment ?? "—"}</dd>
         </dl>
-        {pages.length > 0 && (
-          <>
-            <p className="muted small overlay-hint">
-              Hover an extracted field or line item to locate it on the page; click a
-              box to jump to its field.
-            </p>
-            <SourceOverlay
-              invoiceId={invoice.id}
-              pages={pages}
-              citations={citations}
-              resolved={resolvedTargets}
-              hovered={hovered}
-              setHovered={setHovered}
-              scrollToRow={scrollToRow}
-            />
-          </>
-        )}
-        {detail.source_text && (
-          <details>
-            <summary className="muted">Original invoice preview</summary>
-            <pre className="preview">{detail.source_text}</pre>
-          </details>
+        {!hasSource && (
+          <p className="muted small">No original document image for this invoice.</p>
         )}
       </div>
 
@@ -658,6 +691,20 @@ export default function InvoiceDetail({ detail, onAction, setError }) {
           ))}
         </ul>
       </div>
+
+      <SourceDrawer
+        open={sourceOpen}
+        onClose={() => setSourceOpen(false)}
+        invoiceId={invoice.id}
+        source={source}
+        pages={pages}
+        citations={citations}
+        resolved={resolvedTargets}
+        sourceText={detail.source_text}
+        hovered={hovered}
+        setHovered={setHovered}
+        scrollToRow={scrollToRow}
+      />
     </div>
   );
 }
