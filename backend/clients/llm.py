@@ -80,3 +80,75 @@ def parse_json_or_raise(raw: str) -> dict:
     if not isinstance(value, dict):
         raise ValueError("LLM returned valid JSON but not an object")
     return value
+
+
+# Appended to the caller's system prompt so the provider returns parseable JSON.
+_JSON_ONLY = (
+    "\n\nReturn ONLY a single JSON object. No prose, no explanation, "
+    "no markdown code fences."
+)
+
+
+def _strip_fences(text: str) -> str:
+    """Drop a leading ```json / ``` fence and trailing ``` if the model added one."""
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        stripped = stripped.split("\n", 1)[-1] if "\n" in stripped else stripped
+        if stripped.endswith("```"):
+            stripped = stripped[: -len("```")]
+    return stripped.strip()
+
+
+class AnthropicLLMClient:
+    """Real LLM provider via the Anthropic API (OD-2; uses the official SDK).
+
+    Implements the same ``LLMClient.complete_json`` contract as the offline
+    stand-ins, so extraction (and match adjudication) get genuine model-derived
+    output — including per-field confidence — without any other pipeline change.
+    Selected by ``get_llm_client()`` only when an API key is configured; the
+    offline ``PassthroughLLMClient`` remains the default so dev/tests stay
+    network-free.
+
+    The ``anthropic`` package is imported lazily, so it is required only when this
+    client is actually used. The (constant) system prompt is cached
+    (``cache_control: ephemeral``) so processing many invoices reuses the cached
+    prefix; the per-invoice text goes in the user turn, after the cached prefix.
+    """
+
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        model: str = "claude-opus-4-7",
+        max_tokens: int = 4096,
+    ) -> None:
+        self._api_key = api_key
+        self._model = model
+        self._max_tokens = max_tokens
+        self._client = None
+
+    def _ensure_client(self):
+        if self._client is None:
+            import anthropic  # lazy: only the real-provider path needs the SDK
+
+            self._client = (
+                anthropic.Anthropic(api_key=self._api_key)
+                if self._api_key
+                else anthropic.Anthropic()
+            )
+        return self._client
+
+    def complete_json(self, *, system: str, user: str) -> dict:
+        client = self._ensure_client()
+        message = client.messages.create(
+            model=self._model,
+            max_tokens=self._max_tokens,
+            system=[{
+                "type": "text",
+                "text": system + _JSON_ONLY,
+                "cache_control": {"type": "ephemeral"},
+            }],
+            messages=[{"role": "user", "content": user}],
+        )
+        text = "".join(block.text for block in message.content if block.type == "text")
+        return parse_json_or_raise(_strip_fences(text))

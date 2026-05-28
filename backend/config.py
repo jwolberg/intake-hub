@@ -17,6 +17,11 @@ class Settings:
     mcp_reference_url: str
     clinrun_url: str
     cors_origins: tuple[str, ...]
+    # OD-2: real LLM provider. When ``anthropic_api_key`` is set, the pipeline
+    # uses the live Anthropic API for extraction (model-derived per-field
+    # confidence); otherwise it falls back to the offline stand-in (network-free).
+    anthropic_api_key: str | None
+    llm_model: str
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -33,6 +38,8 @@ class Settings:
             ),
             clinrun_url=os.environ.get("CLINRUN_URL", "http://mock-clinrun:8200"),
             cors_origins=tuple(o.strip() for o in origins.split(",") if o.strip()),
+            anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY") or None,
+            llm_model=os.environ.get("LLM_MODEL", "claude-opus-4-7"),
         )
 
 

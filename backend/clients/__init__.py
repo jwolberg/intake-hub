@@ -27,7 +27,13 @@ from .errors import (
     ReferenceUnavailable,
     SubmissionFailed,
 )
-from .llm import LLMClient, PassthroughLLMClient, StubLLMClient, parse_json_or_raise
+from .llm import (
+    AnthropicLLMClient,
+    LLMClient,
+    PassthroughLLMClient,
+    StubLLMClient,
+    parse_json_or_raise,
+)
 from .mcp_reference import (
     HttpMCPReferenceClient,
     MCPReferenceClient,
@@ -41,6 +47,7 @@ from .vision import (
 )
 
 __all__ = [
+    "AnthropicLLMClient",
     "CatalogNotFound",
     "ClinRunClient",
     "ClinRunClientError",
@@ -85,11 +92,16 @@ def get_clinrun_client() -> ClinRunClient:
 def get_llm_client() -> LLMClient:
     """Default LLM client.
 
-    Returns the offline passthrough stand-in (echoes the structured document the
-    parser renders) so the MVP runs without a provider key. Wiring a real
-    provider (OD-2) is a one-line change here. ``StubLLMClient`` remains the tool
-    for scripted unit tests.
+    When ``ANTHROPIC_API_KEY`` is configured, returns the live Anthropic provider
+    (OD-2) so extraction confidence is genuinely model-derived. Otherwise returns
+    the offline passthrough stand-in (echoes the structured document the parser
+    renders) so dev/tests run without a provider key. ``StubLLMClient`` remains
+    the tool for scripted unit tests.
     """
+    if settings.anthropic_api_key:
+        return AnthropicLLMClient(
+            api_key=settings.anthropic_api_key, model=settings.llm_model
+        )
     return PassthroughLLMClient()
 
 

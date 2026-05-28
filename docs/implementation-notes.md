@@ -1143,3 +1143,53 @@ right-hand **drawer** opened by a **View source ↗** button.
 page image + 13 boxes for the controlled PDF; hovering the Vendor row highlights
 its box inside the drawer; a body-only invoice shows the text preview instead of
 an image. `npm run build` clean; backend untouched.
+
+## 2026-05-28 — Real LLM provider (OD-2), user-requested
+
+Wires a live Anthropic provider behind the existing `LLMClient` interface so
+extraction confidence is **model-derived** instead of the deterministic offline
+heuristics (which is why every invoice read a flat ~90%).
+
+**What landed**
+- `backend/clients/llm.py` — `AnthropicLLMClient.complete_json` (official
+  `anthropic` SDK, **lazily imported**); model `claude-opus-4-7` (configurable),
+  the constant system prompt sent as a cached block (`cache_control: ephemeral`)
+  with the per-invoice text in the user turn; response text de-fenced + parsed
+  via the shared `parse_json_or_raise`.
+- `backend/clients/__init__.py` — `get_llm_client()` returns `AnthropicLLMClient`
+  when `settings.anthropic_api_key` is set, else `PassthroughLLMClient` (offline
+  default). The orchestrator's `_extraction_llm` leaves a real provider untouched
+  (it only swaps the *offline* JSON stand-in for the PDF layout stand-in), so a
+  real provider handles both JSON and PDF-layout text.
+- `backend/config.py` — `ANTHROPIC_API_KEY` + `LLM_MODEL` (default
+  `claude-opus-4-7`).
+- `backend/extraction/__init__.py` — enriched `EXTRACTION_SYSTEM` to request the
+  per-field `{value, confidence, evidence}` shape + per-line
+  `extraction_confidence`. Offline stand-ins ignore the system prompt, so this
+  only changes the real-provider path; offline values stay flat and derive
+  confidence as before.
+- `backend/requirements.txt` — added `anthropic` (only needed when the key is set).
+
+**Decisions (not pre-specified)**
+- **Official SDK, lazy import.** Per the claude-api skill (Python project → use
+  the `anthropic` SDK, not raw HTTP). Imported inside `_ensure_client`, so the
+  offline path and the test suite never require the package.
+- **Generic `complete_json`, no baked schema.** The same method serves extraction
+  *and* match adjudication (different shapes), so the client doesn't impose a
+  structured-output schema — it appends a "return ONLY JSON" instruction and
+  parses (stripping ``` fences). Structured outputs could be added per-caller
+  later.
+- **Gated by key presence, not a flag.** Absence of `ANTHROPIC_API_KEY` ⇒ offline,
+  so dev/tests/CI stay network-free with zero config; setting the key flips the
+  default everywhere (`get_llm_client`) including the API process route.
+- **No `temperature`/`budget_tokens`/thinking** sent (removed on Opus 4.7;
+  extraction is a structured task — thinking omitted keeps it cheap/fast).
+
+**Not live-tested.** No `ANTHROPIC_API_KEY` is available in this dev session, so
+the live API path was exercised only with a **fake SDK client** in unit tests
+(request shape + fenced-JSON parsing + provider selection). To verify for real:
+set the key, restart the API, and `python -m backend.tools.seed_hub` — the
+confidence column should then vary by the model's own certainty.
+
+**Validation:** `ruff` clean; full suite **150 passed, 1 skipped** (+2 client
+tests). Offline path unchanged.

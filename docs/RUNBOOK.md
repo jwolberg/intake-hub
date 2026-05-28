@@ -17,8 +17,13 @@ curl -X POST http://localhost:8000/api/invoices/process \
   -H 'Content-Type: application/json' --data @samples/inv_clean_001.json
 ```
 
-No LLM API key is required: the MVP uses an offline extraction stand-in
-(`PassthroughLLMClient`). A real provider is wired later (Open Decision OD-2).
+No LLM API key is required: by default the pipeline uses an offline extraction
+stand-in (`PassthroughLLMClient` for JSON samples, `LayoutLLMClient` for PDFs).
+To use a **real LLM provider** (OD-2) so extraction — including per-field
+confidence — is model-derived, set `ANTHROPIC_API_KEY` (and optionally
+`LLM_MODEL`, default `claude-opus-4-7`) before starting the API; see
+§Environment variables. Restart the API after setting it (config is read once at
+startup).
 
 ## Prerequisites
 
@@ -70,6 +75,14 @@ runs.
 | `MCP_REFERENCE_URL` | `http://mcp-reference:8100` | `http://localhost:8100` |
 | `CLINRUN_URL` | `http://mock-clinrun:8200` | `http://localhost:8200` |
 | `VITE_API_URL` (frontend) | `http://localhost:8000` | — |
+| `ANTHROPIC_API_KEY` | _(unset → offline stand-in)_ | `sk-ant-...` (enables the real LLM provider, OD-2) |
+| `LLM_MODEL` | `claude-opus-4-7` | e.g. `claude-haiku-4-5` |
+
+When `ANTHROPIC_API_KEY` is set, `get_llm_client()` returns `AnthropicLLMClient`
+(official `anthropic` SDK, imported lazily) and extraction confidence comes from
+the model. Unset → fully offline, network-free. After setting it, restart the API
+and reprocess (e.g. `python -m backend.tools.seed_hub`) to see model-derived
+confidences.
 
 ---
 

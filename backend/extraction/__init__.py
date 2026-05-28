@@ -36,8 +36,16 @@ from backend.domain import (
 from backend.extraction.citations import UNCERTAIN_BELOW
 
 EXTRACTION_SYSTEM = (
-    "Extract clinical-trial invoice header metadata and line items as a JSON "
-    "object with keys 'metadata' and 'line_items'."
+    "Extract clinical-trial invoice header metadata and line items from the "
+    "document text into a JSON object with keys 'metadata' and 'line_items'. "
+    "For each metadata field return an object "
+    '{"value": <string or null>, "confidence": <number 0..1>, '
+    '"evidence": <short snippet of the source text you read it from>}; '
+    "use null/0 when the field is absent. 'confidence' must reflect how certain "
+    "you are that you read the value correctly from this document — lower it for "
+    "smudged, ambiguous, or inferred values. Each line item is an object with "
+    "raw_description, quantity, unit_price, total, raw_source_text, and "
+    "extraction_confidence (number 0..1)."
 )
 
 _VALID_STATUS = {status.value for status in CitationStatus}
