@@ -157,6 +157,43 @@ def test_pages_404_for_unknown_invoice(client):
     assert client.get("/api/invoices/nope/pages/1/image").status_code == 404
 
 
+# --- source-anchored citations (P4-T4) --------------------------------------
+
+
+def test_detail_exposes_pages_and_resolved_citations(client):
+    # The controlled PDF extracts via the offline layout stand-in, so the detail
+    # payload carries page rasters + source-anchored highlight boxes.
+    sample = _sample("inv_clean_001.json")
+    sample["source"]["attachment_path"] = str(_PDF)
+    invoice_id = client.post("/api/invoices/process", json=sample).json()["id"]
+
+    detail = client.get(f"/api/invoices/{invoice_id}").json()
+    assert len(detail["pages"]) == 1
+
+    citations = {c["target_id"]: c for c in detail["citations"]}
+    inv = citations["metadata.invoice_number"]
+    assert inv["quote"] == "INV-1001"
+    assert inv["status"] == "extracted"
+    assert inv["page_number"] == 1
+    # box computed from real OCR geometry, normalized to [0,1]
+    bbox = inv["bbox"]
+    assert bbox is not None
+    assert 0.0 <= bbox["x"] <= 1.0 and 0.0 < bbox["width"] <= 1.0
+    # at least one line item is cited too
+    assert any(t.startswith("line_item.") for t in citations)
+
+
+def test_detail_has_no_citations_without_rasterizable_source(client):
+    # An email-body invoice has no page image, so no highlight boxes.
+    invoice_id = client.post(
+        "/api/invoices/process", json=_sample("inv_body_003.json")
+    ).json()["id"]
+
+    detail = client.get(f"/api/invoices/{invoice_id}").json()
+    assert detail["pages"] == []
+    assert detail["citations"] == []
+
+
 # --- human QC actions (P2-C3) -----------------------------------------------
 
 def _process(client, name):

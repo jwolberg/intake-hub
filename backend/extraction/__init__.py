@@ -33,15 +33,13 @@ from backend.domain import (
     ParsedDocument,
     WordBox,
 )
+from backend.extraction.citations import UNCERTAIN_BELOW
 
 EXTRACTION_SYSTEM = (
     "Extract clinical-trial invoice header metadata and line items as a JSON "
     "object with keys 'metadata' and 'line_items'."
 )
 
-# An anchored value below this confidence is surfaced as uncertain so the
-# reviewer must confirm it before a clean review (Visual Document Review spec §4).
-_UNCERTAIN_BELOW = 0.7
 _VALID_STATUS = {status.value for status in CitationStatus}
 
 # Confidence for derived (un-annotated) values: corroborated in source text vs
@@ -219,7 +217,7 @@ def _refine_status(raw_status: str | None, indices: list[int], confidence: float
         return CitationStatus.MISSING
     if not indices or raw_status == CitationStatus.UNREADABLE.value:
         return CitationStatus.UNREADABLE
-    if confidence < _UNCERTAIN_BELOW:
+    if confidence < UNCERTAIN_BELOW:
         return CitationStatus.UNCERTAIN
     return CitationStatus.EXTRACTED
 

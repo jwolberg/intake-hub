@@ -965,3 +965,65 @@ that cannot be hallucinated (spec §3).
 **Validation:** `ruff` clean; full suite **136 passed, 1 skipped** (+14 vision
 tests: word matcher, offline client, citations + status edge cases). No
 network/model.
+
+## 2026-05-28 — P4-T4 Citation → bbox resolution + persistence + detail (Phase 4)
+
+Resolves each citation's OCR `word_indices` into a highlight `bbox`, wires it into
+the pipeline, persists it, and surfaces `pages` + `citations` in the detail
+payload — so the reviewer overlay (P4-T5) has real boxes to draw.
+
+**What landed**
+- `backend/extraction/citations.py` — `synthesize_citations(extraction, words)`
+  (offline analogue: string-match each extracted value to OCR words via
+  `locate_value`) + `resolve_citations(citations, words)` (union cited word boxes
+  → one `bbox`, drop out-of-range, `None` when nothing resolves) + `_union`.
+  `UNCERTAIN_BELOW` moved here (single source of truth; `extraction/__init__`
+  imports it).
+- `backend/orchestrator/__init__.py` — `_attach_citations` runs after `extract`
+  when the source is rasterizable (render → OCR → synthesize → resolve);
+  citations persisted on the EXTRACTED audit event (`citations` key, OD-9, no
+  schema change). New `ocr` param (defaults to `get_ocr_client()`).
+- `backend/api/main.py` — `_build_detail` now returns `pages` (raster dims) +
+  `citations` (each with page_number + normalized bbox), grouped client-side by
+  page (spec §4.4).
+
+**Decisions / deviations (not pre-specified)**
+- **Citations synthesized from the extraction *result*, not the vision-client
+  prompt.** T3 built `extract_vision`/`OfflineVisionLLMClient`, whose offline
+  stand-in reads JSON from the prompt. But the controlled-PDF path parses to
+  *layout text* (not JSON), so that stand-in can't drive it. Deriving citations
+  from the final `ExtractionResult` + OCR words works uniformly for *both* the
+  JSON/Passthrough and PDF/Layout extraction paths, and is the truer offline
+  analogue (spec §7). `extract_vision` + `resolve_citations` remain the seam for a
+  *real* vision provider (OD-7) that emits indices directly — both funnel through
+  `resolve_citations`.
+- **Orchestrator picks the offline extraction stand-in by source
+  (`_extraction_llm`).** A real PDF (`attachment_path` ends `.pdf`) is parsed to
+  layout text, which `PassthroughLLMClient` (offline JSON stand-in) cannot read —
+  it returned empty extraction (a latent P4-T1 gap: the page endpoints worked but
+  extraction didn't). For real PDFs we now substitute `LayoutLLMClient` (the
+  offline PDF stand-in, as the `process_pdf` CLI does) so the controlled PDFs
+  extract *and* get citations through the normal `process()`/API entry — making
+  the T5 hub overlay demoable without manual client injection. **Keyed off
+  `attachment_path`, not `parsed.format`** — `_detect_format` returns "pdf" for a
+  JSON sample whose attachment is merely *named* `.pdf`, so a format check wrongly
+  swapped the client on the JSON path (caught by the metrics/pdf-pipeline tests).
+  An injected real provider (OD-2) is untouched.
+- **Citations are additive + non-fatal.** Any render/OCR failure (or a source
+  with no text/words) leaves the extraction untouched rather than failing the
+  invoice; non-rasterizable invoices (email-body) get `pages: []`, `citations: []`.
+- **Rerun does not re-synthesize citations** (kept in scope): the persisted
+  citations reflect the AI's original read of the page, which is exactly what the
+  overlay verifies against; corrections are already shown via the corrections
+  overlay. Re-anchoring corrected values is a possible later refinement.
+
+**Risks / follow-ups**
+- Detail GET renders pages on every call (PyMuPDF; `render_pages` is LRU-cached).
+  Fine at demo scale (single-page PDFs); revisit if hub latency matters (P3-T5).
+- Repeated identical text on a page (e.g. vendor == site) anchors to the first
+  occurrence — acceptable for the offline analogue; a real vision model
+  disambiguates by position.
+
+**Validation:** `ruff` clean; full suite **146 passed, 1 skipped** (+6 citation
+unit + 2 detail-payload API; fixed the JSON-path regression the format check
+introduced). No network/model.

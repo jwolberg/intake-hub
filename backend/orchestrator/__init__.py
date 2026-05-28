@@ -17,10 +17,15 @@ from datetime import datetime, timezone
 from backend import corrections
 from backend.audit import latest_details, record
 from backend.catalog import CatalogCache, InMemoryCatalogCache, fetch
-from backend.clients import get_clinrun_client, get_llm_client, get_reference_client
+from backend.clients import (
+    get_clinrun_client,
+    get_llm_client,
+    get_ocr_client,
+    get_reference_client,
+)
 from backend.clients.clinrun import ClinRunClient
 from backend.clients.errors import CatalogNotFound, ReferenceUnavailable, SubmissionFailed
-from backend.clients.llm import LLMClient
+from backend.clients.llm import LLMClient, PassthroughLLMClient
 from backend.clients.mcp_reference import MCPReferenceClient
 from backend.context import resolve
 from backend.corrections import apply_match_overlay
@@ -38,9 +43,13 @@ from backend.domain import (
 from backend.exceptions import build as build_exception
 from backend.exceptions import from_decision
 from backend.extraction import extract
+from backend.extraction.citations import resolve_citations, synthesize_citations
 from backend.intake import ingest
 from backend.matching import match
+from backend.ocr import OCRClient
 from backend.parser import parse
+from backend.parser.pdf import LayoutLLMClient
+from backend.parser.raster import is_rasterizable, render_pages
 from backend.submission import submit_invoice
 
 
@@ -50,6 +59,49 @@ def _advance(repo: Repository, invoice: Invoice, status: InvoiceStatus) -> None:
     repo.save_invoice(invoice)
 
 
+def _extraction_llm(parsed, llm: LLMClient) -> LLMClient:
+    """Pick the extraction client for the parsed source.
+
+    A real PDF (``attachment_path`` is a ``.pdf``) is parsed to *layout text*,
+    which the offline JSON stand-in (``PassthroughLLMClient``) cannot read;
+    substitute the offline PDF stand-in (``LayoutLLMClient``) so the controlled
+    sample PDFs extract — and thus get source-anchored citations — through the
+    normal pipeline. An injected real provider (OD-2) handles both and is left
+    untouched. Keyed off ``attachment_path`` (not ``parsed.format``, which is also
+    "pdf" for a JSON sample whose attachment is merely *named* ``.pdf``).
+    """
+    src_path = (parsed.source or {}).get("attachment_path")
+    is_real_pdf = bool(src_path) and str(src_path).lower().endswith(".pdf")
+    if is_real_pdf and isinstance(llm, PassthroughLLMClient):
+        return LayoutLLMClient()
+    return llm
+
+
+def _attach_citations(
+    extraction: ExtractionResult, source: dict, ocr: OCRClient
+) -> ExtractionResult:
+    """Add source-anchored citations when the invoice has a rasterizable source.
+
+    OCRs the original document and string-matches each extracted value to the word
+    boxes (the offline analogue of a vision model emitting indices, spec §7), then
+    resolves the indices to highlight boxes (P4-T4). Citations are additive: any
+    render/OCR failure leaves the extraction untouched rather than failing the
+    invoice. Invoices with no rasterizable source (e.g. email-body) get none.
+    """
+    path = source.get("attachment_path")
+    if not path or not is_rasterizable(path):
+        return extraction
+    try:
+        pages = render_pages(path)
+        words = ocr.extract_words(path, pages)
+    except (FileNotFoundError, ValueError, RuntimeError):
+        return extraction
+    if not words:
+        return extraction
+    citations = resolve_citations(synthesize_citations(extraction, words), words)
+    return extraction.model_copy(update={"citations": citations})
+
+
 def process(
     sample: dict,
     repo: Repository,
@@ -57,12 +109,14 @@ def process(
     llm: LLMClient | None = None,
     ref: MCPReferenceClient | None = None,
     clinrun: ClinRunClient | None = None,
+    ocr: OCRClient | None = None,
     catalog_cache: CatalogCache | None = None,
 ) -> Invoice:
     """Run one invoice end-to-end to a terminal state, persisting as it goes."""
     llm = llm or get_llm_client()
     ref = ref or get_reference_client()
     clinrun = clinrun or get_clinrun_client()
+    ocr = ocr or get_ocr_client()
 
     invoice = ingest(sample)
     repo.save_invoice(invoice)
@@ -85,7 +139,8 @@ def process(
             "format": parsed.format, "sections": parsed.sections,
         })
 
-        extraction = extract(invoice.id, parsed, llm)
+        extraction = extract(invoice.id, parsed, _extraction_llm(parsed, llm))
+        extraction = _attach_citations(extraction, source, ocr)
         invoice.metadata = extraction.metadata
         repo.replace_line_items(invoice.id, extraction.line_items)
         _advance(repo, invoice, InvoiceStatus.EXTRACTED)
@@ -99,6 +154,9 @@ def process(
             # reconstruct the extraction (P2-C2/C4).
             "field_confidence": extraction.field_confidence,
             "field_evidence": extraction.field_evidence,
+            # Source-anchored highlight boxes for the reviewer overlay (P4-T4),
+            # persisted on the extraction event (OD-9, no schema change).
+            "citations": [c.model_dump(mode="json") for c in extraction.citations],
         })
 
         _resolve_match_decide(

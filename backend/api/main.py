@@ -219,6 +219,15 @@ def _build_detail(invoice_id: str, repo: Repository) -> dict | None:
         "metadata": corrections.metadata_overlay(audit),
         "line_items": corrections.match_overlay(audit),
     }
+    # Visual Document Review (P4-T4): the page rasters + the source-anchored
+    # citations (each carries its page_number + a normalized bbox) so the hub can
+    # overlay highlight boxes on the page image. Empty when there is no
+    # rasterizable source or the extractor found no anchored values.
+    detail["pages"] = [
+        {"page_number": p.page_number, "width": p.width, "height": p.height}
+        for p in _rendered_pages(invoice_id, repo)
+    ]
+    detail["citations"] = extracted.get("citations", [])
     return detail
 
 
