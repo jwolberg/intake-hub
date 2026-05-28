@@ -333,7 +333,7 @@ hallucinated).
   - Files: /backend/ocr/**, /backend/clients/**, /backend/domain/**
   - Depends on: P4-T1
   - Acceptance criteria covered: PRD §7 Step 2 (extended); OD-6.
-  - Status: Todo
+  - Status: Done — `backend/ocr/` (`OCRClient`, `StubOCRClient` offline default reading the PDF text layer, `TesseractOCRClient` + `parse_tesseract_tsv` for OD-6); `WordBox`/`BoundingBox` domain types; `get_ocr_client()` factory. 122 tests pass.
 - **P4-T3 — Vision extraction with word-index citations**
   - Objective: Extend `LLMClient` (vision method / `VisionLLMClient`) to take page image + OCR word list and return fields/line items each with `word_indices` + `status`; schema-validated; keep an **offline deterministic stand-in** (string-match values → OCR words).
   - Files: /backend/clients/** (LLM vision), /backend/extraction/** (prompts/schema), /backend/domain/**

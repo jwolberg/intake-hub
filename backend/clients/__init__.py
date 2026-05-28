@@ -10,6 +10,10 @@ from __future__ import annotations
 
 from backend.config import settings
 
+# OCR clients live in backend.ocr (their own stage); re-exported here so stages
+# resolve every external seam through the same clients factory layer.
+from backend.ocr import OCRClient, StubOCRClient, TesseractOCRClient
+
 from .clinrun import (
     ClinRunClient,
     HttpClinRunClient,
@@ -38,16 +42,20 @@ __all__ = [
     "HttpMCPReferenceClient",
     "LLMClient",
     "MCPReferenceClient",
+    "OCRClient",
     "PassthroughLLMClient",
     "ReferenceClientError",
     "ReferenceUnavailable",
     "StubClinRunClient",
     "StubLLMClient",
     "StubMCPReferenceClient",
+    "StubOCRClient",
     "SubmissionFailed",
     "SubmissionResult",
+    "TesseractOCRClient",
     "get_clinrun_client",
     "get_llm_client",
+    "get_ocr_client",
     "get_reference_client",
     "parse_json_or_raise",
 ]
@@ -72,3 +80,13 @@ def get_llm_client() -> LLMClient:
     for scripted unit tests.
     """
     return PassthroughLLMClient()
+
+
+def get_ocr_client() -> OCRClient:
+    """Default OCR client: the offline text-layer stand-in (``StubOCRClient``).
+
+    Returns deterministic word boxes for the controlled sample PDFs with no
+    network and no Tesseract binary, preserving the offline-first path (spec §7).
+    Swapping in ``TesseractOCRClient`` (OD-6) is a one-line change here.
+    """
+    return StubOCRClient()

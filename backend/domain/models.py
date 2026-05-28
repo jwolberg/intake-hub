@@ -27,6 +27,35 @@ def _new_id(prefix: str) -> str:
     return f"{prefix}_{uuid4().hex[:12]}"
 
 
+class BoundingBox(BaseModel):
+    """A rectangle in normalized page coordinates — all four values in ``[0,1]``.
+
+    Normalizing to the unit square (rather than pixels) means a box computed at
+    OCR resolution overlays correctly at any display resolution: the reviewer's
+    SVG overlay uses ``viewBox="0 0 1 1"`` and needs no scaling math (Visual
+    Document Review spec §3).
+    """
+
+    x: float
+    y: float
+    width: float
+    height: float
+
+
+class WordBox(BaseModel):
+    """One OCR word with its normalized location on a page (spec §3).
+
+    ``index`` is the word's 0-based position within its ``page_number``. The
+    vision extractor cites these indices (never raw coordinates), so highlights
+    are anchored to real OCR geometry and cannot be hallucinated (P4-T3/T4).
+    """
+
+    page_number: int
+    index: int
+    text: str
+    bbox: BoundingBox
+
+
 class ParsedDocument(BaseModel):
     """Output of the parser stage: raw text + source metadata (PRD §7 Step 2).
 

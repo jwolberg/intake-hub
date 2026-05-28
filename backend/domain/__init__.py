@@ -3,6 +3,7 @@
 from .enums import Actor, AuditAction, Decision, InvoiceStatus, Severity
 from .models import (
     AuditEvent,
+    BoundingBox,
     CatalogItem,
     ContextCandidate,
     DecisionResult,
@@ -15,12 +16,14 @@ from .models import (
     ParsedDocument,
     ResolvedContext,
     RiskFlag,
+    WordBox,
 )
 
 __all__ = [
     "Actor",
     "AuditAction",
     "AuditEvent",
+    "BoundingBox",
     "CatalogItem",
     "ContextCandidate",
     "Decision",
@@ -36,4 +39,5 @@ __all__ = [
     "ResolvedContext",
     "RiskFlag",
     "Severity",
+    "WordBox",
 ]

@@ -868,3 +868,43 @@ extracted-field highlights.
 
 **Validation:** `ruff check` clean on changed files; full suite **115 passed, 1
 skipped** (was 106/1; +6 raster unit + 3 page-endpoint tests). No network/model.
+
+## 2026-05-27 — P4-T2 OCR word-box extraction (Phase 4)
+
+Adds the `OCRClient` seam + `WordBox`/`BoundingBox` domain types. OCR turns an
+invoice's pages into per-word boxes (0-based per-page `index`, normalized [0,1]
+bbox) that the vision extractor (T3) cites by index.
+
+**What landed**
+- `backend/domain/models.py` — `BoundingBox {x,y,width,height}` (all [0,1]) and
+  `WordBox {page_number, index, text, bbox}`; exported from `backend.domain`.
+- `backend/ocr/__init__.py` — `OCRClient` protocol; `StubOCRClient` (offline
+  default); `TesseractOCRClient` (OD-6, lazy deps); `parse_tesseract_tsv` (pure).
+- `backend/clients/__init__.py` — `get_ocr_client()` → `StubOCRClient()`, plus
+  re-exports (mirrors the `get_llm_client()` seam).
+
+**Decisions / deviations (not pre-specified)**
+- **Offline stub reads the PDF text layer (PyMuPDF `get_text("words")`), not
+  canned boxes.** Spec §7 says "canned word boxes ... geometry is known"; rather
+  than hardcode per-sample fixtures, the stub derives exact geometry from the
+  text layer of the controlled PDFs we render ourselves. Deterministic, no
+  Tesseract/network, and generalizes to any PDF with a text layer. Image-only /
+  text-less sources return `[]` (they'd need the real engine) — acceptable since
+  the demo substrate is the controlled PDFs.
+- **`extract_words(source, pages)` takes both the source path and rendered
+  pages.** Honest minimal interface: the stub uses `source` (text layer), the
+  real Tesseract client uses `pages` (page images). Both are products of the
+  parser/raster stage. Documented asymmetry rather than a new wrapper type.
+- **pytesseract/Pillow NOT added to requirements.** Following the OD-2 precedent
+  (real LLM provider isn't a dep until wired), `TesseractOCRClient` imports them
+  lazily; the default path needs neither. The TSV parser is split out so it's
+  unit-tested with a canned string — no Tesseract binary required.
+- **No orchestrator wiring yet.** OCR output is consumed by vision extraction
+  (T3) and surfaced/persisted by T4; T2 is the client + types only (smallest
+  change).
+
+**Index semantics:** `index` is 0-based *per page* (objective says "indices per
+page"); citations are page-scoped, so `word_indices` index into that page's list.
+
+**Validation:** `ruff` clean; full suite **122 passed, 1 skipped** (+7 OCR tests).
+No network/model/Tesseract.
