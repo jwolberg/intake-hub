@@ -29,8 +29,11 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 SAMPLES = ROOT / "samples"
 PDF_DIR = SAMPLES / "pdf"
 
-# Document-style samples worth showing as PDFs (1 submit + 2 distinct holds).
-STEMS = ["inv_clean_001", "inv_hold_unmatched_002", "inv_hold_mismatch_005"]
+# Document-style samples worth showing as PDFs: a clean submit, two distinct
+# holds, and one submit with a low-confidence (description-only) line — the last
+# shows a sub-90% confidence + an *uncertain* highlight that gates a clean review.
+STEMS = ["inv_clean_001", "inv_hold_unmatched_002", "inv_hold_mismatch_005",
+         "inv_uncertain_006"]
 
 
 def _post(api: str, sample: dict) -> dict:
