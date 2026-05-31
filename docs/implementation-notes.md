@@ -1258,3 +1258,72 @@ knob; lower it to auto-submit more aggressively.
 (`test_decision` updated: moderate confidence now holds; the submit-confidence
 weakest-link test is unaffected). Verified live on the offline demo stack — list
 reads SUBMIT@90 / HOLD@90 / HOLD@90 / HOLD@60.
+
+---
+
+## 2026-05-30 — Deploy doc (Cloud Run) + local Anthropic key in Keychain
+
+Not a build-plan ticket; setup/docs work driven by the blank Vendor/Sponsor/Study
+finding (PDF-backed seeded invoices + no `ANTHROPIC_API_KEY` ⇒ offline stand-in
+returns `{}` ⇒ empty metadata; resolved by supplying the real key).
+
+- **Local secret in macOS Keychain.** Decided to store the Anthropic key in the
+  login Keychain under service name `ledgerrun-ANTHROPIC_API_KEY` rather than a
+  committed `.env` — keeps it out of repo/shell history. Documented store + load
+  commands in `RUNBOOK.md` (Environment variables §).
+- **`docs/DEPLOY.md` drafted, target = Cloud Run + Cloud SQL.** Rationale: API is
+  a stateless container that self-applies its schema on startup (no migration
+  job), scales to zero, pairs naturally with Cloud SQL; GKE would be overkill for
+  the MVP. Cloud key sourced from Secret Manager (cloud mirror of the Keychain
+  entry), piped straight from Keychain so it never hits the terminal.
+- **Two code follow-ups flagged in DEPLOY.md (not yet done):** (1) the API
+  container hardcodes `--port 8000` but Cloud Run injects `$PORT` (8080) — needs a
+  shell-form CMD or a pinned container port; (2) `VITE_API_URL` is baked at build
+  time and `frontend/Dockerfile` is a dev server, so prod hub needs a static build
+  + hosting. Stub services (`mcp-reference`, `mock-clinrun`) ship as-is for the
+  demo and are listed as replace-with-real follow-ups.
+- **Doc nit noticed, not fixed (out of scope):** RUNBOOK §TL;DR / Path D still
+  reference a `LayoutLLMClient` for the PDF path; the code uses
+  `PassthroughLLMClient` + `pypdf` `extract_text`. Worth reconciling separately.
+
+DEPLOY.md is a **draft** — no cloud resources were created and nothing was
+deployed or tested against GCP.
+
+---
+
+## 2026-05-30 — Bugfix: blank Vendor/Sponsor/Study (extraction key mismatch)
+
+**Symptom:** hub list/detail showed blank Vendor and Sponsor/Study for the
+PDF-backed seeded invoices; invoice #, date, currency, total were fine.
+
+**Root cause (not infra):** the real Anthropic provider extracted *all* fields
+correctly but emitted document-label keys — `vendor`, `sponsor`, `study`,
+`protocol`, `site` — while `InvoiceMetadata` expects `vendor_name`,
+`sponsor_name`, `study_name`, `protocol_number`, `site_identifier`.
+`_build_metadata` looks up by exact schema name, so those values were dropped
+into `missing_fields`. The four surviving fields are the ones whose label-derived
+key happens to equal the schema key. `EXTRACTION_SYSTEM` never pinned the field
+names, so the model guessed. (The offline `LayoutLLMClient` path was unaffected —
+it maps labels→schema keys itself — which is why this only bit the real-provider
+path.) Empty `sponsor_id`/`study_id` were a downstream effect: context resolution
+keys off the (missing) sponsor/study names.
+
+**Fix:** `backend/extraction/__init__.py` — `EXTRACTION_SYSTEM` now lists the
+exact metadata keys, built from `InvoiceMetadata.model_fields` so it can't drift
+from the schema. Regression guard added: `test_extraction_prompt_pins_every_
+schema_field` asserts every schema field appears in the prompt.
+
+**Verified live:** reseeded via local uvicorn (real key) → Vendor =
+"Riverside Clinical Research", sponsor_001/study_001 resolved, INV-1001 →
+submitted. `ruff` clean; extraction/orchestrator/decision tests 47 passed.
+
+**Infra notes from the same session (not committed unless asked):**
+- `docker-compose.yml` got `ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}` on the
+  `api` service (empty default = offline, backward compatible).
+- The Docker `api` cannot read host PDF paths that `seed_hub` sends (no samples
+  mount), so PDF seeding must run against a **local uvicorn** (as seed_hub's own
+  docstring says). Current demo setup: db/mcp/clinrun/hub in Docker, API run
+  locally with the key on :8000.
+- Pre-existing doc drift still unfixed: RUNBOOK references `LayoutLLMClient` for
+  PDFs in a couple of spots where the wiring is via `_extraction_llm` in the
+  orchestrator — reconcile separately.

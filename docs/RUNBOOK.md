@@ -84,6 +84,29 @@ the model. Unset → fully offline, network-free. After setting it, restart the 
 and reprocess (e.g. `python -m backend.tools.seed_hub`) to see model-derived
 confidences.
 
+> **PDF-backed invoices need the real key.** The offline stand-in only echoes
+> JSON; it cannot read a PDF text layer, so PDF samples (e.g. those seeded by
+> `seed_hub`) come back with empty metadata (blank Vendor / Sponsor / Study)
+> unless `ANTHROPIC_API_KEY` is set. JSON `document` samples work offline.
+
+### Local secret: `ANTHROPIC_API_KEY` in macOS Keychain
+
+For local dev the key is stored in the login Keychain under the service name
+**`ledgerrun-ANTHROPIC_API_KEY`** — so it never lives in shell history, a
+committed `.env`, or this repo.
+
+```bash
+# Store / update (prompts for the value, hidden; asks twice to confirm)
+security add-generic-password -a "$USER" -s "ledgerrun-ANTHROPIC_API_KEY" -U -w
+
+# Read it back into the environment when launching the API
+ANTHROPIC_API_KEY="$(security find-generic-password -s ledgerrun-ANTHROPIC_API_KEY -w)" \
+  uvicorn backend.api.main:app --reload --port 8000
+```
+
+In the cloud the same value lives in GCP Secret Manager and is injected as the
+`ANTHROPIC_API_KEY` env var — see [`DEPLOY.md`](./DEPLOY.md).
+
 ---
 
 ## Path A — Full stack with Docker (recommended)

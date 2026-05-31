@@ -27,6 +27,11 @@ services:
       DATABASE_URL: postgresql+psycopg://invoicescreener:invoicescreener@db:5432/invoicescreener
       MCP_REFERENCE_URL: http://mcp-reference:8100
       CLINRUN_URL: http://mock-clinrun:8200
+      # OD-2 real LLM provider. Read from the host env at `up` time; empty →
+      # offline stand-in (network-free default). Export it from the Keychain:
+      #   ANTHROPIC_API_KEY="$(security find-generic-password \
+      #     -s ledgerrun-ANTHROPIC_API_KEY -w)" docker compose up -d --build api
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     ports:
       - "8000:8000"
     depends_on:
