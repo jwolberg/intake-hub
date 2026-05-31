@@ -1327,3 +1327,34 @@ submitted. `ruff` clean; extraction/orchestrator/decision tests 47 passed.
 - Pre-existing doc drift still unfixed: RUNBOOK references `LayoutLLMClient` for
   PDFs in a couple of spots where the wiring is via `_extraction_llm` in the
   orchestrator — reconcile separately.
+
+---
+
+## 2026-05-30 — Deployed to GCP Cloud Run (project ledgerrun-1)
+
+Stood up the full stack on Cloud Run + Cloud SQL with secrets in Secret Manager
+(see docs/DEPLOY.md "Deployment record" for URLs and exact commands).
+
+- **Secret Manager**: anthropic key, full DATABASE_URL (Cloud SQL socket DSN), and
+  db password. API reads DATABASE_URL from SM; key stored but not bound at runtime
+  (see egress note).
+- **Code/infra added**: backend/Dockerfile honors `$PORT` (Cloud Run injects 8080);
+  cloudbuild.backend.yaml + cloudbuild.hub.yaml (backend/Dockerfile isn't at repo
+  root, so `builds submit --tag` can't find it); .gcloudignore + frontend/.gcloudignore
+  to shrink build uploads; frontend/Dockerfile.prod + nginx.conf (prod hub: Vite
+  build → nginx:8080, VITE_API_URL baked at build time).
+- **Cloud SQL is PG15** (this gcloud's max; local compose is 16 — schema is portable).
+- **Stubs deployed public** (--allow-unauthenticated) per user decision; the
+  reference/clinrun HTTP clients don't fetch service-to-service ID tokens.
+
+**Blocker found — Anthropic egress:** real-provider extraction fails on Cloud Run
+with `APIConnectionError: "Connection error."`, while Google-hosted stubs (*.run.app)
+and Cloud SQL work. The project's Cloud Run egress can't reach api.anthropic.com.
+Worked around by running the API offline (LayoutLLMClient/PassthroughLLMClient via
+the JSON document path), which populates all fields for the controlled samples.
+To enable the real provider later: Serverless VPC Access connector + Cloud NAT +
+`--vpc-egress=all-traffic`, then bind the anthropic secret.
+
+**Seeding in cloud:** used JSON `document` samples (no attachment_path), since the
+cloud API can't read local PDF paths — so no source page images in cloud, but
+list/detail metadata populate.

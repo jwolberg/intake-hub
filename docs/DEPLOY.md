@@ -37,7 +37,7 @@ state. Secrets (the Anthropic key) come from Secret Manager. The alternative
   first pass).
 
 ```bash
-export PROJECT_ID=your-project-id
+export PROJECT_ID=ledgerrun-1
 export REGION=us-central1
 gcloud config set project "$PROJECT_ID"
 gcloud services enable \
@@ -220,15 +220,49 @@ key fixes locally; see RUNBOOK).
 - Logs: `gcloud run services logs read invoicescreener-api --region "$REGION"`.
 - Cloud SQL is **not** scale-to-zero; stop the instance when idle to save cost.
 
+## Deployment record (2026-05-30, project `ledgerrun-1`, region `us-central1`)
+
+Live services (all `--allow-unauthenticated`):
+
+| Service | URL |
+| --- | --- |
+| Hub | https://invoicescreener-hub-o27sizgahq-uc.a.run.app |
+| API | https://invoicescreener-api-o27sizgahq-uc.a.run.app |
+| mcp-reference (stub) | https://invoicescreener-mcp-o27sizgahq-uc.a.run.app |
+| mock-clinrun (stub) | https://invoicescreener-clinrun-o27sizgahq-uc.a.run.app |
+
+- **Cloud SQL**: `invoicescreener-db` (PostgreSQL **15** — this gcloud maxes at 15),
+  `db-f1-micro`. Connected via the `/cloudsql/...` socket.
+- **Secret Manager**: `ledgerrun-anthropic-api-key`, `ledgerrun-database-url`,
+  `ledgerrun-db-password`. The API reads `DATABASE_URL` from Secret Manager.
+- **Images**: built on Cloud Build (`cloudbuild.backend.yaml`,
+  `cloudbuild.hub.yaml`) → Artifact Registry repo `invoicescreener`. Backend
+  `Dockerfile` now honors `$PORT`; hub uses `frontend/Dockerfile.prod` (Vite
+  build → nginx on 8080, `VITE_API_URL` baked at build time).
+- Seeded 4 invoices via JSON `document` samples (the cloud API can't read local
+  PDF paths, so no `seed_hub`/page images — fields still populate).
+
+### ⚠ Known limitation: outbound egress to api.anthropic.com is blocked
+
+The API is deployed **offline** (no `ANTHROPIC_API_KEY` bound at runtime) because
+this project's Cloud Run egress cannot reach `api.anthropic.com` — extraction via
+the real provider failed with `APIConnectionError: "Connection error."`, while
+calls to the Google-hosted stubs (`*.run.app`) and Cloud SQL succeed. The
+offline `LayoutLLMClient`/`PassthroughLLMClient` path handles the controlled
+samples, so the demo works. The key remains in Secret Manager, ready to bind
+(`--set-secrets ANTHROPIC_API_KEY=ledgerrun-anthropic-api-key:latest`) once
+egress exists. To enable the real provider: add a Serverless VPC Access connector
++ Cloud NAT (static outbound) and set `--vpc-egress=all-traffic`.
+
 ## Follow-ups / open decisions
 
-- [ ] Code change: API container must honor `$PORT` (or pin Cloud Run port 8000).
-- [ ] Code change / new file: production frontend build + hosting (Vite env is
-      build-time; current `frontend/Dockerfile` is dev-only).
-- [ ] Replace the `mcp-reference` / `mock-clinrun` stubs with real integrations
-      (these are demo stand-ins).
-- [ ] Lock down stub-service auth (service-to-service IAM vs public ingress).
-- [ ] CI/CD: wire `gcloud builds submit` + `gcloud run deploy` into a pipeline
-      (Cloud Build trigger) instead of manual deploys.
+- [x] Code change: API container honors `$PORT` (done — shell-form CMD).
+- [x] Production frontend build + hosting (done — `frontend/Dockerfile.prod`
+      + nginx, deployed as the `hub` Cloud Run service).
+- [ ] **Enable real-provider egress** (VPC connector + Cloud NAT), then bind the
+      Anthropic secret on the API. Until then extraction is offline.
+- [ ] Replace the `mcp-reference` / `mock-clinrun` stubs with real integrations.
+- [ ] Lock down stub-service auth (currently public per demo decision).
+- [ ] CI/CD: wire the Cloud Build configs into a trigger instead of manual deploys.
 - [ ] Dedicated runtime service account (least privilege) instead of the default
       compute SA.

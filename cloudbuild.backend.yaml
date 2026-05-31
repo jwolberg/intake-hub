@@ -1,0 +1,14 @@
+# Cloud Build config for the backend image. Needed because backend/Dockerfile is
+# not at the repo root, so `gcloud builds submit --tag` can't find it. Build
+# context is the repo root (preserves the `backend.` import path).
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - backend/Dockerfile
+      - -t
+      - us-central1-docker.pkg.dev/ledgerrun-1/invoicescreener/backend:latest
+      - .
+images:
+  - us-central1-docker.pkg.dev/ledgerrun-1/invoicescreener/backend:latest

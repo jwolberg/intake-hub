@@ -1,0 +1,15 @@
+# Cloud Build config for the production hub image. VITE_API_URL is a build arg
+# (baked into the static bundle). Source context is the frontend/ dir.
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - Dockerfile.prod
+      - --build-arg
+      - VITE_API_URL=${_API_URL}
+      - -t
+      - us-central1-docker.pkg.dev/ledgerrun-1/invoicescreener/hub:latest
+      - .
+images:
+  - us-central1-docker.pkg.dev/ledgerrun-1/invoicescreener/hub:latest

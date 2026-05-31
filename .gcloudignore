@@ -1,0 +1,10 @@
+# Limit what `gcloud builds submit` uploads as build context. The backend image
+# only needs backend/; exclude heavy/dev-only trees so uploads stay small.
+.git
+.venv
+**/__pycache__
+*.pyc
+node_modules
+frontend/node_modules
+frontend/dist
+samples/pdf
