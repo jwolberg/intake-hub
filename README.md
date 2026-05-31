@@ -7,7 +7,27 @@ exceptions — without a human gate before decisioning**. Reviewers then get a
 clear *post-decision* QC hub to understand outcomes, validate risk cases, and
 intervene (correct / rerun / escalate / retry).
 
-See [`docs/challenge.md`](docs/challenge.md) for the brief and
+- **Live Dashboard page: https://invoicescreener-hub-o27sizgahq-uc.a.run.app//**
+- **Demo video: https://www.loom.com/share/0975477394ed4b47895f41821fdd3438**
+#
+## Overview page ##
+- Summary of invoices received as pdf in inbox
+- Key invoice information (Invoice #, Vendor, Sponsor, Amount, Status, Confidence Score, # of exceptions)
+ ![Invoice summary: ](docs/img/summary.png)
+ #
+## Key Features of Invoice Page ##
+- Decision status, confidence, and reasoning
+- Exception call outs: type, severity, human-readable context
+- Link to viewable source PDF
+- Line-item extracted metadata, with callout to value, confidence, evidence, and override
+- Matching of line item cahrge to catalog items
+![Invoice page 1 of 3: ](docs/img/inv1.png)
+![Invoice page 2 of 3: ](docs/img/inv2.png)
+![Invoice page 3 of 3: ](docs/img/inv3.png)
+
+
+#
+
 [`docs/CHALLENGE_ASSESSMENT.md`](docs/CHALLENGE_ASSESSMENT.md) for a
 requirement-by-requirement status.
 
