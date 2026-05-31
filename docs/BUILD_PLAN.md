@@ -20,6 +20,7 @@
   - **OD-3 Job execution model** — provisional: async worker/queue vs. synchronous (ARCHITECTURE §16/§17). MVP may run synchronously; revisited in Phase 3.
   - **OD-4 Reference API availability** — provisional: MCP reference API is stubbed for tests/dev; real MCP wired if provided (ARCHITECTURE §7).
   - **OD-5 ClinRun backend** — provisional: mock ClinRun by default; real backend if provided (ARCHITECTURE §2; PRD §Non-Goals excludes full prod integration unless a mock/backend is available).
+  - **OD-10 Inbox provider** (Phase 6) — provisional: `MockInbox` reading `/samples`, behind an `InboxClient` protocol; real Gmail/IMAP slots in later with zero pipeline changes. Not blocking; interface isolates it. PRD §7 Step 1 explicitly authorizes "Mock inbox" intake, so Phase 6 needs **no input-doc change** — it activates a previously-deferred-but-authorized path; live IMAP/Gmail stays deferred.
 - **Monorepo layout.** The skill mentions `frontend/ backend/ shared/ docs/ tests/`. ARCHITECTURE §19 specifies a more detailed layout (`/backend` with one package per stage, `/frontend`, `/tests/{unit,integration,scenarios}`, `/samples`). Per the skill rule "use ARCHITECTURE file paths verbatim," this plan uses ARCHITECTURE §19; `shared` maps to `/backend/domain` and `/backend/clients`.
 - **No material document conflicts.** PRD and ARCHITECTURE align (ARCHITECTURE was derived from PRD). Where PRD §13 lists OpenAI specifically, it is treated as one provider option behind the `LLMClient` interface (ARCHITECTURE §8), not a hard requirement.
 
@@ -34,7 +35,7 @@
 
 ## Current Status
 - Overall status: In Progress
-- Current phase: **All phases complete.** Phases 0–2, 4, 5 done; **Phase 3 (Hardening & Polish) COMPLETE** (P3-T1..T7 — retry/recovery, scenario suite, coverage, trace observability, scale, demo seed set, README). Suite: 168 passed / 1 skipped; ruff clean. The stack is also **deployed to GCP Cloud Run** (project `ledgerrun-1`; see docs/DEPLOY.md).
+- Current phase: Phases 0–5 complete. **Phase 6 (Mock Inbox Intake) ADDED — planned, not started** (P6-T1..T6): activates PRD §7 Step 1's authorized "Mock inbox" intake so the demo *receives* email rather than being seeded. Prior: **Phase 3 (Hardening & Polish) COMPLETE** (P3-T1..T7). Suite: 168 passed / 1 skipped; ruff clean. The stack is also **deployed to GCP Cloud Run** (project `ledgerrun-1`; see docs/DEPLOY.md).
 - Current ticket: **P3-T1** (failure isolation, retry & recovery) — next recommended; all of Phase 4 is shipped. The Phase 1 live-stack exit gate is **CLEARED** (2026-05-27): Postgres round-trip passes against the live DB, `docker compose up` brings up the full stack, hub serves at `http://127.0.0.1:5173`. Remaining there: a human visual click-through of the hub UI. Commands: /docs/RUNBOOK.md.
 - Note: All of Phase 2 (P2-A1..A4 + P2-B1..B4 + P2-C1..C4) validated in-process (106 passed, 1 skipped) **and** exercised end-to-end against the live Postgres stack (process → filters → detail → QC corrections → rerun → metrics). The skipped test is the Postgres round-trip, which passes when run with a live `DATABASE_URL`. Dev test also fixed a metric-bucketing bug (rates now key off the AI's first/autonomous decision, robust to rerun). Also: out-of-plan real-PDF demo path (RUNBOOK Path D).
 - Blockers: None for in-process work (OD-1 resolved; OD-2..OD-5 provisional behind interfaces). Live-stack exit gate blocked on Docker availability only.
@@ -476,6 +477,102 @@ clause P4-T1 already cites.
     page image 200 `image/png` from bytes. GCS remains a future option only if
     PDFs grow large.
 
+### Phase 6 — Mock Inbox Intake (simulated email receipt)
+
+Implements PRD §7 Step 1's explicitly-authorized **"Mock inbox"** ingestion path,
+previously deferred (see § Deferred: "IMAP/Gmail live ingestion … deferred"). Today
+an invoice only enters as a JSON payload POSTed to `/api/invoices/process` (its
+`source` block *simulates* an email) and the demo is **seeded** (`seed_hub.py`)
+rather than **received**. This phase adds an intake adapter so the system *receives*
+messages from a (mock) inbox and drives each through the existing orchestrator
+unchanged — turning the demo from "seeded records" into "received email."
+
+**No doc change required (unlike Phase 4).** PRD §7 Step 1 lists "Mock inbox" as a
+valid hackathon/demo ingestion method, so this is within existing authority: it does
+**not** touch PRD §4's "production-scale email ingestion system" non-goal, and live
+IMAP/Gmail ("if time allows") stays deferred behind the same interface.
+
+**Open decisions**
+- **OD-10 Inbox provider** — provisional: `MockInbox` (reads `/samples`) default,
+  behind an `InboxClient` protocol; a real `GmailClient`/`IMAPClient` slots in later
+  with zero pipeline changes (extends the prior IMAP/Gmail deferral). Not blocking —
+  the interface isolates it (same pattern as OD-2/OD-4/OD-5).
+- **OD-3 (job execution)** still applies: the poller runs **synchronously** (one
+  message → `orchestrator.process` in-line), no queue/worker — consistent with the
+  MVP synchronous decision; revisited only if needed.
+
+**Goal**
+- A fetch/poll **pulls messages from a mock inbox** and processes each end-to-end
+  through the existing pipeline to the same submit/hold outcomes as the seeded demo.
+
+**Exit Criteria**
+- A single `POST /api/inbox/fetch` (or `python -m backend.tools.inbox_poller`)
+  ingests the demo sample messages from `MockInbox`, each producing an `Invoice` via
+  `orchestrator.process` with its expected SUBMIT/HOLD outcome; **re-running is
+  idempotent** (already-seen messages skipped, no duplicate invoices); the offline
+  suite still passes with no network.
+
+**Tickets**
+- **P6-T1 — Inbox module: `InboxClient` protocol + `MockInbox`**
+  - Objective: New `backend/inbox/` package (named `inbox`, **not** `email` — that
+    shadows the stdlib `email` a real IMAP impl needs). Define an `InboxClient`
+    protocol (`fetch_messages() -> list[InboxMessage]`) and an `InboxMessage` type
+    carrying `message_id`, `subject`, `sender`, `attachment`, and the body payload;
+    ship `MockInbox` reading the `/samples` set (reuse the `seed_hub` demo `STEMS`),
+    rendering PDFs via `samples/generate_pdfs.render_invoice_pdf` so messages carry a
+    real `attachment_path` (parity with `seed_hub`).
+  - Files: /backend/inbox/**, /samples/**, /backend/clients/** (interface parity)
+  - Depends on: P1-T1, P3-T6 (demo seed set)
+  - Acceptance criteria covered: PRD §7 Step 1 ("Mock inbox"), FR1; ARCHITECTURE §4 (`intake`); mirrors the stub-client pattern (ARCHITECTURE §7–§8).
+  - Status: Todo
+- **P6-T2 — `message_to_sample` adapter**
+  - Objective: Pure function mapping an `InboxMessage` → the exact intake `sample`
+    dict the orchestrator already consumes (`{source: {channel:"email", subject,
+    sender, attachment, attachment_path}, document: …}`), so **nothing downstream
+    changes**. This is the one genuinely new piece of logic; everything it emits is
+    already covered by Phases 1–5.
+  - Files: /backend/inbox/**
+  - Depends on: P6-T1
+  - Acceptance criteria covered: PRD §7 Step 1–2 (intake → parse handoff), FR1; ARCHITECTURE §4.
+  - Status: Todo
+- **P6-T3 — Idempotency: seen-message tracking**
+  - Objective: Track processed `message_id`s so a re-fetch never double-processes;
+    the fetch path filters already-seen ids. Mirror the `catalog_cache` approach
+    (P2-A3): an in-memory set on the `Repository` (InMemory default) with the
+    Postgres `seen_messages` table impl deferred behind the same methods
+    (`mark_seen` / `is_seen`).
+  - Files: /backend/inbox/**, /backend/db/** (repository methods)
+  - Depends on: P6-T1
+  - Acceptance criteria covered: PRD §14 (per-invoice independence / no duplicate work); ARCHITECTURE §6 (state ownership).
+  - Status: Todo
+- **P6-T4 — API: `POST /api/inbox/fetch`**
+  - Objective: Route that pulls unseen messages from the injected `InboxClient`,
+    maps each via `message_to_sample`, calls `orchestrator.process`, marks them seen,
+    and returns the per-message summaries (reuse `_summary`). Inject the inbox client
+    via a FastAPI dep alongside `RepoDep` / `ClientsDep`.
+  - Files: /backend/api/**
+  - Depends on: P6-T2, P6-T3
+  - Acceptance criteria covered: PRD §13 (API surface), §7 Step 1, FR1; USERS § Reviewer (a "Check inbox" affordance feeds the hub).
+  - Status: Todo
+- **P6-T5 — CLI: `backend/tools/inbox_poller`**
+  - Objective: `python -m backend.tools.inbox_poller [api_url]` triggers a fetch
+    (POSTs the route, or runs `MockInbox` → process in-process), printing each
+    received message's id/status — a *received-email* counterpart to `seed_hub.py`.
+  - Files: /backend/tools/inbox_poller.py
+  - Depends on: P6-T4
+  - Acceptance criteria covered: PRD §19 (Demo Requirements — received-email demo path); STRATEGY § Interpretation engine (intake front door).
+  - Status: Todo
+- **P6-T6 — Tests (unit + integration)**
+  - Objective: Unit-test `message_to_sample` (payload shape) + idempotency (re-fetch
+    skips seen); integration-test `MockInbox` → `POST /api/inbox/fetch` asserting the
+    demo messages land in their expected SUBMIT/HOLD states (reuse the Phase 3
+    scenario expectations) and a second fetch creates no new invoices; offline (no
+    network/model).
+  - Files: /tests/unit/**, /tests/integration/**
+  - Depends on: P6-T4, P6-T5
+  - Acceptance criteria covered: PRD §18 (Unit/Integration), §14 (idempotent/independent); STRATEGY Track "Interpretation engine".
+  - Status: Todo
+
 ---
 
 ## Dependency Order
@@ -498,9 +595,11 @@ clause P4-T1 already cites.
 17. Phase 3: P3-T1, P3-T4 → P3-T2, P3-T3, P3-T5 → P3-T6 → P3-T7
 18. Phase 4 (new scope, doc change applied — unblocked): P4-T1 → P4-T2 → P4-T3 → P4-T4 → P4-T5 → P4-T6 (P4-T6 also needs P2-C3/C4, done)
 19. Phase 5 (completes PRD §10 "download" — no new scope): P5-T1 → P5-T2 → P5-T3 (cloud plan)
+20. Phase 6 (PRD §7 Step 1 "Mock inbox" — no new scope): P6-T1 → P6-T2 ∥ P6-T3 → P6-T4 → P6-T5 → P6-T6
 
 ## Recommended Next Step
-- **Phase 4 (Visual Document Review) is COMPLETE** — P4-T1..T6 all shipped and browser-verified on branch `p2-track-c-reviewer-hub`. The only remaining open phase is **Phase 3 — Hardening & Polish**.
+- **NEW — Phase 6 (Mock Inbox Intake) → start at P6-T1 (`InboxClient` protocol + `MockInbox`).** Adds PRD §7 Step 1's authorized "Mock inbox" path so the demo *receives* email instead of being seeded; the existing pipeline is reused unchanged (the only new logic is the `message_to_sample` adapter, P6-T2). No input-doc change needed (PRD §7 Step 1 lists "Mock inbox"); ~2 commits per the one-ticket-per-commit rule. Order: P6-T1 → P6-T2 ∥ P6-T3 → P6-T4 → P6-T5 → P6-T6.
+- **Phase 4 (Visual Document Review) is COMPLETE** — P4-T1..T6 all shipped and browser-verified on branch `p2-track-c-reviewer-hub`. The only remaining open prior phase is **Phase 3 — Hardening & Polish**.
 - **PICK UP HERE (next session) → P3-T1 — Failure isolation, retry & recovery.** Retryable vs terminal failure states; resume from a failed stage without redoing successful upstream work; low-confidence → hold (PRD §14, FR11; ARCHITECTURE §15). Files: `/backend/orchestrator/**`, `/backend/clients/**`. Depends on P1-T9, P2-A3 (done). Note the current orchestrator already isolates per-invoice failures (`_fail` marks `failed` + an exception, never propagates) and distinguishes retryable `catalog_fetch_failed` from deliberate holds; P3-T1 formalizes retry/resume (e.g. re-enter from the failed stage, bounded retries for transient client errors) and adds the explicit low-confidence→hold guard end-to-end. Then P3-T2 (scenario suite over the eight PRD §18 scenarios), P3-T3 (unit/integration coverage), P3-T4 (observability), P3-T5 (performance), P3-T6 (demo seed set), P3-T7 (docs/README).
 - Still OPEN — **Phase 1 exit gate (live stack)**: deferred only because the Docker daemon is unavailable in the dev session. Run once Docker is up, before demo:
   1. `docker compose up -d db` then `DATABASE_URL=postgresql+psycopg://invoicescreener:invoicescreener@localhost:5432/invoicescreener pytest tests/integration/test_postgres_repository.py` — un-skips the Postgres round-trip.
@@ -514,7 +613,7 @@ clause P4-T1 already cites.
 - Authentication/authorization beyond basic operator access — not a PRD functional requirement; not planned for this scope.
 - Real MCP reference API and real ClinRun backend — wired only if provided (OD-4, OD-5); otherwise stub/mock.
 - Async job orchestration (OD-3) — MVP may run synchronously; revisited only if Phase 3 performance requires it.
-- IMAP/Gmail live ingestion — PRD §7 Step 1 allows seeded/sample/mock intake; live email deferred.
+- IMAP/Gmail **live** ingestion — still deferred (PRD §7 Step 1 "if time allows"). The **mock inbox** half of §7 Step 1 is now planned in **Phase 6** (in scope, no doc change); a real `GmailClient`/`IMAPClient` slots behind Phase 6's `InboxClient` (OD-10) later with zero pipeline changes.
 
 ## Update Rules
 After each implementation pass:
