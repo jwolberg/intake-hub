@@ -7,7 +7,7 @@ exceptions — without a human gate before decisioning**. Reviewers then get a
 clear *post-decision* QC hub to understand outcomes, validate risk cases, and
 intervene (correct / rerun / escalate / retry).
 
-- **Live Dashboard page: https://invoicescreener-hub-o27sizgahq-uc.a.run.app//**
+- **Live Dashboard page: https://invoicescreener-hub-o27sizgahq-uc.a.run.app/**
 - **Demo video: https://www.loom.com/share/0975477394ed4b47895f41821fdd3438**
 #
 ## Overview page ##
@@ -20,7 +20,7 @@ intervene (correct / rerun / escalate / retry).
 - Exception call outs: type, severity, human-readable context
 - Link to viewable source PDF
 - Line-item extracted metadata, with callout to value, confidence, evidence, and override
-- Matching of line item cahrge to catalog items
+- Matching of line item charge to catalog items
 ![Invoice page 1 of 3: ](docs/img/inv1.png)
 ![Invoice page 2 of 3: ](docs/img/inv2.png)
 ![Invoice page 3 of 3: ](docs/img/inv3.png)
