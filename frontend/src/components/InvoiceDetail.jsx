@@ -14,6 +14,7 @@ import {
   correctLineItem,
   correctMetadata,
   escalateInvoice,
+  retryInvoice,
   markReviewed,
   pageImageUrl,
   rerunInvoice,
@@ -342,6 +343,11 @@ export default function InvoiceDetail({ detail, onAction, setError }) {
           <button disabled={busy} onClick={() => run(rerunInvoice(invoice.id))}>
             Rerun with corrections
           </button>
+          {invoice.status === "failed" && (
+            <button disabled={busy} onClick={() => run(retryInvoice(invoice.id))}>
+              Retry failed stage
+            </button>
+          )}
           <button
             disabled={busy}
             className="danger"

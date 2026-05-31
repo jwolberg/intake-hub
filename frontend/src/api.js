@@ -73,6 +73,11 @@ export function rerunInvoice(id) {
   return postJSON(`/api/invoices/${id}/rerun`, {});
 }
 
+// Resume a FAILED invoice from the failed stage (P3-T1).
+export function retryInvoice(id) {
+  return postJSON(`/api/invoices/${id}/retry`, {});
+}
+
 // Confirm an uncertain source-anchored field against the page image (P4-T6).
 export function confirmCitation(id, targetId, reason) {
   return postJSON(`/api/invoices/${id}/citations/confirm`, {

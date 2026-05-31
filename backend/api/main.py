@@ -30,7 +30,7 @@ from backend.config import settings
 from backend.db import get_engine, init_schema
 from backend.db.repository import Repository, get_repository
 from backend.domain import Actor, AuditAction, Decision, InvoiceMetadata, InvoiceStatus
-from backend.orchestrator import process, rerun
+from backend.orchestrator import process, recover, rerun
 from backend.parser.raster import (
     RenderedPage,
     is_rasterizable,
@@ -496,6 +496,16 @@ def rerun_invoice(invoice_id: str, repo: RepoDep, clients: ClientsDep) -> dict:
     """Re-enter the pipeline using corrected data as fixed inputs (PRD FR10)."""
     _get_invoice_or_404(invoice_id, repo)
     rerun(invoice_id, repo, **clients)
+    return _require_detail(invoice_id, repo)
+
+
+@app.post("/api/invoices/{invoice_id}/retry")
+def retry_invoice(invoice_id: str, repo: RepoDep, clients: ClientsDep) -> dict:
+    """Resume a FAILED invoice from the failed stage (P3-T1; PRD §15 retry option)."""
+    invoice = _get_invoice_or_404(invoice_id, repo)
+    if invoice.status is not InvoiceStatus.FAILED:
+        raise HTTPException(status_code=409, detail="only failed invoices can be retried")
+    recover(invoice_id, repo, **clients)
     return _require_detail(invoice_id, repo)
 
 

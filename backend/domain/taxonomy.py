@@ -22,6 +22,7 @@ class HoldReason:
     title: str
     severity: Severity
     fr8: bool = True  # listed explicitly in PRD FR8
+    retryable: bool = False  # an operational failure a retry can recover (P3-T1)
 
 
 _REASONS: list[HoldReason] = [
@@ -52,10 +53,13 @@ _REASONS: list[HoldReason] = [
     HoldReason("catalog_unavailable", "Catalog unavailable", Severity.HIGH),
     # Overall + operational failures (FR8: backend submission failure).
     HoldReason("low_confidence", "Low overall decision confidence", Severity.HIGH, fr8=False),
-    HoldReason("submission_failed", "Backend submission failure", Severity.HIGH),
+    HoldReason("submission_failed", "Backend submission failure", Severity.HIGH, retryable=True),
     HoldReason("catalog_fetch_failed", "Catalog fetch failed (retryable)", Severity.HIGH,
-               fr8=False),
-    HoldReason("stage_failure", "Processing stage failed (retryable)", Severity.HIGH, fr8=False),
+               fr8=False, retryable=True),
+    HoldReason("extraction_failed", "LLM extraction failed (retryable)", Severity.HIGH,
+               fr8=False, retryable=True),
+    HoldReason("stage_failure", "Processing stage failed (retryable)", Severity.HIGH,
+               fr8=False, retryable=True),
 ]
 
 REGISTRY: dict[str, HoldReason] = {r.code: r for r in _REASONS}
@@ -71,3 +75,11 @@ def title_of(code: str) -> str:
     """Human-readable title for a code, falling back to a humanised code."""
     reason = REGISTRY.get(code)
     return reason.title if reason else code.replace("_", " ").capitalize()
+
+
+def is_retryable(code: str) -> bool:
+    """Whether a failure ``code`` is an operational error a retry can recover
+    (P3-T1) — transient catalog/submission/extraction failures, not deliberate
+    holds or terminal data problems."""
+    reason = REGISTRY.get(code)
+    return bool(reason and reason.retryable)

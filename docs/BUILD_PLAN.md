@@ -247,7 +247,15 @@ Tickets are grouped by STRATEGY § Tracks. Each traces to a PRD requirement.
   - Files: /backend/orchestrator/**, /backend/clients/**
   - Depends on: P1-T9, P2-A3
   - Acceptance criteria covered: PRD §14 (predictable retry/recovery), FR11; ARCHITECTURE §15.
-  - Status: Todo
+  - Status: Done — taxonomy marks retryable codes (`catalog_fetch_failed`,
+    `submission_failed`, `extraction_failed`, `stage_failure`) + `is_retryable()`;
+    bounded in-process `_retry` on transient catalog/submission errors;
+    extraction failures classified `extraction_failed` (don't proceed to submit);
+    `recover()` resumes a FAILED invoice from the failed stage — reuses persisted
+    extraction for catalog/submission failures, re-extracts from source text when
+    extraction itself failed; `POST /api/invoices/:id/retry` + a "Retry failed
+    stage" hub action. Tests: transient self-heal, recover-without-reextract,
+    extraction-failure-then-recover.
 - **P3-T2 — Scenario test suite**
   - Objective: End-to-end tests for the eight PRD §18 scenarios against stubbed MCP + mock ClinRun.
   - Files: /tests/scenarios/**, /samples/**

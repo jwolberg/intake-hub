@@ -13,7 +13,7 @@ from backend.clients.errors import ReferenceUnavailable
 from backend.clients.llm import StubLLMClient
 from backend.db.repository import InMemoryRepository
 from backend.domain import Decision, InvoiceStatus
-from backend.orchestrator import process, process_all
+from backend.orchestrator import process, process_all, recover
 
 SAMPLES = pathlib.Path(__file__).resolve().parents[2] / "samples"
 
@@ -90,7 +90,8 @@ def test_stage_failure_marks_failed_and_is_isolated():
     assert InvoiceStatus.FAILED in statuses
     failed = next(r for r in results if r.status is InvoiceStatus.FAILED)
     assert [e.action.value for e in repo.get_audit(failed.id)][-1] == "failed"
-    assert any(e.type == "stage_failure" for e in repo.get_exceptions(failed.id))
+    # an extraction error is now classified specifically (P3-T1), not generic
+    assert any(e.type == "extraction_failed" for e in repo.get_exceptions(failed.id))
 
 
 class _CatalogUnavailableRef:
@@ -120,6 +121,71 @@ def test_catalog_transport_error_marks_failed_not_held():
     assert invoice.status is InvoiceStatus.FAILED
     assert [e.action.value for e in repo.get_audit(invoice.id)][-1] == "failed"
     assert any(e.type == "catalog_fetch_failed" for e in repo.get_exceptions(invoice.id))
+
+
+class _FlakyCatalogRef:
+    """Catalog endpoint fails the first ``fail_times`` calls, then recovers."""
+
+    def __init__(self, fail_times: int):
+        self._inner = StubMCPReferenceClient()
+        self.calls = 0
+        self._fail_times = fail_times
+
+    def resolve_sponsor_study_site(self, clues):
+        return self._inner.resolve_sponsor_study_site(clues)
+
+    def get_catalog(self, sponsor_id, study_id):
+        self.calls += 1
+        if self.calls <= self._fail_times:
+            raise ReferenceUnavailable("transient")
+        return self._inner.get_catalog(sponsor_id, study_id)
+
+
+def test_transient_catalog_error_is_retried_within_attempts():
+    # Fails twice, succeeds on the 3rd attempt → bounded retry self-heals (PRD §14).
+    repo = InMemoryRepository()
+    stubs = _stubs()
+    ref = _FlakyCatalogRef(fail_times=2)
+    invoice = process(_load("inv_clean_001.json"), repo,
+                      llm=stubs["llm"], ref=ref, clinrun=stubs["clinrun"])
+    assert invoice.status is InvoiceStatus.SUBMITTED
+    assert ref.calls == 3  # two failures + one success, all in-process
+
+
+def test_recover_resumes_failed_catalog_without_reextracting():
+    # Catalog down past the retry budget → FAILED (retryable); recover() with a
+    # healthy ref resumes from the catalog stage, reusing the existing extraction.
+    repo = InMemoryRepository()
+    stubs = _stubs()
+    invoice = process(_load("inv_clean_001.json"), repo,
+                      llm=stubs["llm"], ref=_CatalogUnavailableRef(), clinrun=stubs["clinrun"])
+    assert invoice.status is InvoiceStatus.FAILED
+    assert any(e.type == "catalog_fetch_failed" for e in repo.get_exceptions(invoice.id))
+
+    recovered = recover(invoice.id, repo,
+                        llm=stubs["llm"], ref=StubMCPReferenceClient(), clinrun=stubs["clinrun"])
+    assert recovered.status is InvoiceStatus.SUBMITTED
+    actions = [e.action.value for e in repo.get_audit(invoice.id)]
+    assert "recovered" in actions
+    assert actions.count("extracted") == 1  # extraction was reused, not re-run
+
+
+def test_extraction_failure_then_recover_reextracts():
+    # LLM extraction failure → extraction_failed, no submission; recover() with a
+    # working extractor re-extracts from the persisted source text and submits.
+    repo = InMemoryRepository()
+    stubs = _stubs()
+    bad_llm = StubLLMClient(responses=[{"metadata": {"total_amount": "not-a-number"}}])
+    invoice = process(_load("inv_clean_001.json"), repo,
+                      llm=bad_llm, ref=stubs["ref"], clinrun=stubs["clinrun"])
+    assert invoice.status is InvoiceStatus.FAILED
+    assert any(e.type == "extraction_failed" for e in repo.get_exceptions(invoice.id))
+    assert "submitted" not in [e.action.value for e in repo.get_audit(invoice.id)]
+
+    recovered = recover(invoice.id, repo,
+                        llm=PassthroughLLMClient(), ref=stubs["ref"], clinrun=stubs["clinrun"])
+    assert recovered.status is InvoiceStatus.SUBMITTED
+    assert recovered.metadata.invoice_number == "INV-1001"
 
 
 def test_batch_shares_catalog_cache_across_same_scope():

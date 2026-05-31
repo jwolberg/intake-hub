@@ -42,6 +42,7 @@ from backend.domain import (
     ExtractionResult,
     Invoice,
     InvoiceStatus,
+    ParsedDocument,
 )
 from backend.exceptions import build as build_exception
 from backend.exceptions import from_decision
@@ -60,6 +61,28 @@ def _advance(repo: Repository, invoice: Invoice, status: InvoiceStatus) -> None:
     invoice.status = status
     invoice.updated_at = datetime.now(timezone.utc)
     repo.save_invoice(invoice)
+
+
+# Transient client calls (catalog fetch, submission) get a few in-process attempts
+# before the invoice is failed — predictable recovery from a flaky dependency
+# (PRD §14). Non-transient errors (e.g. CatalogNotFound) are not caught here and
+# surface immediately.
+_RETRY_ATTEMPTS = 3
+
+
+def _retry(
+    fn,
+    *,
+    on: type[Exception] | tuple[type[Exception], ...],
+    attempts: int = _RETRY_ATTEMPTS,
+):
+    last: Exception | None = None
+    for _ in range(attempts):
+        try:
+            return fn()
+        except on as exc:
+            last = exc
+    raise last  # type: ignore[misc]  # attempts >= 1, so last is set
 
 
 def _extraction_llm(parsed, llm: LLMClient) -> LLMClient:
@@ -177,7 +200,11 @@ def process(
             "format": parsed.format, "sections": parsed.sections,
         })
 
-        extraction = extract(invoice.id, parsed, _extraction_llm(parsed, llm))
+        try:
+            extraction = extract(invoice.id, parsed, _extraction_llm(parsed, llm))
+        except Exception as exc:  # PRD §15 LLM Extraction Failure: mark + don't submit
+            _fail(repo, invoice, "extraction_failed", str(exc))
+            return invoice
         extraction = _attach_citations(extraction, source, ocr)
         invoice.metadata = extraction.metadata
         repo.replace_line_items(invoice.id, extraction.line_items)
@@ -235,7 +262,7 @@ def _resolve_match_decide(
     })
 
     try:
-        catalog = fetch(ctx, ref, cache=catalog_cache)
+        catalog = _retry(lambda: fetch(ctx, ref, cache=catalog_cache), on=ReferenceUnavailable)
         catalog_available = True
     except CatalogNotFound:
         # scope known but no catalog → deliberate hold (catalog_unavailable)
@@ -274,7 +301,10 @@ def _resolve_match_decide(
 
 def _submit(repo, invoice, metadata, ctx, matches, clinrun, decision) -> None:
     try:
-        result = submit_invoice(invoice, metadata, ctx, matches, clinrun)
+        result = _retry(
+            lambda: submit_invoice(invoice, metadata, ctx, matches, clinrun),
+            on=SubmissionFailed,
+        )
     except SubmissionFailed as exc:
         _fail(repo, invoice, "submission_failed", str(exc))
         return
@@ -343,6 +373,76 @@ def rerun(
         _fail(repo, invoice, "stage_failure", str(exc))
 
     return invoice
+
+
+def recover(
+    invoice_id: str,
+    repo: Repository,
+    *,
+    llm: LLMClient | None = None,
+    ref: MCPReferenceClient | None = None,
+    clinrun: ClinRunClient | None = None,
+    catalog_cache: CatalogCache | None = None,
+) -> Invoice:
+    """Resume a FAILED invoice from where it failed, reusing successful upstream
+    outputs (P3-T1; PRD §15 "provide retry option", §14 retry/recovery).
+
+    If extraction had succeeded (an ``EXTRACTED`` event exists), its persisted
+    metadata + line items are reused — so a catalog or submission failure retries
+    *without* re-extracting. If extraction itself failed, it is re-run from the
+    persisted source text. Then context → catalog → match → decide → submit/hold
+    runs again, with the in-process retry on transient client errors.
+    """
+    llm = llm or get_llm_client()
+    ref = ref or get_reference_client()
+    clinrun = clinrun or get_clinrun_client()
+
+    invoice = repo.get_invoice(invoice_id)
+    if invoice is None:
+        raise KeyError(invoice_id)
+
+    audit = repo.get_audit(invoice_id)
+    received = latest_details(audit, AuditAction.RECEIVED)
+    source = {k: received.get(k) for k in ("channel", "subject", "sender", "attachment")}
+
+    record(repo, invoice_id, AuditAction.RECOVERED, actor=Actor.SYSTEM,
+           reason="retry failed stage", details={"from_status": invoice.status.value})
+    _advance(repo, invoice, InvoiceStatus.RERUN_REQUESTED)
+
+    try:
+        if latest_details(audit, AuditAction.EXTRACTED):
+            extraction = _reconstruct_extraction(repo, invoice, audit)
+        else:
+            extraction = _reextract(repo, invoice_id, audit, llm)
+            invoice.metadata = extraction.metadata
+            repo.replace_line_items(invoice_id, extraction.line_items)
+        _resolve_match_decide(
+            repo, invoice, extraction, source,
+            llm=llm, ref=ref, clinrun=clinrun, catalog_cache=catalog_cache,
+            match_corrections=audit,
+        )
+    except Exception as exc:  # same isolation contract as process
+        _fail(repo, invoice, "stage_failure", str(exc))
+
+    return invoice
+
+
+def _reextract(
+    repo: Repository, invoice_id: str, audit: list[AuditEvent], llm: LLMClient
+) -> ExtractionResult:
+    """Re-run extraction from the persisted source text (recovery from an
+    extraction failure). The original document isn't re-fetched — the parsed text
+    captured at PARSED time is the input."""
+    detail = repo.get_detail(invoice_id) or {}
+    source = {k: latest_details(audit, AuditAction.RECEIVED).get(k)
+              for k in ("channel", "subject", "sender", "attachment", "attachment_path")}
+    parsed = ParsedDocument(
+        invoice_id=invoice_id,
+        source=source,
+        text=detail.get("source_text") or "",
+        format=latest_details(audit, AuditAction.PARSED).get("format", "unknown"),
+    )
+    return extract(invoice_id, parsed, _extraction_llm(parsed, llm))
 
 
 def _reconstruct_extraction(
