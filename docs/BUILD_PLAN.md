@@ -261,7 +261,9 @@ Tickets are grouped by STRATEGY § Tracks. Each traces to a PRD requirement.
   - Files: /tests/scenarios/**, /samples/**
   - Depends on: Phase 2
   - Acceptance criteria covered: PRD §18 (Scenario Tests), §15.
-  - Status: Todo
+  - Status: Done — `tests/scenarios/test_scenarios.py`: one test per §18 scenario
+    (simple / medium / large / ambiguous / mismatched / unmatched / failed-catalog
+    / failed-submission) through the real orchestrator + stubs (8 passing).
 - **P3-T3 — Unit + integration coverage**
   - Objective: Unit tests for extraction schema, context ranking, matching layers, decision policy, exception creation, state transitions; integration for end-to-end + retries. Decision policy + matching carry heaviest coverage.
   - Files: /tests/unit/**, /tests/integration/**
@@ -285,7 +287,11 @@ Tickets are grouped by STRATEGY § Tracks. Each traces to a PRD requirement.
   - Files: /samples/**, seed scripts
   - Depends on: Phase 2
   - Acceptance criteria covered: PRD §19 (Demo Requirements).
-  - Status: Todo
+  - Status: Done — added `inv_large_007` (15 line items vs a 60-item generated
+    catalog for sponsor_003/study_003 → submits, all matched) and
+    `inv_ambiguous_008` (sibling-site tie → context_ambiguity hold). Both rendered
+    to PDFs and added to `seed_hub`/`seed_cloud`, so the demo set now covers
+    submit + ambiguity + mismatch + large per PRD §19.
 - **P3-T7 — Docs & run instructions**
   - Objective: Finalize `docs/implementation-notes.md`; add README/run steps (`docker-compose up`, seed, demo walkthrough).
   - Files: /README.md, /docs/implementation-notes.md

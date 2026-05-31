@@ -1,0 +1,34 @@
+{
+  "source": {
+    "channel": "email",
+    "subject": "Invoice INV-1008 \u2014 Northwind Therapeutics",
+    "sender": "billing@northwind-cro.example",
+    "attachment": "INV-1008.pdf"
+  },
+  "document": {
+    "metadata": {
+      "invoice_number": "INV-1008",
+      "invoice_date": "2026-05-29",
+      "vendor_name": "Northwind Therapeutics",
+      "sponsor_name": "Northwind Therapeutics",
+      "protocol_number": "NWT-101",
+      "study_name": "NW-CARDIO-1",
+      "currency": "USD",
+      "total_amount": "420.00"
+    },
+    "line_items": [
+      {
+        "raw_description": "Screening Visit",
+        "quantity": "1",
+        "unit_price": "300.00",
+        "total": "300.00"
+      },
+      {
+        "raw_description": "ECG",
+        "quantity": "1",
+        "unit_price": "120.00",
+        "total": "120.00"
+      }
+    ]
+  }
+}

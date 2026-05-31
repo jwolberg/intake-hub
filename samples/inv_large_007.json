@@ -1,0 +1,113 @@
+{
+  "source": {
+    "channel": "email",
+    "subject": "Invoice INV-1007 \u2014 Globex Pharma (GX-NEURO-3)",
+    "sender": "billing@globex-neuro.example",
+    "attachment": "INV-1007.pdf"
+  },
+  "document": {
+    "metadata": {
+      "invoice_number": "INV-1007",
+      "invoice_date": "2026-05-28",
+      "vendor_name": "Globex Pharma",
+      "sponsor_name": "Globex Pharma",
+      "protocol_number": "GLX-303",
+      "study_name": "GX-NEURO-3",
+      "site_identifier": "Globex Neuro Center",
+      "currency": "USD",
+      "total_amount": "1620.00"
+    },
+    "line_items": [
+      {
+        "raw_description": "Procedure 01",
+        "quantity": "1",
+        "unit_price": "101.00",
+        "total": "101.00"
+      },
+      {
+        "raw_description": "Procedure 02",
+        "quantity": "1",
+        "unit_price": "102.00",
+        "total": "102.00"
+      },
+      {
+        "raw_description": "Procedure 03",
+        "quantity": "1",
+        "unit_price": "103.00",
+        "total": "103.00"
+      },
+      {
+        "raw_description": "Procedure 04",
+        "quantity": "1",
+        "unit_price": "104.00",
+        "total": "104.00"
+      },
+      {
+        "raw_description": "Procedure 05",
+        "quantity": "1",
+        "unit_price": "105.00",
+        "total": "105.00"
+      },
+      {
+        "raw_description": "Procedure 06",
+        "quantity": "1",
+        "unit_price": "106.00",
+        "total": "106.00"
+      },
+      {
+        "raw_description": "Procedure 07",
+        "quantity": "1",
+        "unit_price": "107.00",
+        "total": "107.00"
+      },
+      {
+        "raw_description": "Procedure 08",
+        "quantity": "1",
+        "unit_price": "108.00",
+        "total": "108.00"
+      },
+      {
+        "raw_description": "Procedure 09",
+        "quantity": "1",
+        "unit_price": "109.00",
+        "total": "109.00"
+      },
+      {
+        "raw_description": "Procedure 10",
+        "quantity": "1",
+        "unit_price": "110.00",
+        "total": "110.00"
+      },
+      {
+        "raw_description": "Procedure 11",
+        "quantity": "1",
+        "unit_price": "111.00",
+        "total": "111.00"
+      },
+      {
+        "raw_description": "Procedure 12",
+        "quantity": "1",
+        "unit_price": "112.00",
+        "total": "112.00"
+      },
+      {
+        "raw_description": "Procedure 13",
+        "quantity": "1",
+        "unit_price": "113.00",
+        "total": "113.00"
+      },
+      {
+        "raw_description": "Procedure 14",
+        "quantity": "1",
+        "unit_price": "114.00",
+        "total": "114.00"
+      },
+      {
+        "raw_description": "Procedure 15",
+        "quantity": "1",
+        "unit_price": "115.00",
+        "total": "115.00"
+      }
+    ]
+  }
+}

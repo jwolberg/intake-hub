@@ -27,9 +27,10 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 SAMPLES = ROOT / "samples"
 PDF_DIR = SAMPLES / "pdf"
 
-# Same demo set as seed_hub: a clean submit, two distinct holds, a low-confidence line.
+# Same demo set as seed_hub (P3-T6): submit / holds / low-confidence / ambiguity /
+# large invoice + larger catalog.
 STEMS = ["inv_clean_001", "inv_hold_unmatched_002", "inv_hold_mismatch_005",
-         "inv_uncertain_006"]
+         "inv_uncertain_006", "inv_ambiguous_008", "inv_large_007"]
 
 
 def _post(api: str, sample: dict) -> dict:

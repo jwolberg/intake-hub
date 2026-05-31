@@ -27,7 +27,8 @@ PDF_DIR = SAMPLES_DIR / "pdf"
 
 # JSON samples that have structured invoice content worth rendering as a PDF.
 _RENDERABLE = ["inv_clean_001", "inv_hold_unmatched_002", "inv_body_003",
-               "inv_hold_mismatch_005", "inv_uncertain_006"]
+               "inv_hold_mismatch_005", "inv_uncertain_006",
+               "inv_ambiguous_008", "inv_large_007"]
 
 _MARGIN = 72
 _TOP = 720

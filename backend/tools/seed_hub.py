@@ -29,11 +29,11 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 SAMPLES = ROOT / "samples"
 PDF_DIR = SAMPLES / "pdf"
 
-# Document-style samples worth showing as PDFs: a clean submit, two distinct
-# holds, and one submit with a low-confidence (description-only) line — the last
-# shows a sub-90% confidence + an *uncertain* highlight that gates a clean review.
+# Demo seed set (PRD §19, P3-T6): a clean submit, two distinct holds, a
+# low-confidence line, an ambiguous-context hold, and a large invoice matched
+# against a larger catalog — covering submit / ambiguity / mismatch / large.
 STEMS = ["inv_clean_001", "inv_hold_unmatched_002", "inv_hold_mismatch_005",
-         "inv_uncertain_006"]
+         "inv_uncertain_006", "inv_ambiguous_008", "inv_large_007"]
 
 
 def _post(api: str, sample: dict) -> dict:
