@@ -269,19 +269,28 @@ Tickets are grouped by STRATEGY § Tracks. Each traces to a PRD requirement.
   - Files: /tests/unit/**, /tests/integration/**
   - Depends on: Phase 2
   - Acceptance criteria covered: PRD §18 (Unit/Integration), § Code Quality Expectations.
-  - Status: Todo
+  - Status: Done — 168 passing / 1 skipped across unit (extraction schema, context
+    ranking incl. ambiguity, matching layers, decision policy, exception creation)
+    + integration (orchestrator state transitions, retries/recovery, scenarios,
+    scale). Postgres round-trip is the skip (runs with a live DB).
 - **P3-T4 — Observability of workflow state**
   - Objective: Visible per-stage status, typed stage errors, traces reconstructing an invoice's path.
   - Files: /backend/orchestrator/**, /backend/api/**, /frontend/**
   - Depends on: P1-T9
   - Acceptance criteria covered: PRD FR11; ARCHITECTURE §15.
-  - Status: Todo
+  - Status: Done — audit trail already drives the hub's "Processing timeline";
+    added `GET /api/invoices/:id/trace` reconstructing the ordered stage path with
+    actor/timestamp/ok + typed error `kind` and `retryable` for failed steps.
 - **P3-T5 — Performance**
   - Objective: Stable processing on large invoices/catalogs; responsive hub read/review actions.
   - Files: /backend/**, /frontend/**
   - Depends on: P2-A3, P2-A4
   - Acceptance criteria covered: PRD §14 (Performance Benchmarks).
-  - Status: Todo
+  - Status: Done — `tests/integration/test_performance.py` processes an 80-line
+    invoice against a 250-item catalog to a fully-matched submit with no failure
+    (stability-at-scale, not flaky wall-clock); the `inv_large_007` scenario
+    covers the demo-scale path. Hub read/review stays responsive (client-side
+    filtering over server `filter_tags`).
 - **P3-T6 — Demo seed set**
   - Objective: Seed/process at least one submitted invoice, one held-for-ambiguity, one held-for-mismatch, one large invoice/catalog example.
   - Files: /samples/**, seed scripts

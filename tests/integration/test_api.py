@@ -180,6 +180,50 @@ def test_source_pdf_404_for_body_only_invoice(client):
     assert client.get(f"/api/invoices/{invoice_id}/source.pdf").status_code == 404
 
 
+# --- workflow trace (P3-T4 observability) -----------------------------------
+
+
+def test_trace_reconstructs_pipeline_path_for_submitted(client):
+    invoice_id = client.post(
+        "/api/invoices/process", json=_sample("inv_clean_001.json")
+    ).json()["id"]
+
+    trace = client.get(f"/api/invoices/{invoice_id}/trace").json()
+    assert trace["status"] == "submitted"
+    stages = [s["stage"] for s in trace["steps"]]
+    assert stages == ["received", "parsed", "extracted", "context_resolved",
+                      "catalog_matched", "submitted"]
+    assert all(s["ok"] for s in trace["steps"])
+
+
+def test_trace_marks_failed_stage_typed_and_retryable(client):
+    # Override clients so the catalog endpoint is down → a retryable failure.
+    class _CatalogDown:
+        def __init__(self):
+            self._inner = StubMCPReferenceClient()
+
+        def resolve_sponsor_study_site(self, clues):
+            return self._inner.resolve_sponsor_study_site(clues)
+
+        def get_catalog(self, sponsor_id, study_id):
+            from backend.clients.errors import ReferenceUnavailable
+            raise ReferenceUnavailable("down")
+
+    app.dependency_overrides[get_pipeline_clients] = lambda: {
+        "llm": PassthroughLLMClient(), "ref": _CatalogDown(), "clinrun": StubClinRunClient(),
+    }
+    invoice_id = client.post(
+        "/api/invoices/process", json=_sample("inv_clean_001.json")
+    ).json()["id"]
+
+    trace = client.get(f"/api/invoices/{invoice_id}/trace").json()
+    assert trace["status"] == "failed"
+    last = trace["steps"][-1]
+    assert last["ok"] is False
+    assert last["kind"] == "catalog_fetch_failed"
+    assert last["retryable"] is True
+
+
 def test_inline_base64_pdf_is_extracted_served_and_rendered(client):
     # Cloud path (P5-T3): the PDF rides in the payload as base64, no local path.
     import base64

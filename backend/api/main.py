@@ -30,6 +30,7 @@ from backend.config import settings
 from backend.db import get_engine, init_schema
 from backend.db.repository import Repository, get_repository
 from backend.domain import Actor, AuditAction, Decision, InvoiceMetadata, InvoiceStatus
+from backend.domain.taxonomy import is_retryable
 from backend.orchestrator import process, recover, rerun
 from backend.parser.raster import (
     RenderedPage,
@@ -195,6 +196,31 @@ def list_invoices(
 def metrics(repo: RepoDep) -> WorkflowMetrics:
     """Aggregate strategy metrics for the Operations Lead (STRATEGY § Key metrics)."""
     return compute_metrics(repo)
+
+
+@app.get("/api/invoices/{invoice_id}/trace")
+def invoice_trace(invoice_id: str, repo: RepoDep) -> dict:
+    """Reconstruct an invoice's path through the pipeline (P3-T4 observability).
+
+    An ordered list of stage steps from the audit trail — each with actor,
+    timestamp, and an ``ok`` flag; a failed step carries the typed error ``kind``,
+    message, and whether it is ``retryable`` (PRD FR11; ARCHITECTURE §15).
+    """
+    invoice = _get_invoice_or_404(invoice_id, repo)
+    steps = []
+    for event in repo.get_audit(invoice_id):
+        failed = event.action is AuditAction.FAILED
+        kind = event.details.get("kind") if failed else None
+        steps.append({
+            "stage": event.action.value,
+            "actor": event.actor.value,
+            "at": event.timestamp,
+            "ok": not failed,
+            "kind": kind,
+            "error": event.details.get("reason") if failed else None,
+            "retryable": is_retryable(kind) if kind else None,
+        })
+    return {"invoice_id": invoice_id, "status": invoice.status.value, "steps": steps}
 
 
 def _build_detail(invoice_id: str, repo: Repository) -> dict | None:
