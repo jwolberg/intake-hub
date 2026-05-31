@@ -11,6 +11,7 @@ unavailable dependency should be visible, not fatal (ARCHITECTURE.md §15).
 from __future__ import annotations
 
 import logging
+import pathlib
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Annotated
@@ -209,6 +210,9 @@ def _build_detail(invoice_id: str, repo: Repository) -> dict | None:
         "subject": received.get("subject"),
         "sender": received.get("sender"),
         "attachment": received.get("attachment"),
+        # P5-T1: whether the original PDF can be served (drives the hub's
+        # "Open original PDF" affordance).
+        "has_pdf": _has_source_pdf(invoice_id, repo),
     }
     detail["extraction"] = {
         "field_confidence": extracted.get("field_confidence", {}),
@@ -290,6 +294,50 @@ def get_page_image(invoice_id: str, page_number: int, repo: RepoDep) -> Response
     if page is None:
         raise HTTPException(status_code=404, detail="page image not found")
     return Response(content=page.image_png, media_type="image/png")
+
+
+def _has_source_pdf(invoice_id: str, repo: Repository) -> bool:
+    """Cheap flag for the detail payload: does this invoice have a PDF source?
+
+    Based on the recorded attachment (no blob read) — the orchestrator stores PDF
+    bytes exactly when the attachment is a ``.pdf``.
+    """
+    received = latest_details(repo.get_audit(invoice_id), AuditAction.RECEIVED)
+    for key in ("attachment_path", "attachment"):
+        value = received.get(key)
+        if value and str(value).lower().endswith(".pdf"):
+            return True
+    return False
+
+
+def _source_pdf_bytes(invoice_id: str, repo: Repository) -> bytes | None:
+    """The original PDF bytes: prefer the persisted blob, else read the recorded
+    file path (dev). ``None`` when the invoice has no PDF source."""
+    stored = repo.get_source_pdf(invoice_id)
+    if stored:
+        return stored
+    received = latest_details(repo.get_audit(invoice_id), AuditAction.RECEIVED)
+    path = received.get("attachment_path")
+    if path and str(path).lower().endswith(".pdf"):
+        try:
+            return pathlib.Path(path).read_bytes()
+        except OSError:
+            return None
+    return None
+
+
+@app.get("/api/invoices/{invoice_id}/source.pdf")
+def get_source_pdf(invoice_id: str, repo: RepoDep) -> Response:
+    """The original source PDF (PRD §10 download). 404 if the invoice has none."""
+    _get_invoice_or_404(invoice_id, repo)
+    data = _source_pdf_bytes(invoice_id, repo)
+    if data is None:
+        raise HTTPException(status_code=404, detail="no source PDF for this invoice")
+    return Response(
+        content=data,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{invoice_id}.pdf"'},
+    )
 
 
 # --- human QC actions (PRD FR10, §13; ARCHITECTURE.md §11) ------------------

@@ -13,9 +13,14 @@ CREATE TABLE IF NOT EXISTS invoices (
     decision_confidence DOUBLE PRECISION,
     metadata            JSONB NOT NULL DEFAULT '{}'::jsonb,
     source_text         TEXT,
+    source_pdf          BYTEA,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- Original source PDF bytes (P5-T1) so the hub can serve the actual document
+-- (PRD §10 download), independent of any local file path. Idempotent add for
+-- databases created before this column existed.
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS source_pdf BYTEA;
 
 CREATE TABLE IF NOT EXISTS line_items (
     id                     TEXT PRIMARY KEY,

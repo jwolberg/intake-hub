@@ -9,6 +9,12 @@ export function pageImageUrl(id, pageNumber) {
   return `${API_URL}/api/invoices/${id}/pages/${pageNumber}/image`;
 }
 
+// URL of the original source PDF (PRD §10 download; P5-T2). Served only when the
+// invoice has a PDF source (detail.source.has_pdf).
+export function sourcePdfUrl(id) {
+  return `${API_URL}/api/invoices/${id}/source.pdf`;
+}
+
 async function getJSON(path) {
   const resp = await fetch(`${API_URL}${path}`);
   if (!resp.ok) throw new Error(`${path} → ${resp.status}`);

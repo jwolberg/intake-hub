@@ -12,6 +12,7 @@ Low confidence / ambiguity flow to a ``hold`` decision, never a silent submit.
 
 from __future__ import annotations
 
+import pathlib
 from datetime import datetime, timezone
 
 from backend import corrections
@@ -102,6 +103,24 @@ def _attach_citations(
     return extraction.model_copy(update={"citations": citations})
 
 
+def _store_source_pdf(repo: Repository, invoice_id: str, source: dict) -> None:
+    """Persist the original PDF bytes (P5-T1) so the hub can serve the actual
+    document (PRD §10 download), independent of the local file path.
+
+    Best-effort: a missing/unreadable file (e.g. an email-body invoice, or the
+    cloud where the path isn't present) simply leaves no stored PDF rather than
+    failing intake.
+    """
+    path = source.get("attachment_path")
+    if not path or not str(path).lower().endswith(".pdf"):
+        return
+    try:
+        data = pathlib.Path(path).read_bytes()
+    except OSError:
+        return
+    repo.set_source_pdf(invoice_id, data)
+
+
 def process(
     sample: dict,
     repo: Repository,
@@ -130,6 +149,7 @@ def process(
         # can rasterize the source for the reviewer overlay (P4-T1).
         "attachment_path": source.get("attachment_path"),
     })
+    _store_source_pdf(repo, invoice.id, source)
 
     try:
         parsed = parse(invoice.id, sample)

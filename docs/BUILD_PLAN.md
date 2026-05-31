@@ -34,7 +34,7 @@
 
 ## Current Status
 - Overall status: In Progress
-- Current phase: **Phase 4 — Visual Document Review: COMPLETE** (P4-T1..T6 all done, browser-verified). Phase 2 complete. **Phase 3 (Hardening & Polish) is the only remaining open phase** and is independent.
+- Current phase: **Phase 4 — Visual Document Review: COMPLETE** (P4-T1..T6 all done, browser-verified). Phase 2 complete. **Phase 5 — Original PDF View** added (P5-T1/T2 dev, P5-T3 cloud-plan); **Phase 3 (Hardening & Polish)** remains open and independent. The stack is also **deployed to GCP Cloud Run** (project `ledgerrun-1`; see docs/DEPLOY.md).
 - Current ticket: **P3-T1** (failure isolation, retry & recovery) — next recommended; all of Phase 4 is shipped. The Phase 1 live-stack exit gate is **CLEARED** (2026-05-27): Postgres round-trip passes against the live DB, `docker compose up` brings up the full stack, hub serves at `http://127.0.0.1:5173`. Remaining there: a human visual click-through of the hub UI. Commands: /docs/RUNBOOK.md.
 - Note: All of Phase 2 (P2-A1..A4 + P2-B1..B4 + P2-C1..C4) validated in-process (106 passed, 1 skipped) **and** exercised end-to-end against the live Postgres stack (process → filters → detail → QC corrections → rerun → metrics). The skipped test is the Postgres round-trip, which passes when run with a live `DATABASE_URL`. Dev test also fixed a metric-bucketing bug (rates now key off the AI's first/autonomous decision, robust to rerun). Also: out-of-plan real-PDF demo path (RUNBOOK Path D).
 - Blockers: None for in-process work (OD-1 resolved; OD-2..OD-5 provisional behind interfaces). Live-stack exit gate blocked on Docker availability only.
@@ -383,6 +383,66 @@ hallucinated).
     Browser-verified end-to-end on a seeded uncertain-line scenario (gate blocks →
     Confirm → human audit event + gate releases). 148 tests pass; build clean.
 
+### Phase 5 — Original PDF View (preview → download)
+
+Completes the **"download"** half of PRD §10 *"Original invoice preview/download"*.
+Phase 4 delivered the *preview* (rasterized page image + highlight overlay); this
+adds serving the **actual source PDF** so a reviewer can open/download the
+original document, not just a rendered image. **No new scope** — same PRD §10
+clause P4-T1 already cites.
+
+**Goal**
+- From "View source", a reviewer can open the original PDF (open in a new tab /
+  download), in addition to the highlighted page-image preview.
+
+**Why it's needed**
+- Today the source is only ever served as a PNG raster (`/pages/:n/image`); the
+  raw `.pdf` is never persisted or served. It also relies on the original file
+  sitting on the API's local disk (`attachment_path`), which does not hold on
+  Cloud Run (the cloud demo was seeded via the JSON `document` path and has no
+  source document at all — see docs/DEPLOY.md).
+
+**Exit Criteria**
+- `GET /api/invoices/:id/source.pdf` returns the original PDF (`application/pdf`)
+  for a PDF-backed invoice, 404 for one with no PDF source; the hub's "View
+  source" panel shows an "Open original PDF" affordance when a PDF exists; the
+  offline suite still passes with no network.
+
+**Tickets**
+- **P5-T1 — Persist the source PDF (dev) + serve it**
+  - Objective: Store the original PDF bytes at ingest (DB blob — `invoices.source_pdf BYTEA`, mirroring `source_text`) and serve via `GET /api/invoices/:id/source.pdf`; the detail payload flags whether a PDF exists. Reading from the stored bytes (not just `attachment_path`) decouples serving from local disk.
+  - Files: /backend/db/** (schema + repository), /backend/orchestrator/**, /backend/api/**
+  - Depends on: P4-T1
+  - Acceptance criteria covered: PRD §10 (Original invoice **download**).
+  - Status: Done (dev) — `invoices.source_pdf BYTEA` (+ idempotent `ALTER`); repo
+    `set_source_pdf`/`get_source_pdf` (InMemory + Postgres); orchestrator stores
+    the bytes best-effort at intake; `GET /api/invoices/:id/source.pdf` serves the
+    blob (falls back to the file path), `detail.source.has_pdf` flag. Verified
+    live (HTTP 200 `application/pdf`, `%PDF-`); tests added (served + 404).
+- **P5-T2 — Hub: open the original PDF from "View source"**
+  - Objective: Add an "Open original PDF ↗" link/embed in the SourceDrawer (new tab / browser-native PDF view), shown only when the invoice has a PDF source; keep the page-image + overlay preview unchanged.
+  - Files: /frontend/** (api.js, InvoiceDetail.jsx)
+  - Depends on: P5-T1
+  - Acceptance criteria covered: PRD §10; USERS § Reviewer.
+  - Status: Done (dev) — `sourcePdfUrl` + an "Open original PDF ↗" link in the
+    SourceDrawer (new tab), shown only when `source.has_pdf`; page-image overlay
+    unchanged. Browser-verified in the dev hub.
+- **P5-T3 — Cloud plan: get the PDF into Cloud Run (PLAN ONLY)**
+  - Objective: Plan how a source PDF reaches the cloud API, which cannot read local
+    paths. Recommended approach: an **ingest that carries the PDF bytes** — either a
+    multipart upload endpoint (`POST /api/invoices/process` accepting a file) or
+    base64 bytes in the JSON payload — persisted via P5-T1's `source_pdf` blob in
+    Cloud SQL (BYTEA works in the cloud as-is; **no GCS needed at demo scale**).
+    Consider **GCS object storage** only if PDFs grow large or DB bloat matters
+    (store a `gs://` key instead of bytes; serve via signed URL). Then re-seed the
+    cloud (a PDF-aware seeder) so cloud invoices have real source documents and
+    page images. Rasterization must also render from stored **bytes** (not a path)
+    for the cloud path.
+  - Files: docs/DEPLOY.md (plan), later /backend/api/** + /backend/parser/raster.py
+  - Depends on: P5-T1, P5-T2
+  - Acceptance criteria covered: PRD §10; ARCHITECTURE §17 (deployment).
+  - Status: Todo (planning ticket — not implemented this pass).
+
 ---
 
 ## Dependency Order
@@ -404,6 +464,7 @@ hallucinated).
 16. Phase 2 (Track A: P2-A1→A4) ∥ (Track B: P2-B1→B4) ∥ (Track C: P2-C1→C4), respecting per-ticket deps
 17. Phase 3: P3-T1, P3-T4 → P3-T2, P3-T3, P3-T5 → P3-T6 → P3-T7
 18. Phase 4 (new scope, doc change applied — unblocked): P4-T1 → P4-T2 → P4-T3 → P4-T4 → P4-T5 → P4-T6 (P4-T6 also needs P2-C3/C4, done)
+19. Phase 5 (completes PRD §10 "download" — no new scope): P5-T1 → P5-T2 → P5-T3 (cloud plan)
 
 ## Recommended Next Step
 - **Phase 4 (Visual Document Review) is COMPLETE** — P4-T1..T6 all shipped and browser-verified on branch `p2-track-c-reviewer-hub`. The only remaining open phase is **Phase 3 — Hardening & Polish**.

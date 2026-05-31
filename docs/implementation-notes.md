@@ -1358,3 +1358,40 @@ To enable the real provider later: Serverless VPC Access connector + Cloud NAT +
 **Seeding in cloud:** used JSON `document` samples (no attachment_path), since the
 cloud API can't read local PDF paths — so no source page images in cloud, but
 list/detail metadata populate.
+
+---
+
+## 2026-05-31 — Phase 5 (dev): View Source → open the original PDF
+
+New BUILD_PLAN Phase 5 completes the "download" half of PRD §10 (Phase 4 shipped
+the page-image *preview*). Dev portion (P5-T1/T2) implemented; cloud is planned
+(P5-T3) not built.
+
+- **Persist the PDF**: `invoices.source_pdf BYTEA` (+ idempotent `ALTER ... ADD
+  COLUMN IF NOT EXISTS` so existing DBs upgrade on startup). Repo gains
+  `set_source_pdf`/`get_source_pdf` (InMemory + Postgres; Postgres normalizes the
+  BYTEA memoryview to bytes). `save_invoice`'s on-conflict update already excludes
+  the column, so the blob survives later status writes (same trick as source_text).
+- **Capture**: `orchestrator._store_source_pdf` reads the `.pdf` at
+  `attachment_path` and stores the bytes — **best-effort** (missing/unreadable file
+  just means no stored PDF; never fails intake). Decouples serving from local disk.
+- **Serve**: `GET /api/invoices/:id/source.pdf` returns the blob (falls back to
+  reading the file path in dev), 404 when there's no PDF. `detail.source.has_pdf`
+  is a cheap flag (from the recorded attachment name, no blob read) that drives the
+  hub affordance.
+- **Hub**: `sourcePdfUrl` + an "Open original PDF ↗" link in the SourceDrawer
+  (opens in a new tab → browser-native PDF view); page-image overlay untouched.
+
+**Decision — DB blob, not GCS (for now).** PDFs are tiny (~2 KB rendered samples);
+BYTEA in Postgres/Cloud SQL is simplest and works in the cloud as-is. GCS only if
+PDFs grow large — captured as a P5-T3 option.
+
+**Cloud (P5-T3, not built):** the cloud API can't read local paths, so a source
+PDF must arrive **in the request** (multipart upload or base64 in the JSON
+payload), then persist via the same `source_pdf` blob. Rasterization must also
+render from **bytes** (not a path) for the cloud preview. The current cloud deploy
+was JSON-seeded, so it has no source documents yet.
+
+**Validation:** ruff clean; full suite **153 passed, 1 skipped**; rebuilt the local
+Docker stack and browser-verified the "Open original PDF" button serves a real PDF
+(HTTP 200 application/pdf, %PDF-) from the stored blob.

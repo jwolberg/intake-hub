@@ -41,6 +41,8 @@ class Repository(Protocol):
     def get_invoice(self, invoice_id: str) -> Invoice | None: ...
     def list_invoices(self) -> list[Invoice]: ...
     def set_source_text(self, invoice_id: str, text: str) -> None: ...
+    def set_source_pdf(self, invoice_id: str, pdf: bytes) -> None: ...
+    def get_source_pdf(self, invoice_id: str) -> bytes | None: ...
     def replace_line_items(self, invoice_id: str, items: list[LineItem]) -> None: ...
     def get_line_items(self, invoice_id: str) -> list[LineItem]: ...
     def save_context(self, ctx: ResolvedContext) -> None: ...
@@ -60,6 +62,7 @@ class InMemoryRepository:
     def __init__(self) -> None:
         self._invoices: dict[str, Invoice] = {}
         self._source_text: dict[str, str] = {}
+        self._source_pdf: dict[str, bytes] = {}
         self._line_items: dict[str, list[LineItem]] = {}
         self._context: dict[str, ResolvedContext] = {}
         self._matches: dict[str, list[MatchResult]] = {}
@@ -78,6 +81,12 @@ class InMemoryRepository:
 
     def set_source_text(self, invoice_id: str, text: str) -> None:
         self._source_text[invoice_id] = text
+
+    def set_source_pdf(self, invoice_id: str, pdf: bytes) -> None:
+        self._source_pdf[invoice_id] = pdf
+
+    def get_source_pdf(self, invoice_id: str) -> bytes | None:
+        return self._source_pdf.get(invoice_id)
 
     def replace_line_items(self, invoice_id: str, items: list[LineItem]) -> None:
         self._line_items[invoice_id] = [i.model_copy(deep=True) for i in items]
@@ -202,6 +211,22 @@ class PostgresRepository:
                 .where(self.invoices.c.id == invoice_id)
                 .values(source_text=text)
             )
+
+    def set_source_pdf(self, invoice_id: str, pdf: bytes) -> None:
+        with self._engine.begin() as conn:
+            conn.execute(
+                self.invoices.update()
+                .where(self.invoices.c.id == invoice_id)
+                .values(source_pdf=pdf)
+            )
+
+    def get_source_pdf(self, invoice_id: str) -> bytes | None:
+        with self._engine.connect() as conn:
+            value = conn.execute(
+                select(self.invoices.c.source_pdf).where(self.invoices.c.id == invoice_id)
+            ).scalar()
+        # psycopg returns BYTEA as memoryview/bytes; normalize to bytes.
+        return bytes(value) if value is not None else None
 
     def replace_line_items(self, invoice_id: str, items: list[LineItem]) -> None:
         rows = [{

@@ -152,6 +152,34 @@ def test_pages_empty_for_body_only_invoice(client):
     assert client.get(f"/api/invoices/{invoice_id}/pages/1/image").status_code == 404
 
 
+# --- original source PDF (P5-T1; PRD §10 download) --------------------------
+
+
+def test_source_pdf_served_and_flagged_for_pdf_invoice(client):
+    sample = _sample("inv_clean_001.json")
+    sample["source"]["attachment_path"] = str(_PDF)
+    invoice_id = client.post("/api/invoices/process", json=sample).json()["id"]
+
+    # The detail payload flags that a PDF is available.
+    detail = client.get(f"/api/invoices/{invoice_id}").json()
+    assert detail["source"]["has_pdf"] is True
+
+    pdf = client.get(f"/api/invoices/{invoice_id}/source.pdf")
+    assert pdf.status_code == 200
+    assert pdf.headers["content-type"] == "application/pdf"
+    assert pdf.content.startswith(b"%PDF")
+
+
+def test_source_pdf_404_for_body_only_invoice(client):
+    invoice_id = client.post(
+        "/api/invoices/process", json=_sample("inv_body_003.json")
+    ).json()["id"]
+
+    detail = client.get(f"/api/invoices/{invoice_id}").json()
+    assert detail["source"]["has_pdf"] is False
+    assert client.get(f"/api/invoices/{invoice_id}/source.pdf").status_code == 404
+
+
 def test_pages_404_for_unknown_invoice(client):
     assert client.get("/api/invoices/nope/pages").status_code == 404
     assert client.get("/api/invoices/nope/pages/1/image").status_code == 404

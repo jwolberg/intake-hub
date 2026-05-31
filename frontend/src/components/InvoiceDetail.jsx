@@ -17,6 +17,7 @@ import {
   markReviewed,
   pageImageUrl,
   rerunInvoice,
+  sourcePdfUrl,
 } from "../api.js";
 
 // Header fields shown in the Extracted Metadata section (PRD §10), in order.
@@ -159,7 +160,19 @@ function SourceDrawer({ open, onClose, invoiceId, source, pages, citations, reso
     <aside className="source-drawer" aria-label="Original source">
       <div className="drawer-head">
         <strong>Original source{source?.attachment ? ` — ${source.attachment}` : ""}</strong>
-        <button className="small-btn" onClick={onClose}>Close ✕</button>
+        <div className="drawer-actions">
+          {source?.has_pdf && (
+            <a
+              className="small-btn"
+              href={sourcePdfUrl(invoiceId)}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Open original PDF ↗
+            </a>
+          )}
+          <button className="small-btn" onClick={onClose}>Close ✕</button>
+        </div>
       </div>
       <div className="drawer-body">
         {pages.length > 0 ? (

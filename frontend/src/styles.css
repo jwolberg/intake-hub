@@ -186,6 +186,8 @@ tbody tr:hover { background: var(--row-hover); }
   display: flex; align-items: center; justify-content: space-between;
   padding: 0.75rem 1rem; border-bottom: 1px solid var(--border);
 }
+.drawer-actions { display: flex; align-items: center; gap: 0.5rem; }
+a.small-btn { text-decoration: none; display: inline-block; }
 .drawer-body { padding: 1rem; overflow: auto; }
 .source-drawer .page-frame { max-width: 100%; }
 .source-drawer .pages { display: block; }
