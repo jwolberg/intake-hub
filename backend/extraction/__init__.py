@@ -35,9 +35,17 @@ from backend.domain import (
 )
 from backend.extraction.citations import UNCERTAIN_BELOW
 
+# The exact metadata keys the schema expects, derived from the domain model so
+# the prompt can never drift from it. Pinning these in the prompt is essential:
+# without them the model invents synonyms from the document labels (e.g. "vendor"
+# instead of "vendor_name"), which _build_metadata then drops as missing.
+_METADATA_FIELDS = ", ".join(InvoiceMetadata.model_fields)
+
 EXTRACTION_SYSTEM = (
     "Extract clinical-trial invoice header metadata and line items from the "
     "document text into a JSON object with keys 'metadata' and 'line_items'. "
+    "The 'metadata' object MUST use exactly these field keys, verbatim — do not "
+    "rename, abbreviate, or substitute synonyms: " + _METADATA_FIELDS + ". "
     "For each metadata field return an object "
     '{"value": <string or null>, "confidence": <number 0..1>, '
     '"evidence": <short snippet of the source text you read it from>}; '

@@ -10,7 +10,8 @@ import pathlib
 
 from backend.clients import PassthroughLLMClient
 from backend.clients.llm import StubLLMClient
-from backend.extraction import extract
+from backend.domain import InvoiceMetadata
+from backend.extraction import EXTRACTION_SYSTEM, extract
 from backend.parser import parse
 
 SAMPLES = pathlib.Path(__file__).resolve().parents[2] / "samples"
@@ -18,6 +19,15 @@ SAMPLES = pathlib.Path(__file__).resolve().parents[2] / "samples"
 
 def _load(name: str) -> dict:
     return json.loads((SAMPLES / name).read_text())
+
+
+def test_extraction_prompt_pins_every_schema_field():
+    """The system prompt must name every metadata field verbatim, or a real
+    provider invents synonyms (e.g. "vendor" vs "vendor_name") that
+    ``_build_metadata`` drops as missing — the blank Vendor/Sponsor/Study bug.
+    """
+    for field in InvoiceMetadata.model_fields:
+        assert field in EXTRACTION_SYSTEM, f"prompt omits schema field {field!r}"
 
 
 def test_parse_detects_pdf_attachment():
