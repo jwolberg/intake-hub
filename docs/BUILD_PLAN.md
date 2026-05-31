@@ -34,7 +34,7 @@
 
 ## Current Status
 - Overall status: In Progress
-- Current phase: **Phase 4 — Visual Document Review: COMPLETE** (P4-T1..T6 all done, browser-verified). Phase 2 complete. **Phase 5 — Original PDF View** added (P5-T1/T2 dev, P5-T3 cloud-plan); **Phase 3 (Hardening & Polish)** remains open and independent. The stack is also **deployed to GCP Cloud Run** (project `ledgerrun-1`; see docs/DEPLOY.md).
+- Current phase: **All phases complete.** Phases 0–2, 4, 5 done; **Phase 3 (Hardening & Polish) COMPLETE** (P3-T1..T7 — retry/recovery, scenario suite, coverage, trace observability, scale, demo seed set, README). Suite: 168 passed / 1 skipped; ruff clean. The stack is also **deployed to GCP Cloud Run** (project `ledgerrun-1`; see docs/DEPLOY.md).
 - Current ticket: **P3-T1** (failure isolation, retry & recovery) — next recommended; all of Phase 4 is shipped. The Phase 1 live-stack exit gate is **CLEARED** (2026-05-27): Postgres round-trip passes against the live DB, `docker compose up` brings up the full stack, hub serves at `http://127.0.0.1:5173`. Remaining there: a human visual click-through of the hub UI. Commands: /docs/RUNBOOK.md.
 - Note: All of Phase 2 (P2-A1..A4 + P2-B1..B4 + P2-C1..C4) validated in-process (106 passed, 1 skipped) **and** exercised end-to-end against the live Postgres stack (process → filters → detail → QC corrections → rerun → metrics). The skipped test is the Postgres round-trip, which passes when run with a live `DATABASE_URL`. Dev test also fixed a metric-bucketing bug (rates now key off the AI's first/autonomous decision, robust to rerun). Also: out-of-plan real-PDF demo path (RUNBOOK Path D).
 - Blockers: None for in-process work (OD-1 resolved; OD-2..OD-5 provisional behind interfaces). Live-stack exit gate blocked on Docker availability only.
@@ -306,7 +306,10 @@ Tickets are grouped by STRATEGY § Tracks. Each traces to a PRD requirement.
   - Files: /README.md, /docs/implementation-notes.md
   - Depends on: P3-T6
   - Acceptance criteria covered: PRD § Code Quality Expectations (demo clarity); ARCHITECTURE §17.
-  - Status: Todo
+  - Status: Done — added top-level `README.md` (quickstart `docker compose up` +
+    seed, architecture overview, demo walkthrough table, testing, doc links);
+    `implementation-notes.md` carries the running decisions log incl. a Phase 3
+    summary.
 
 ### Phase 4 — Visual Document Review (Image + Bounding-Box Overlay)
 Full spec: **`/docs/specs/visual-document-review.md`**. Adapts the OCR →

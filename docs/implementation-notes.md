@@ -1423,3 +1423,35 @@ can't read local file paths.
 **Verified on Cloud Run:** `GET /source.pdf` → 200 `application/pdf`; `GET
 /pages/1/image` → 200 `image/png` rendered from the stored bytes; clean 4-invoice
 demo (wiped via delete-service → recreate-db → redeploy → seed_cloud).
+
+---
+
+## 2026-05-31 — Phase 3 (Hardening & Polish) implemented
+
+All seven P3 tickets landed. Suite: 168 passed / 1 skipped; ruff clean.
+
+- **P3-T1 retry/recovery:** taxonomy `retryable` + `is_retryable()`; explicit
+  `extraction_failed` code; bounded in-process `_retry` on transient catalog/
+  submission errors; `recover()` resumes a FAILED invoice from the failed stage
+  (reuse persisted extraction; re-extract from source text on extraction failure);
+  `POST /api/invoices/:id/retry` + hub "Retry failed stage".
+- **P3-T2 scenario suite:** `tests/scenarios/test_scenarios.py` — one test per
+  PRD §18 scenario (simple/medium/large/ambiguous/mismatched/unmatched/
+  failed-catalog/failed-submission).
+- **P3-T3 coverage:** breadth confirmed across all stages + retries + scenarios +
+  scale.
+- **P3-T4 observability:** `GET /api/invoices/:id/trace` (typed/retryable stage
+  errors) on top of the existing audit-driven hub timeline + `/api/metrics`.
+- **P3-T5 performance:** `test_performance` — 80-line invoice vs 250-item catalog
+  → fully-matched submit, no failure (stability at scale, not flaky wall-clock).
+- **P3-T6 demo seed set:** `inv_large_007` (large invoice + generated 60-item
+  catalog → submit) and `inv_ambiguous_008` (sibling-site tie → ambiguity hold);
+  added to `generate_pdfs` + `seed_hub`/`seed_cloud`.
+- **P3-T7 docs:** added top-level `README.md` (quickstart, architecture, demo
+  walkthrough, testing, doc links).
+
+**Decisions:** retry is bounded in-process (3 attempts) + a manual resume rather
+than a durable queue (OD-3 async worker still deferred — MVP runs synchronously).
+The ambiguous sample exploits the two sibling Riverside sites under study_001 (a
+clue with sponsor+protocol but no distinguishing site ties them → context
+ambiguity), avoiding any fixture change beyond the new large sponsor/study.
