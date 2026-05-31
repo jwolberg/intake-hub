@@ -8,14 +8,22 @@ for status see [`BUILD_PLAN.md`](./BUILD_PLAN.md).
 ## TL;DR
 
 ```bash
-# Full stack (DB + API + hub + stub services)
-docker compose up --build
-# → API   http://localhost:8000  (docs at /docs)
-# → Hub   http://localhost:5173
-# Process a sample invoice:
+# Full stack (DB + API + hub + stub services) + a hub full of PDF-backed invoices
+docker compose up -d --build                          # → API :8000, Hub :5173
+python -m backend.tools.seed_hub http://localhost:8000 # one-time: seed the hub
+# Open http://localhost:5173 — invoices show with Vendor / Sponsor / Study filled.
+# Process a single sample by hand instead:
 curl -X POST http://localhost:8000/api/invoices/process \
   -H 'Content-Type: application/json' --data @samples/inv_clean_001.json
 ```
+
+`seed_hub` renders the samples to real PDFs and posts them. The dev-only
+`docker-compose.override.yml` (auto-loaded) mounts `samples/` into the `api`
+container at the host path so the container can read those PDFs — run both
+`docker compose` and `seed_hub` from the repo root so `$PWD` matches. Seeded
+data persists in the `db_data` volume, so after a reboot just `docker compose
+up -d` (no re-seed needed). This path is offline (no key); export
+`ANTHROPIC_API_KEY` before `up` to use the real provider instead.
 
 No LLM API key is required: by default the pipeline uses an offline extraction
 stand-in (`PassthroughLLMClient` for JSON samples, `LayoutLLMClient` for PDFs).

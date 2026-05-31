@@ -1,0 +1,10 @@
+# Dev-only override (auto-loaded by `docker compose`). Mounts the repo's samples
+# into the api container at the SAME absolute path the host uses, so the paths
+# `seed_hub` sends (it resolves PDFs to host-absolute paths) resolve inside the
+# container too. Lets the full Docker stack seed PDF-backed invoices — no local
+# uvicorn needed. Run `docker compose` and `seed_hub` from the repo root so $PWD
+# matches. Not for production (see docs/DEPLOY.md).
+services:
+  api:
+    volumes:
+      - ./samples:${PWD}/samples:ro
