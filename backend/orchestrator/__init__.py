@@ -12,6 +12,8 @@ Low confidence / ambiguity flow to a ``hold`` decision, never a silent submit.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import pathlib
 from datetime import datetime, timezone
 
@@ -68,12 +70,12 @@ def _extraction_llm(parsed, llm: LLMClient) -> LLMClient:
     substitute the offline PDF stand-in (``LayoutLLMClient``) so the controlled
     sample PDFs extract — and thus get source-anchored citations — through the
     normal pipeline. An injected real provider (OD-2) handles both and is left
-    untouched. Keyed off ``attachment_path`` (not ``parsed.format``, which is also
-    "pdf" for a JSON sample whose attachment is merely *named* ``.pdf``).
+    untouched. Keyed off the attachment being a real ``.pdf`` (a local
+    ``attachment_path`` in dev, or inline ``attachment_b64`` in the cloud) — not
+    ``parsed.format``, which is also "pdf" for a JSON sample whose attachment is
+    merely *named* ``.pdf``.
     """
-    src_path = (parsed.source or {}).get("attachment_path")
-    is_real_pdf = bool(src_path) and str(src_path).lower().endswith(".pdf")
-    if is_real_pdf and isinstance(llm, PassthroughLLMClient):
+    if _is_real_pdf(parsed.source or {}) and isinstance(llm, PassthroughLLMClient):
         return LayoutLLMClient()
     return llm
 
@@ -103,19 +105,35 @@ def _attach_citations(
     return extraction.model_copy(update={"citations": citations})
 
 
+def _is_real_pdf(source: dict) -> bool:
+    """True when the invoice carries an actual PDF — a local ``attachment_path``
+    (dev) or inline ``attachment_b64`` (cloud)."""
+    path = source.get("attachment_path")
+    if path and str(path).lower().endswith(".pdf"):
+        return True
+    attachment = str(source.get("attachment") or "").lower()
+    return bool(source.get("attachment_b64")) and attachment.endswith(".pdf")
+
+
 def _store_source_pdf(repo: Repository, invoice_id: str, source: dict) -> None:
     """Persist the original PDF bytes (P5-T1) so the hub can serve the actual
     document (PRD §10 download), independent of the local file path.
 
-    Best-effort: a missing/unreadable file (e.g. an email-body invoice, or the
-    cloud where the path isn't present) simply leaves no stored PDF rather than
-    failing intake.
+    Reads inline ``attachment_b64`` (cloud) first, else the local
+    ``attachment_path`` (dev). Best-effort: a missing/unreadable/absent source
+    simply leaves no stored PDF rather than failing intake.
     """
-    path = source.get("attachment_path")
-    if not path or not str(path).lower().endswith(".pdf"):
+    if not _is_real_pdf(source):
+        return
+    b64 = source.get("attachment_b64")
+    if b64:
+        try:
+            repo.set_source_pdf(invoice_id, base64.b64decode(b64))
+        except (binascii.Error, ValueError):
+            return
         return
     try:
-        data = pathlib.Path(path).read_bytes()
+        data = pathlib.Path(source["attachment_path"]).read_bytes()
     except OSError:
         return
     repo.set_source_pdf(invoice_id, data)

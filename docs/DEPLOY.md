@@ -239,8 +239,13 @@ Live services (all `--allow-unauthenticated`):
   `cloudbuild.hub.yaml`) → Artifact Registry repo `invoicescreener`. Backend
   `Dockerfile` now honors `$PORT`; hub uses `frontend/Dockerfile.prod` (Vite
   build → nginx on 8080, `VITE_API_URL` baked at build time).
-- Seeded 4 invoices via JSON `document` samples (the cloud API can't read local
-  PDF paths, so no `seed_hub`/page images — fields still populate).
+- Seeded 4 PDF-backed invoices via `python -m backend.tools.seed_cloud <API_URL>`,
+  which posts each PDF **inline as base64** (`source.attachment_b64`) since the
+  cloud API can't read local paths (P5-T3). The API persists the bytes
+  (`invoices.source_pdf`), so the cloud hub has real source documents: page-image
+  preview *and* "Open original PDF" download. (Source-anchored highlight overlay
+  boxes remain dev-only — OCR still reads a file path; the cloud shows the page
+  image without boxes plus the raw PDF.)
 
 ### ⚠ Known limitation: outbound egress to api.anthropic.com is blocked
 

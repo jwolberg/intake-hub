@@ -63,20 +63,42 @@ def render_pages(source, *, dpi: int = RENDER_DPI) -> list[RenderedPage]:
     return list(_render_cached(str(path.resolve()), path.stat().st_mtime_ns, dpi))
 
 
+def render_pdf_bytes(data: bytes, *, dpi: int = RENDER_DPI) -> list[RenderedPage]:
+    """Render every page of an in-memory PDF (``data``) to PNG + dims.
+
+    The cloud path (P5-T3): the source PDF is persisted as bytes (Cloud Run has no
+    local file to point at), so pages render straight from the stored blob.
+    PDF-only — ``fitz`` opens the stream with ``filetype="pdf"``.
+    """
+    return list(_render_cached_bytes(data, dpi))
+
+
 @lru_cache(maxsize=16)
 def _render_cached(resolved_path: str, _mtime_ns: int, dpi: int) -> tuple[RenderedPage, ...]:
     import fitz  # lazy: only the rasterization path pulls in PyMuPDF
 
-    pages: list[RenderedPage] = []
     with fitz.open(resolved_path) as doc:
-        for number, page in enumerate(doc, start=1):
-            pixmap = page.get_pixmap(dpi=dpi)
-            pages.append(
-                RenderedPage(
-                    page_number=number,
-                    width=pixmap.width,
-                    height=pixmap.height,
-                    image_png=pixmap.tobytes("png"),
-                )
+        return _render_doc(doc, dpi)
+
+
+@lru_cache(maxsize=16)
+def _render_cached_bytes(data: bytes, dpi: int) -> tuple[RenderedPage, ...]:
+    import fitz  # lazy: only the rasterization path pulls in PyMuPDF
+
+    with fitz.open(stream=data, filetype="pdf") as doc:
+        return _render_doc(doc, dpi)
+
+
+def _render_doc(doc, dpi: int) -> tuple[RenderedPage, ...]:
+    pages: list[RenderedPage] = []
+    for number, page in enumerate(doc, start=1):
+        pixmap = page.get_pixmap(dpi=dpi)
+        pages.append(
+            RenderedPage(
+                page_number=number,
+                width=pixmap.width,
+                height=pixmap.height,
+                image_png=pixmap.tobytes("png"),
             )
+        )
     return tuple(pages)

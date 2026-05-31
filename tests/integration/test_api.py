@@ -180,6 +180,27 @@ def test_source_pdf_404_for_body_only_invoice(client):
     assert client.get(f"/api/invoices/{invoice_id}/source.pdf").status_code == 404
 
 
+def test_inline_base64_pdf_is_extracted_served_and_rendered(client):
+    # Cloud path (P5-T3): the PDF rides in the payload as base64, no local path.
+    import base64
+
+    sample = _sample("inv_clean_001.json")
+    sample["source"].pop("attachment_path", None)
+    sample["source"]["attachment"] = "inv_clean_001.pdf"
+    sample["source"]["attachment_b64"] = base64.b64encode(_PDF.read_bytes()).decode()
+
+    invoice_id = client.post("/api/invoices/process", json=sample).json()["id"]
+
+    # Extraction ran from the inline PDF (offline LayoutLLMClient) → fields populate.
+    listing = {r["id"]: r for r in client.get("/api/invoices").json()}
+    assert listing[invoice_id]["vendor_name"] == "Riverside Clinical Research"
+
+    # Raw PDF served from the persisted blob, and pages render from those bytes.
+    pdf = client.get(f"/api/invoices/{invoice_id}/source.pdf")
+    assert pdf.status_code == 200 and pdf.content.startswith(b"%PDF")
+    assert len(client.get(f"/api/invoices/{invoice_id}/pages").json()) == 1
+
+
 def test_pages_404_for_unknown_invoice(client):
     assert client.get("/api/invoices/nope/pages").status_code == 404
     assert client.get("/api/invoices/nope/pages/1/image").status_code == 404

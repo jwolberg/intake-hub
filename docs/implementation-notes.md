@@ -1395,3 +1395,31 @@ was JSON-seeded, so it has no source documents yet.
 **Validation:** ruff clean; full suite **153 passed, 1 skipped**; rebuilt the local
 Docker stack and browser-verified the "Open original PDF" button serves a real PDF
 (HTTP 200 application/pdf, %PDF-) from the stored blob.
+
+---
+
+## 2026-05-31 — Phase 5 cloud (P5-T3): source PDF on Cloud Run
+
+Got the original PDF (and page-image preview) working in the cloud, where the API
+can't read local file paths.
+
+- **Transport = base64 in the payload.** `source.attachment_b64` carries the PDF;
+  the parser extracts text from the bytes, the orchestrator persists them
+  (`source_pdf` blob from P5-T1), and `_is_real_pdf` now recognizes the b64 case so
+  the offline `LayoutLLMClient` still runs (no key/network). Backward compatible
+  with dev's `attachment_path` and the JSON-document path.
+- **Rasterize from bytes.** `raster.render_pdf_bytes` (fitz `stream=`); the API's
+  `_rendered_pages` prefers the stored blob over a file path, so the cloud page
+  preview renders without a local file. (OCR/citation overlay still needs a path —
+  boxes stay dev-only for now; cloud shows the page image + raw PDF.)
+- **`backend/tools/seed_cloud.py`** posts the demo PDFs as base64 to a remote API.
+- **Decision: DB blob, not GCS.** Rendered sample PDFs are ~2 KB; BYTEA in Cloud
+  SQL is simplest and works as-is. GCS only if PDFs grow large (store a key + serve
+  via signed URL) — left as a future option.
+- **Deploy gotcha:** rebuilding only the *backend* image left the **hub image
+  stale** (no "Open original PDF" button). The hub bakes `VITE_API_URL` at build
+  time, so any frontend change needs a hub rebuild + redeploy too.
+
+**Verified on Cloud Run:** `GET /source.pdf` → 200 `application/pdf`; `GET
+/pages/1/image` → 200 `image/png` rendered from the stored bytes; clean 4-invoice
+demo (wiped via delete-service → recreate-db → redeploy → seed_cloud).

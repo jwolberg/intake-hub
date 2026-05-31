@@ -25,6 +25,7 @@ _IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".tif", ".tiff", ".gif", ".bmp")
 
 def parse(invoice_id: str, sample: dict) -> ParsedDocument:
     source = sample.get("source", {})
+    attachment = str(source.get("attachment") or "")
 
     # Real PDF: read its text layer rather than a structured stand-in block.
     pdf_path = source.get("attachment_path")
@@ -35,6 +36,22 @@ def parse(invoice_id: str, sample: dict) -> ParsedDocument:
             invoice_id=invoice_id,
             source=source,
             text=extract_text(pdf_path),
+            format="pdf",
+        )
+
+    # Cloud path (P5-T3): the PDF rides in the payload as base64 (no local file),
+    # so the same PDF pipeline runs where Cloud Run can't read host paths.
+    attachment_b64 = source.get("attachment_b64")
+    if attachment_b64 and attachment.lower().endswith(".pdf"):
+        import base64
+        import io
+
+        from backend.parser.pdf import extract_text
+
+        return ParsedDocument(
+            invoice_id=invoice_id,
+            source=source,
+            text=extract_text(io.BytesIO(base64.b64decode(attachment_b64))),
             format="pdf",
         )
 

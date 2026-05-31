@@ -31,7 +31,12 @@ from backend.db import get_engine, init_schema
 from backend.db.repository import Repository, get_repository
 from backend.domain import Actor, AuditAction, Decision, InvoiceMetadata, InvoiceStatus
 from backend.orchestrator import process, rerun
-from backend.parser.raster import RenderedPage, is_rasterizable, render_pages
+from backend.parser.raster import (
+    RenderedPage,
+    is_rasterizable,
+    render_pages,
+    render_pdf_bytes,
+)
 
 logger = logging.getLogger("invoicescreener.api")
 
@@ -265,8 +270,18 @@ def _source_image_path(invoice_id: str, repo: Repository) -> str | None:
 
 
 def _rendered_pages(invoice_id: str, repo: Repository) -> list[RenderedPage]:
-    """Render the invoice's source pages, or [] when there is nothing to render."""
+    """Render the invoice's source pages, or [] when there is nothing to render.
+
+    Prefers the persisted PDF blob (works on Cloud Run, which has no local file),
+    falling back to rasterizing the recorded file path (dev, and image sources).
+    """
     _get_invoice_or_404(invoice_id, repo)
+    pdf = repo.get_source_pdf(invoice_id)
+    if pdf:
+        try:
+            return render_pdf_bytes(pdf)
+        except (ValueError, RuntimeError):
+            return []
     path = _source_image_path(invoice_id, repo)
     if path is None:
         return []

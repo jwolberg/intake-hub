@@ -438,10 +438,17 @@ clause P4-T1 already cites.
     cloud (a PDF-aware seeder) so cloud invoices have real source documents and
     page images. Rasterization must also render from stored **bytes** (not a path)
     for the cloud path.
-  - Files: docs/DEPLOY.md (plan), later /backend/api/** + /backend/parser/raster.py
+  - Files: /backend/parser/** (b64 ingest + raster from bytes), /backend/orchestrator/**, /backend/api/**, /backend/tools/seed_cloud.py, docs/DEPLOY.md
   - Depends on: P5-T1, P5-T2
   - Acceptance criteria covered: PRD §10; ARCHITECTURE §17 (deployment).
-  - Status: Todo (planning ticket — not implemented this pass).
+  - Status: Done — chose **PDF bytes in the payload** (`source.attachment_b64`,
+    base64) + persist via the P5-T1 `source_pdf` blob in Cloud SQL (**no GCS** at
+    this scale). Parser extracts PDF text from the bytes; rasterization renders
+    page images from the stored **bytes** (`render_pdf_bytes`) so the cloud
+    preview works without a local file; `seed_cloud` posts the demo PDFs as
+    base64. Deployed + verified on Cloud Run: `source.pdf` 200 `application/pdf`,
+    page image 200 `image/png` from bytes. GCS remains a future option only if
+    PDFs grow large.
 
 ---
 
