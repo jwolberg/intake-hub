@@ -1455,3 +1455,46 @@ than a durable queue (OD-3 async worker still deferred — MVP runs synchronousl
 The ambiguous sample exploits the two sibling Riverside sites under study_001 (a
 clue with sponsor+protocol but no distinguishing site ties them → context
 ambiguity), avoiding any fixture change beyond the new large sponsor/study.
+
+## 2026-05-31 — Phase 6 (P6-T1..T6): Mock Inbox Intake
+
+**Goal:** make the system *receive* invoices from a (mock) inbox rather than only
+being seeded, satisfying PRD §7 Step 1's explicitly-authorized "Mock inbox"
+ingestion path. No input-doc change needed — §7 Step 1 already lists "Mock inbox",
+and this does not touch the §4 "production-scale email ingestion system" non-goal.
+
+**Decision: new package named `backend/inbox/`, not `backend/email/`.** `email`
+would shadow the Python stdlib `email` package that a real IMAP client (OD-10)
+will import. The `InboxClient` protocol + `MockInbox` mirror the existing stub
+client seam (LLM/MCP/ClinRun): `get_inbox_client()` returns `MockInbox` today; a
+real Gmail/IMAP client slots in behind the same protocol with zero pipeline
+changes (live IMAP/Gmail stays deferred — "if time allows").
+
+**Design: `message_to_sample` is the only new logic.** It maps an `InboxMessage`
+to the exact `{source, document?/body?}` sample dict `orchestrator.process`
+already consumes, so the whole Phases 1–5 pipeline is reused unchanged. Verified
+the six demo messages reach their curated submit/hold outcomes through it.
+
+**Decision: `MockInbox(render_pdf=True)` by default, `False` for tests.** The demo
+renders each sample to a real PDF (parity with `seed_hub`) so received invoices
+have a rasterizable source for the P4 page-image overlay. Tests use
+`render_pdf=False` (document block + `PassthroughLLMClient`) for deterministic,
+dependency-free outcomes that match the Phase 3 scenario suite. Note the parser
+prefers a `.pdf` `attachment_path` over the `document` block, so the two paths are
+mutually exclusive by construction.
+
+**Idempotency (P6-T3): `is_seen`/`mark_seen` on the `Repository`.** In-memory set
+for tests/offline; a new `seen_messages` table (idempotent `CREATE TABLE IF NOT
+EXISTS`, insert `ON CONFLICT DO NOTHING`) for Postgres — mirrors the
+`catalog_cache` approach. The fetch route skips already-seen `message_id`s so a
+re-fetch never double-processes (PRD §14).
+
+**Sync, not async (OD-3 still deferred).** `POST /api/inbox/fetch` processes each
+message in-line via `orchestrator.process`; no queue/worker. `inbox_poller` is a
+thin CLI counterpart to `seed_hub` that just triggers the route.
+
+**Validation:** ruff clean (`backend` + `tests`); suite 175 passed / 1 skipped
+(7 new: MockInbox replay, adapter shapes, repo idempotency, fetch outcomes +
+idempotent re-fetch). The 1 skip remains the Postgres round-trip (needs a live DB);
+the Postgres `seen_messages` idempotency path is therefore exercised only when run
+against a live `DATABASE_URL`, like the rest of the Postgres repository.
