@@ -56,6 +56,32 @@ class InboxClient(Protocol):
     def fetch_messages(self) -> list[InboxMessage]: ...
 
 
+def message_to_sample(message: InboxMessage) -> dict:
+    """Map an inbox message to the intake ``sample`` the orchestrator consumes.
+
+    ``orchestrator.process`` takes a ``{source, document?/body?}`` dict (PRD §7
+    Step 1-2); this is the single adapter between "received email" and the existing
+    pipeline, so nothing downstream changes. ``channel`` is fixed to ``email`` (the
+    mock inbox simulates email receipt), and the message's stable ``message_id``
+    rides in ``source`` for traceability. ``document`` / ``body`` are included only
+    when present, so the parser picks the right path (parsed attachment vs body).
+    """
+    source: dict = {
+        "channel": "email",
+        "message_id": message.message_id,
+        "subject": message.subject,
+        "sender": message.sender,
+        "attachment": message.attachment,
+        "attachment_path": message.attachment_path,
+    }
+    sample: dict = {"source": source}
+    if message.document is not None:
+        sample["document"] = message.document
+    if message.body:
+        sample["body"] = message.body
+    return sample
+
+
 class MockInbox:
     """Replays the demo sample set as inbox messages (PRD §7 Step 1 "Mock inbox").
 
