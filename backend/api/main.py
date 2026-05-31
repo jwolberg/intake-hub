@@ -31,6 +31,7 @@ from backend.db import get_engine, init_schema
 from backend.db.repository import Repository, get_repository
 from backend.domain import Actor, AuditAction, Decision, InvoiceMetadata, InvoiceStatus
 from backend.domain.taxonomy import is_retryable
+from backend.inbox import InboxClient, get_inbox_client, message_to_sample
 from backend.orchestrator import process, recover, rerun
 from backend.parser.raster import (
     RenderedPage,
@@ -90,8 +91,13 @@ def get_pipeline_clients() -> dict:
     }
 
 
+def get_inbox() -> InboxClient:
+    return get_inbox_client()
+
+
 RepoDep = Annotated[Repository, Depends(get_repo)]
 ClientsDep = Annotated[dict, Depends(get_pipeline_clients)]
+InboxDep = Annotated[InboxClient, Depends(get_inbox)]
 
 
 # --- list-view filters (PRD §10 Invoice List View) --------------------------
@@ -176,6 +182,27 @@ def process_invoice(sample: dict, repo: RepoDep, clients: ClientsDep) -> dict:
     """Run a sample invoice through the AI pipeline and return its outcome."""
     invoice = process(sample, repo, **clients)
     return _summary(invoice, repo)
+
+
+@app.post("/api/inbox/fetch")
+def fetch_inbox(repo: RepoDep, clients: ClientsDep, inbox: InboxDep) -> dict:
+    """Pull unseen messages from the (mock) inbox and process each end-to-end.
+
+    PRD §7 Step 1 "Mock inbox": the system *receives* invoices rather than being
+    seeded. Each new message is mapped to the intake sample and run through the
+    existing pipeline; already-seen messages are skipped so a re-fetch never
+    double-processes (idempotent; PRD §14).
+    """
+    received: list[dict] = []
+    skipped = 0
+    for message in inbox.fetch_messages():
+        if repo.is_seen(message.message_id):
+            skipped += 1
+            continue
+        invoice = process(message_to_sample(message), repo, **clients)
+        repo.mark_seen(message.message_id)
+        received.append({"message_id": message.message_id, **_summary(invoice, repo)})
+    return {"count": len(received), "skipped": skipped, "received": received}
 
 
 @app.get("/api/invoices")
