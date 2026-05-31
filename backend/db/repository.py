@@ -54,6 +54,8 @@ class Repository(Protocol):
     def append_audit(self, event: AuditEvent) -> None: ...
     def get_audit(self, invoice_id: str) -> list[AuditEvent]: ...
     def get_detail(self, invoice_id: str) -> dict | None: ...
+    def is_seen(self, message_id: str) -> bool: ...
+    def mark_seen(self, message_id: str) -> None: ...
 
 
 class InMemoryRepository:
@@ -68,6 +70,7 @@ class InMemoryRepository:
         self._matches: dict[str, list[MatchResult]] = {}
         self._exceptions: dict[str, list[ExceptionRecord]] = {}
         self._audit: dict[str, list[AuditEvent]] = {}
+        self._seen_messages: set[str] = set()
 
     def save_invoice(self, invoice: Invoice) -> None:
         self._invoices[invoice.id] = invoice.model_copy(deep=True)
@@ -134,6 +137,12 @@ class InMemoryRepository:
             "audit": self.get_audit(invoice_id),
         }
 
+    def is_seen(self, message_id: str) -> bool:
+        return message_id in self._seen_messages
+
+    def mark_seen(self, message_id: str) -> None:
+        self._seen_messages.add(message_id)
+
 
 # --- Postgres implementation ------------------------------------------------
 # Reflects the schema created by db.session.init_schema (the canonical DDL), so
@@ -169,6 +178,7 @@ class PostgresRepository:
         self.match_results = Table("match_results", md, autoload_with=engine)
         self.exceptions = Table("exceptions", md, autoload_with=engine)
         self.audit_events = Table("audit_events", md, autoload_with=engine)
+        self.seen_messages = Table("seen_messages", md, autoload_with=engine)
 
     def save_invoice(self, invoice: Invoice) -> None:
         values = {
@@ -362,6 +372,21 @@ class PostgresRepository:
             "exceptions": self.get_exceptions(invoice_id),
             "audit": self.get_audit(invoice_id),
         }
+
+    def is_seen(self, message_id: str) -> bool:
+        with self._engine.connect() as conn:
+            row = conn.execute(
+                select(self.seen_messages.c.message_id)
+                .where(self.seen_messages.c.message_id == message_id)
+            ).first()
+        return row is not None
+
+    def mark_seen(self, message_id: str) -> None:
+        stmt = pg_insert(self.seen_messages).values(message_id=message_id).on_conflict_do_nothing(
+            index_elements=[self.seen_messages.c.message_id],
+        )
+        with self._engine.begin() as conn:
+            conn.execute(stmt)
 
 
 @lru_cache(maxsize=1)

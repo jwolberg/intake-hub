@@ -88,3 +88,10 @@ CREATE TABLE IF NOT EXISTS catalog_cache (
     fetched_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (sponsor_id, study_id)
 );
+
+-- Inbox idempotency (P6-T3): message ids already ingested, so re-fetching a mock
+-- inbox never double-processes the same email (PRD §14, §7 Step 1 "Mock inbox").
+CREATE TABLE IF NOT EXISTS seen_messages (
+    message_id  TEXT PRIMARY KEY,
+    seen_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
