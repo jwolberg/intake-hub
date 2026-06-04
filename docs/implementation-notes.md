@@ -1498,3 +1498,38 @@ thin CLI counterpart to `seed_hub` that just triggers the route.
 idempotent re-fetch). The 1 skip remains the Postgres round-trip (needs a live DB);
 the Postgres `seen_messages` idempotency path is therefore exercised only when run
 against a live `DATABASE_URL`, like the rest of the Postgres repository.
+
+## 2026-06-04 — Production real-provider egress verified + graceful fallback
+
+**Finding (verification request).** Confirmed production has **no live
+`ANTHROPIC_API_KEY`**: the Cloud Run service `invoicescreener-api` (`ledgerrun-1`)
+binds only `MCP_REFERENCE_URL/CLINRUN_URL/LLM_MODEL/CORS_ORIGINS/DATABASE_URL`;
+the secret exists in Secret Manager but is unbound. Re-test (bound the key on a
+fresh revision, posted one sample) reproduced the original failure —
+`extraction_failed / "Connection error."` after ~40s of SDK retries. So egress to
+`api.anthropic.com` is structurally blocked, not transient. Not an org policy
+(project has 0 org policies; `run.allowedVPCEgress` has no rule) — it's default
+Cloud Run egress not reaching Anthropic. Rolled the key back
+(`--remove-secrets`, revision `…-00003-jib`) to restore the working offline path;
+re-tested offline extraction → `status: submitted` in 0.5s.
+
+**Decision: ship a graceful fallback instead of (yet) building VPC+NAT.**
+`get_llm_client()` now wraps the live provider in a new `FallbackLLMClient`
+(`backend/clients/llm.py`) that degrades to `PassthroughLLMClient` on a
+*connection* error (matched by built-in type + SDK/httpx class name; logs a
+warning), and re-raises everything else (auth/rate-limit/bad-JSON) so genuine
+misconfig still surfaces. Rationale: binding the key with broken egress was a live
+regression (every invoice hard-failed); this makes a bound key safe-by-default, so
+enabling the real provider later is a pure infra change (VPC connector + Cloud NAT,
+then bind the secret) with no code risk.
+
+**Tradeoff.** Fallback is silent-but-logged per request: real extraction quietly
+becomes offline extraction if the API is unreachable. Acceptable here (offline is
+the documented demo path) and observable via the warning log; the alternative
+(hard-fail) is strictly worse for the demo. VPC+NAT egress remains the open
+follow-up in DEPLOY.md.
+
+**Validation:** ruff clean (`backend` + `tests`); suite 179 passed / 1 skipped
+(4 new: fallback degrades on SDK + built-in connection errors, re-raises
+non-connection errors, passes through on success). The 1 skip remains the Postgres
+round-trip.

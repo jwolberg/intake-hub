@@ -29,6 +29,7 @@ from .errors import (
 )
 from .llm import (
     AnthropicLLMClient,
+    FallbackLLMClient,
     LLMClient,
     PassthroughLLMClient,
     StubLLMClient,
@@ -51,6 +52,7 @@ __all__ = [
     "CatalogNotFound",
     "ClinRunClient",
     "ClinRunClientError",
+    "FallbackLLMClient",
     "HttpClinRunClient",
     "HttpMCPReferenceClient",
     "LLMClient",
@@ -97,11 +99,17 @@ def get_llm_client() -> LLMClient:
     the offline passthrough stand-in (echoes the structured document the parser
     renders) so dev/tests run without a provider key. ``StubLLMClient`` remains
     the tool for scripted unit tests.
+
+    The live provider is wrapped in ``FallbackLLMClient`` so that if it is
+    unreachable (e.g. Cloud Run egress can't reach ``api.anthropic.com`` — see
+    docs/DEPLOY.md), extraction degrades to the offline path instead of
+    hard-failing the invoice. A bound key can therefore never break production.
     """
     if settings.anthropic_api_key:
-        return AnthropicLLMClient(
+        primary = AnthropicLLMClient(
             api_key=settings.anthropic_api_key, model=settings.llm_model
         )
+        return FallbackLLMClient(primary, PassthroughLLMClient())
     return PassthroughLLMClient()
 
 

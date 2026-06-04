@@ -122,7 +122,11 @@ def test_get_llm_client_selects_provider_by_key(monkeypatch):
     import types
 
     import backend.clients as clients
-    from backend.clients import AnthropicLLMClient, PassthroughLLMClient
+    from backend.clients import (
+        AnthropicLLMClient,
+        FallbackLLMClient,
+        PassthroughLLMClient,
+    )
 
     # settings is a frozen dataclass; swap the whole reference per case.
     monkeypatch.setattr(
@@ -135,4 +139,66 @@ def test_get_llm_client_selects_provider_by_key(monkeypatch):
         clients, "settings",
         types.SimpleNamespace(anthropic_api_key="sk-test", llm_model="claude-opus-4-7"),
     )
-    assert isinstance(clients.get_llm_client(), AnthropicLLMClient)
+    client = clients.get_llm_client()
+    # With a key, the live provider is wrapped so an unreachable API degrades to
+    # the offline path instead of hard-failing (see docs/DEPLOY.md).
+    assert isinstance(client, FallbackLLMClient)
+    assert isinstance(client._primary, AnthropicLLMClient)
+    assert isinstance(client._fallback, PassthroughLLMClient)
+
+
+# --- graceful degradation (FallbackLLMClient) --------------------------------
+
+
+class _BoomLLMClient:
+    """Primary stand-in that always raises a given exception."""
+
+    def __init__(self, exc):
+        self._exc = exc
+
+    def complete_json(self, *, system, user):
+        raise self._exc
+
+
+class APIConnectionError(Exception):
+    """Named to mirror the anthropic SDK error, matched by class name."""
+
+
+def test_fallback_degrades_to_offline_on_connection_error():
+    from backend.clients import FallbackLLMClient, StubLLMClient
+
+    fallback = StubLLMClient(default={"degraded": True})
+    client = FallbackLLMClient(_BoomLLMClient(APIConnectionError("Connection error.")), fallback)
+
+    assert client.complete_json(system="s", user="u") == {"degraded": True}
+
+
+def test_fallback_also_catches_builtin_connection_error():
+    from backend.clients import FallbackLLMClient, StubLLMClient
+
+    fallback = StubLLMClient(default={"degraded": True})
+    client = FallbackLLMClient(_BoomLLMClient(ConnectionError("refused")), fallback)
+
+    assert client.complete_json(system="s", user="u") == {"degraded": True}
+
+
+def test_fallback_reraises_non_connection_errors():
+    from backend.clients import FallbackLLMClient, StubLLMClient
+
+    # A bad-JSON / config error must surface, not silently degrade.
+    fallback = StubLLMClient(default={"degraded": True})
+    client = FallbackLLMClient(_BoomLLMClient(ValueError("bad json")), fallback)
+
+    with pytest.raises(ValueError):
+        client.complete_json(system="s", user="u")
+
+
+def test_fallback_passes_through_on_success():
+    from backend.clients import FallbackLLMClient, StubLLMClient
+
+    primary = StubLLMClient(default={"real": True})
+    fallback = StubLLMClient(default={"degraded": True})
+    client = FallbackLLMClient(primary, fallback)
+
+    assert client.complete_json(system="s", user="u") == {"real": True}
+    assert fallback.calls == []  # fallback untouched when the primary succeeds

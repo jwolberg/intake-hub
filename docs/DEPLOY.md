@@ -259,13 +259,42 @@ samples, so the demo works. The key remains in Secret Manager, ready to bind
 egress exists. To enable the real provider: add a Serverless VPC Access connector
 + Cloud NAT (static outbound) and set `--vpc-egress=all-traffic`.
 
+**Re-test 2026-06-04 — failure reproduced, diagnosis confirmed and refined.**
+Bound the secret to a fresh revision and posted one PDF sample to
+`/api/invoices/process`. The invoice came back `status: failed` after ~40s (the
+anthropic SDK retrying the connection), with a stored exception
+`extraction_failed / "Connection error."` — same failure as the original deploy.
+So the block is **structural, not transient**. Refinements to the original note:
+
+- It is **not** an org policy. The project has **0** org policies set and
+  `constraints/run.allowedVPCEgress` has no active rule. The service uses Cloud
+  Run **default egress** (no VPC connector / no `vpc-egress` annotation), which
+  normally reaches the public internet — yet this service cannot reach Anthropic.
+  The reliable fix is still the **Serverless VPC connector + Cloud NAT** path
+  (deterministic, static outbound), which is now evidence-justified rather than
+  speculative. Note: adding `--vpc-egress=all-traffic` *without* a Cloud NAT would
+  remove default internet egress and make this worse — the NAT is required.
+- Binding the key without working egress is a **regression**: with the key bound
+  and the API unreachable, every new invoice hard-failed (`status: failed`)
+  instead of using the offline path. The re-test was rolled back
+  (`--remove-secrets ANTHROPIC_API_KEY`, revision `…-00003-jib`) to restore the
+  working offline behavior.
+- **Mitigation shipped (`backend/clients`):** the live provider is now wrapped in
+  `FallbackLLMClient`, which degrades to the offline `PassthroughLLMClient` on a
+  connection error (logging a warning) instead of failing the invoice. A bound
+  key can therefore no longer break production — once egress exists, the same
+  bound key produces real model-derived extraction with no further change.
+
 ## Follow-ups / open decisions
 
 - [x] Code change: API container honors `$PORT` (done — shell-form CMD).
 - [x] Production frontend build + hosting (done — `frontend/Dockerfile.prod`
       + nginx, deployed as the `hub` Cloud Run service).
 - [ ] **Enable real-provider egress** (VPC connector + Cloud NAT), then bind the
-      Anthropic secret on the API. Until then extraction is offline.
+      Anthropic secret on the API. Until then extraction is offline. (Re-tested
+      2026-06-04: failure reproduced — see Known limitation above. Binding the key
+      is now safe regardless, thanks to `FallbackLLMClient`, but extraction stays
+      offline until egress exists.)
 - [ ] Replace the `mcp-reference` / `mock-clinrun` stubs with real integrations.
 - [ ] Lock down stub-service auth (currently public per demo decision).
 - [ ] CI/CD: wire the Cloud Build configs into a trigger instead of manual deploys.

@@ -12,7 +12,10 @@ logic can be tested deterministically without live model calls.
 from __future__ import annotations
 
 import json
+import logging
 from typing import Protocol, runtime_checkable
+
+logger = logging.getLogger(__name__)
 
 
 @runtime_checkable
@@ -65,6 +68,62 @@ class PassthroughLLMClient:
             return parse_json_or_raise(user)
         except ValueError:
             return {}
+
+
+# Exception class names that signal the provider was unreachable — a transport
+# failure, not a bad response. Matched by name so this module needs no eager
+# anthropic/httpx import (the SDK stays lazy in ``AnthropicLLMClient``).
+_CONNECTION_ERROR_NAMES = frozenset({
+    "APIConnectionError",  # anthropic SDK; message is the "Connection error." we see
+    "APITimeoutError",
+    "ConnectError",  # httpx
+    "ConnectTimeout",
+    "ReadTimeout",
+    "PoolTimeout",
+})
+
+
+def _is_connection_error(exc: BaseException) -> bool:
+    """True if ``exc`` is a transport/connection failure (vs. a model/usage error).
+
+    Covers Python's built-in socket errors and, by class name, the anthropic SDK /
+    httpx connection and timeout errors. Auth, rate-limit, and bad-JSON errors are
+    deliberately excluded so genuine misconfiguration still surfaces rather than
+    silently degrading.
+    """
+    if isinstance(exc, (ConnectionError, TimeoutError)):
+        return True
+    return type(exc).__name__ in _CONNECTION_ERROR_NAMES
+
+
+class FallbackLLMClient:
+    """A primary LLM client with an offline fallback on connection failure.
+
+    When a real provider is configured but unreachable, extracting a single
+    invoice should *degrade* — not hard-fail with ``extraction_failed`` (the
+    production regression documented in docs/DEPLOY.md, where Cloud Run egress
+    cannot reach ``api.anthropic.com``). On a connection error we log a warning
+    (so the degradation is observable, not silent) and retry the request against
+    ``fallback``. Non-connection errors propagate unchanged.
+    """
+
+    def __init__(self, primary: LLMClient, fallback: LLMClient) -> None:
+        self._primary = primary
+        self._fallback = fallback
+
+    def complete_json(self, *, system: str, user: str) -> dict:
+        try:
+            return self._primary.complete_json(system=system, user=user)
+        except Exception as exc:  # noqa: BLE001 - re-raised below unless it's a connection error
+            if not _is_connection_error(exc):
+                raise
+            logger.warning(
+                "LLM provider unreachable (%s: %s); falling back to offline "
+                "extraction for this request. See docs/DEPLOY.md.",
+                type(exc).__name__,
+                exc,
+            )
+            return self._fallback.complete_json(system=system, user=user)
 
 
 def parse_json_or_raise(raw: str) -> dict:
