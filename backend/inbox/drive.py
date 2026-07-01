@@ -19,10 +19,18 @@ import pathlib
 
 from backend.clients.drive import DriveClient
 from backend.clients.errors import DriveClientError
+from backend.domain.enums import Decision, InvoiceStatus
+from backend.domain.models import Invoice
 
 from . import InboxMessage
 
 logger = logging.getLogger(__name__)
+
+# Status subfolder names the processed file is moved into (KTD4). Kept as module
+# constants so the runbook (U6) and tests reference the same literals.
+SUBMITTED_DIR = "submitted"
+NEEDS_REVIEW_DIR = "needs-review"
+FAILED_DIR = "failed"
 
 
 class DriveInbox:
@@ -72,3 +80,27 @@ class DriveInbox:
                 body=None,
             ))
         return messages
+
+    def on_processed(self, message: InboxMessage, invoice: Invoice) -> None:
+        """Move the processed file into its decision's status subfolder (KTD4).
+
+        The destination reflects the decision **at processing time only** — the
+        app does not chase later hub actions (R6). ``message_id`` is the Drive
+        fileId. Called by the fetch route after ``mark_seen``, so a raised move
+        never causes reprocessing (KTD3); the route treats it as best-effort.
+        """
+        self._client.move(message.message_id, _dest_for(invoice))
+
+
+def _dest_for(invoice: Invoice) -> str:
+    """Map a processed invoice to its status subfolder (KTD4).
+
+    FAILED is checked first: a submit that fails at the ClinRun call ends FAILED
+    with ``decision == SUBMIT``, and such a file was not actually submitted, so it
+    belongs in ``failed`` rather than ``submitted``.
+    """
+    if invoice.status is InvoiceStatus.FAILED:
+        return FAILED_DIR
+    if invoice.decision is Decision.SUBMIT:
+        return SUBMITTED_DIR
+    return NEEDS_REVIEW_DIR

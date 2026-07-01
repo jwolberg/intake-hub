@@ -1634,3 +1634,26 @@ not raised — one bad file never aborts the poll; it stays in root and is retri
 next fetch. Temp filename keyed by fileId for uniqueness. `on_processed` (the move
 hook) is deferred to U3 per the plan's unit boundaries.
 Validation: `tests/unit/test_drive_inbox.py` 4 passed; ruff clean.
+
+**U3 (post-decision move hook + route wiring):** Added `on_processed(message,
+invoice)` to the `InboxClient` Protocol (`backend/inbox/__init__.py`); `MockInbox`
+implements it as a no-op. `DriveInbox.on_processed` maps the processed invoice to
+a status subfolder via `_dest_for` (KTD4): **FAILED checked first** (a submit that
+fails at the ClinRun call ends FAILED with decision==SUBMIT and was not actually
+submitted, so it belongs in `failed`), then SUBMIT→`submitted`, else
+`needs-review`. Subfolder names are module constants (shared with the runbook).
+
+Route (`fetch_inbox`): order is is_seen → process → **mark_seen → on_processed**
+(KTD3: idempotency committed before the move). Two defensive catches: (1) an
+unexpected raise from `process()` marks the file seen and continues so a poison
+message can't wedge the poll; (2) an `on_processed` move failure is best-effort —
+logged, file left in place, and skipped on re-fetch via is_seen (AE4).
+
+Resolved deferred question: `process()` never raises on an unreadable PDF — it
+isolates via `_fail()` and returns a FAILED invoice (orchestrator line 231/205),
+so AE3 (garbage PDF → `failed`) flows through the normal on_processed path; the
+route catch is a pure backstop.
+
+Validation: `tests/integration/test_inbox_fetch.py` +3 Drive cases (AE1/2/3, AE4,
+AE5) and MockInbox regression; unit+integration inbox/drive suite 24 passed; ruff
+clean.

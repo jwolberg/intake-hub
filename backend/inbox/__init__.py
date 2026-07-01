@@ -15,9 +15,12 @@ from __future__ import annotations
 
 import json
 import pathlib
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from pydantic import BaseModel
+
+if TYPE_CHECKING:
+    from backend.domain.models import Invoice
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 SAMPLES = ROOT / "samples"
@@ -54,6 +57,17 @@ class InboxClient(Protocol):
     """Source of incoming invoice messages (the ARCHITECTURE §7-§8 client seam)."""
 
     def fetch_messages(self) -> list[InboxMessage]: ...
+
+    def on_processed(self, message: InboxMessage, invoice: Invoice) -> None:
+        """Hook the fetch route calls after a message reaches a decision.
+
+        Runs *after* ``repo.mark_seen`` so idempotency is already committed (a
+        failure here can never cause reprocessing — KTD3). Sources that reflect
+        decision state back to their origin (e.g. ``DriveInbox`` moving the file
+        into a status subfolder) use this; sources with nowhere to reflect state
+        (``MockInbox``) implement it as a no-op.
+        """
+        ...
 
 
 def message_to_sample(message: InboxMessage) -> dict:
@@ -122,6 +136,9 @@ class MockInbox:
                 body=sample.get("body") or source.get("body"),
             ))
         return messages
+
+    def on_processed(self, message: InboxMessage, invoice: Invoice) -> None:
+        """No-op: the mock inbox has no external folder to reflect state in."""
 
     def _render(self, stem: str, sample: dict) -> pathlib.Path:
         # Lazy import: the PDF renderer (reportlab) is only needed on the demo path.

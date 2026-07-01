@@ -199,8 +199,27 @@ def fetch_inbox(repo: RepoDep, clients: ClientsDep, inbox: InboxDep) -> dict:
         if repo.is_seen(message.message_id):
             skipped += 1
             continue
-        invoice = process(message_to_sample(message), repo, **clients)
+        try:
+            invoice = process(message_to_sample(message), repo, **clients)
+        except Exception:
+            # process() isolates stage failures and returns a FAILED invoice, so
+            # reaching here is unexpected. Record the file as seen so one poison
+            # message can't wedge every future poll, then move on.
+            logger.exception("inbox: unexpected error processing %s", message.message_id)
+            repo.mark_seen(message.message_id)
+            continue
+        # Idempotency is committed BEFORE the post-decision move (KTD3): a move
+        # failure below can never cause reprocessing.
         repo.mark_seen(message.message_id)
+        try:
+            inbox.on_processed(message, invoice)
+        except Exception:
+            # The move is best-effort — mark_seen already guarantees no double
+            # submit. A stranded file stays put and is skipped on re-fetch.
+            logger.warning(
+                "inbox: on_processed failed for %s; file left in place",
+                message.message_id, exc_info=True,
+            )
         received.append({"message_id": message.message_id, **_summary(invoice, repo)})
     return {"count": len(received), "skipped": skipped, "received": received}
 
