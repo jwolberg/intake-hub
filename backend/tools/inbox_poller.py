@@ -6,6 +6,10 @@ it calls ``POST /api/inbox/fetch`` so the API pulls messages from its configured
 pipeline, and skips already-seen messages — so re-running is idempotent and the
 demo shows invoices arriving "from email" rather than being seeded.
 
+Provider-agnostic: the poller only calls the fetch route, so it drives the
+``DriveInbox`` provider (``INBOX_PROVIDER=drive``) with no change — the API pulls
+from the watched Drive folder instead of the mock set.
+
     python -m backend.tools.inbox_poller                      # -> http://127.0.0.1:8000
     python -m backend.tools.inbox_poller http://127.0.0.1:8000
 

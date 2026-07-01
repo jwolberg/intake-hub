@@ -1669,3 +1669,13 @@ configured var — the temp PDF only needs to outlive one process() call, KTD5).
 Drive imports are lazy inside the function to avoid the inbox↔drive import cycle
 and keep httpx/google-auth off the default path.
 Validation: `tests/unit/test_inbox.py` 9 passed; ruff clean.
+
+**U5 (sample PDFs for the Drive path):** Added a committed corrupt-PDF fixture
+`samples/pdf/inv_unreadable_009.pdf` (generated reproducibly by
+`generate_pdfs.write_unreadable_pdf`, also emitted by `main()`) so AE3 runs
+against real, checked-in bytes; the integration test's unreadable case now loads
+it. Verified `backend/tools/inbox_poller.py` is provider-agnostic (only calls
+`POST /api/inbox/fetch`) — no code change, just a docstring note that it drives
+`INBOX_PROVIDER=drive` unchanged. Clean/hold demo bytes reuse the existing
+rendered samples via `render_invoice_pdf`.
+Validation: inbox + pdf-pipeline integration 13 passed; ruff clean.

@@ -85,12 +85,28 @@ def render_invoice_pdf(sample: dict, path: pathlib.Path | str) -> pathlib.Path:
     return path
 
 
+# A deliberately corrupt "PDF" (a .pdf name over non-PDF bytes) so the Drive
+# intake path has real bytes for the unreadable case (AE3): parsing fails, the
+# invoice ends FAILED, and DriveInbox files it into the ``failed`` subfolder.
+_UNREADABLE_STEM = "inv_unreadable_009"
+_UNREADABLE_BYTES = b"%PDF-1.4 this file is intentionally corrupt and has no valid body\n"
+
+
+def write_unreadable_pdf(path: pathlib.Path | str) -> pathlib.Path:
+    """Write the corrupt-PDF fixture used to exercise the unreadable path (AE3)."""
+    path = pathlib.Path(path)
+    path.write_bytes(_UNREADABLE_BYTES)
+    return path
+
+
 def main() -> None:
     PDF_DIR.mkdir(exist_ok=True)
     for stem in _RENDERABLE:
         sample = json.loads((SAMPLES_DIR / f"{stem}.json").read_text())
         out = render_invoice_pdf(sample, PDF_DIR / f"{stem}.pdf")
         print(f"wrote {out.relative_to(SAMPLES_DIR.parent)}")
+    out = write_unreadable_pdf(PDF_DIR / f"{_UNREADABLE_STEM}.pdf")
+    print(f"wrote {out.relative_to(SAMPLES_DIR.parent)}")
 
 
 if __name__ == "__main__":

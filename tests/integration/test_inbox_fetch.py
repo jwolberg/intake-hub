@@ -109,7 +109,8 @@ def test_drive_fetch_files_each_pdf_by_decision(tmp_path):
     stub.add_file(
         "hold", "hold.pdf", _pdf_bytes("inv_hold_unmatched_002", tmp_path), parent=DRIVE_ROOT
     )
-    stub.add_file("bad", "bad.pdf", b"not a real pdf at all", parent=DRIVE_ROOT)
+    bad_bytes = (SAMPLES / "pdf" / "inv_unreadable_009.pdf").read_bytes()
+    stub.add_file("bad", "bad.pdf", bad_bytes, parent=DRIVE_ROOT)
 
     client = _drive_client(tmp_path, stub)
     body = client.post("/api/inbox/fetch").json()
