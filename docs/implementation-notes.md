@@ -1596,3 +1596,31 @@ written to preserve the record.
 (GitHub, `jwolberg` SSH creds, same as `workspace/volscan`). Note the GitHub repo
 slug is `intake-hub` (hyphenated) while the in-app product identifier is
 `intakehub` (unhyphenated) — an intentional, user-specified difference.
+
+## 2026-07-01 — feat: Google Drive folder intake (plan 2026-07-01-001)
+
+Branch `feat/drive-folder-intake` off `main` (the checked-out branch
+`p2-track-c-reviewer-hub` was even with main but named for unrelated work; user
+chose a fresh branch matching the plan).
+
+**U1 (Drive REST client):** `backend/clients/drive.py` — `DriveClient` Protocol +
+`HttpDriveClient` (Drive v3 REST over httpx) + `StubDriveClient` (in-memory fake),
+mirroring the `clinrun.py` Protocol/Http/Stub shape. New typed `DriveClientError`
+in `errors.py`; `google-auth` added to `requirements.txt` (lazy import — only the
+real service-account path pulls it in, same posture as `anthropic`).
+
+Decisions within U1 (not spelled out in the plan):
+- **Token minting is injectable** via a `token_provider: Callable[[], str]` seam;
+  it defaults to a lazily-built `google-auth` service-account provider. This is
+  how the plan's "assert lazy via injected auth/transport seam" test scenario is
+  satisfied — tests pass a fake provider + `httpx.MockTransport` and never import
+  `google-auth`.
+- **`move(file_id, dest)` derives the parent folder from the file itself**
+  (`GET ?fields=parents`) rather than taking the watched-root id as an argument,
+  since the file lives in root pre-move. The status subfolder is found-or-created
+  under that parent and cached per `(parent, name)`.
+- `google-auth` is intentionally NOT installed in the local `.venv` yet; U1 tests
+  never need it (stub + injected seam). It ships in `requirements.txt` for the
+  real drive path / deploy.
+
+Validation: `tests/unit/test_drive_client.py` 10 passed; ruff clean.
