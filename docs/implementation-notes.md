@@ -1657,3 +1657,15 @@ route catch is a pure backstop.
 Validation: `tests/integration/test_inbox_fetch.py` +3 Drive cases (AE1/2/3, AE4,
 AE5) and MockInbox regression; unit+integration inbox/drive suite 24 passed; ruff
 clean.
+
+**U4 (config + provider selection):** Added `inbox_provider` (default `mock`),
+`drive_folder_id`, `google_application_credentials` to `Settings.from_env`.
+`get_inbox_client()` branches: `mock`→`MockInbox`, `drive`→`DriveInbox`+
+`HttpDriveClient`, unknown→`ValueError`. Fail-fast: `drive` without folder id or
+credentials raises a clear `ValueError` (no silent mock fallback). Decisions:
+credentials treated as inline JSON when the value starts with `{`, else a file
+path; DriveInbox `download_dir` defaults to `<tempdir>/intakehub-drive` (not a
+configured var — the temp PDF only needs to outlive one process() call, KTD5).
+Drive imports are lazy inside the function to avoid the inbox↔drive import cycle
+and keep httpx/google-auth off the default path.
+Validation: `tests/unit/test_inbox.py` 9 passed; ruff clean.

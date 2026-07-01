@@ -150,9 +150,52 @@ class MockInbox:
 
 
 def get_inbox_client() -> InboxClient:
-    """Default inbox for the running app: the offline ``MockInbox`` (OD-10).
+    """Select the inbox provider from configuration (default ``MockInbox``).
 
-    PRD §7 Step 1 authorizes a mock inbox; a real Gmail/IMAP client slots in here
-    with zero pipeline changes once available ("if time allows").
+    ``INBOX_PROVIDER=mock`` (default) replays the offline demo set (PRD §7 Step 1).
+    ``INBOX_PROVIDER=drive`` reads real PDFs from a watched Google Drive folder
+    (feat: Drive folder intake). Selecting ``drive`` without a folder id and
+    credentials fails fast rather than silently falling back to the mock, so a
+    misconfigured deploy is loud instead of quietly serving demo data.
     """
-    return MockInbox()
+    from backend.config import settings
+
+    provider = (settings.inbox_provider or "mock").strip().lower()
+    if provider == "mock":
+        return MockInbox()
+    if provider == "drive":
+        return _build_drive_inbox(settings)
+    raise ValueError(
+        f"unknown INBOX_PROVIDER '{settings.inbox_provider}' (expected 'mock' or 'drive')"
+    )
+
+
+def _build_drive_inbox(settings) -> InboxClient:
+    """Construct a ``DriveInbox`` + ``HttpDriveClient`` from settings (fail-fast).
+
+    Drive-specific imports are lazy so the default mock path never pulls in httpx
+    transport or ``google-auth`` (KTD1). ``GOOGLE_APPLICATION_CREDENTIALS`` is
+    treated as inline JSON when it starts with ``{``, otherwise as a file path.
+    """
+    import json
+    import tempfile
+
+    from backend.clients.drive import HttpDriveClient
+
+    from .drive import DriveInbox
+
+    if not settings.drive_folder_id:
+        raise ValueError("INBOX_PROVIDER=drive requires DRIVE_FOLDER_ID")
+    creds = settings.google_application_credentials
+    if not creds:
+        raise ValueError(
+            "INBOX_PROVIDER=drive requires GOOGLE_APPLICATION_CREDENTIALS "
+            "(a service-account key path or inline JSON)"
+        )
+    creds = creds.strip()
+    if creds.startswith("{"):
+        client = HttpDriveClient(credentials_info=json.loads(creds))
+    else:
+        client = HttpDriveClient(credentials_file=creds)
+    download_dir = pathlib.Path(tempfile.gettempdir()) / "intakehub-drive"
+    return DriveInbox(client, settings.drive_folder_id, download_dir)
