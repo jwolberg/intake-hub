@@ -1679,3 +1679,15 @@ it. Verified `backend/tools/inbox_poller.py` is provider-agnostic (only calls
 `INBOX_PROVIDER=drive` unchanged. Clean/hold demo bytes reuse the existing
 rendered samples via `render_invoice_pdf`.
 Validation: inbox + pdf-pipeline integration 13 passed; ruff clean.
+
+**U6 (setup runbook):** New `docs/drive-intake-setup.md` — service-account
+creation, folder share (Editor, needed for moves), the three env vars, an
+illustrative Gmail→Drive Apps Script (framed as out-of-app glue), and the
+decision-time-snapshot caveat (R6: reviewers work holds in the hub, not Drive).
+Linked from `docs/RUNBOOK.md` (env-var table + pointer) and `docs/DEPLOY.md`
+(Cloud Run injection note, per System-Wide Impact). Prominent caveat: real Drive
+PDFs need `ANTHROPIC_API_KEY` — the offline stand-in can't read an arbitrary PDF
+text layer (the suite stays offline only because its sample PDFs are parseable by
+LayoutLLMClient).
+
+Docs-only unit — no tests.

@@ -85,6 +85,13 @@ runs.
 | `VITE_API_URL` (frontend) | `http://localhost:8000` | — |
 | `ANTHROPIC_API_KEY` | _(unset → offline stand-in)_ | `sk-ant-...` (enables the real LLM provider, OD-2) |
 | `LLM_MODEL` | `claude-opus-4-7` | e.g. `claude-haiku-4-5` |
+| `INBOX_PROVIDER` | `mock` | `drive` (read invoices from a watched Google Drive folder) |
+| `DRIVE_FOLDER_ID` | _(unset)_ | the watched folder's id (required when `INBOX_PROVIDER=drive`) |
+| `GOOGLE_APPLICATION_CREDENTIALS` | _(unset)_ | service-account key path or inline JSON (required when `INBOX_PROVIDER=drive`) |
+
+For the Google Drive folder intake source (`INBOX_PROVIDER=drive`), see
+[`drive-intake-setup.md`](./drive-intake-setup.md) — service-account creation,
+folder sharing, and the org-side Gmail→Drive glue.
 
 When `ANTHROPIC_API_KEY` is set, `get_llm_client()` returns `AnthropicLLMClient`
 (official `anthropic` SDK, imported lazily) and extraction confidence comes from
