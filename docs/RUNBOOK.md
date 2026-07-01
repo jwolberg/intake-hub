@@ -91,7 +91,8 @@ runs.
 
 For the Google Drive folder intake source (`INBOX_PROVIDER=drive`), see
 [`drive-intake-setup.md`](./drive-intake-setup.md) — service-account creation,
-folder sharing, and the org-side Gmail→Drive glue.
+folder sharing, and the org-side Gmail→Drive glue — and **Path E** below for
+running it in dev (setting the credentials) and exercising it in tests.
 
 When `ANTHROPIC_API_KEY` is set, `get_llm_client()` returns `AnthropicLLMClient`
 (official `anthropic` SDK, imported lazily) and extraction confidence comes from
@@ -259,6 +260,86 @@ Provided PDFs: `inv_clean_001` (→ submit), `inv_hold_unmatched_002` (→ hold,
 unmatched line item), `inv_body_003` (→ submit), `inv_hold_mismatch_005`
 (→ hold, sponsor mismatch).
 
+## Path E — Google Drive folder intake (dev & test)
+
+Run the pipeline against a **watched Google Drive folder** instead of the offline
+mock inbox (`INBOX_PROVIDER=drive`). This path needs a service account and a
+shared folder — that org-side setup (create SA, share folder as Editor, get the
+folder id) lives in [`drive-intake-setup.md`](./drive-intake-setup.md) and is not
+repeated here. Below is how to wire it up **locally**, plus how to exercise the
+Drive code **without any credentials** in tests.
+
+### Test — offline, no credentials
+
+The Drive client, provider, and fetch-route are fully covered by an in-memory
+`StubDriveClient` (seeded with PDF bytes) — no Google account, network, or key is
+needed. Run just those suites:
+
+```bash
+source .venv/bin/activate                       # (create per Path B/C if needed)
+pytest tests/unit/test_drive_client.py \
+       tests/unit/test_drive_inbox.py \
+       tests/integration/test_inbox_fetch.py -q
+```
+
+These verify list/download/move + typed errors, that each PDF files into
+`submitted` / `needs-review` / `failed` by decision, and that a re-fetch is
+idempotent (moved files are never re-listed). `HttpDriveClient` never imports
+`google-auth` unless it actually mints a token, so the suite stays network-free.
+
+### Dev — against a real Drive folder
+
+You need two things from [`drive-intake-setup.md`](./drive-intake-setup.md): the
+**service-account JSON key** and the watched **folder id**. Then set:
+
+| Variable | Value |
+| --- | --- |
+| `INBOX_PROVIDER` | `drive` |
+| `DRIVE_FOLDER_ID` | the watched folder's id |
+| `GOOGLE_APPLICATION_CREDENTIALS` | path to the SA JSON key **or** the key's inline JSON |
+| `ANTHROPIC_API_KEY` | needed in practice — real Drive PDFs have no structured block, so without it extraction is blank and everything holds |
+
+`GOOGLE_APPLICATION_CREDENTIALS` is treated as **inline JSON** when the value
+starts with `{`, otherwise as a **file path**. Selecting `drive` without a folder
+id or credentials fails fast at startup (no silent fall-back to the mock).
+
+**Supplying the credentials — two options:**
+
+```bash
+# Option 1 — file path. Keep the key OUTSIDE the repo tree so it can't be
+# committed (the repo only gitignores .env and /logs). e.g. ~/.config/:
+mkdir -p ~/.config/intakehub
+mv ~/Downloads/intake-drive-*.json ~/.config/intakehub/drive-sa.json
+chmod 600 ~/.config/intakehub/drive-sa.json
+export GOOGLE_APPLICATION_CREDENTIALS="$HOME/.config/intakehub/drive-sa.json"
+
+# Option 2 — inline JSON from the macOS Keychain (mirrors the ANTHROPIC_API_KEY
+# pattern below; keeps the key out of disk, shell history, and any .env). Store
+# the whole JSON once, read it back at launch:
+security add-generic-password -a "$USER" -s "ledgerrun-DRIVE_SA_JSON" -U -w < ~/.config/intakehub/drive-sa.json
+export GOOGLE_APPLICATION_CREDENTIALS="$(security find-generic-password -s ledgerrun-DRIVE_SA_JSON -w)"
+```
+
+Then run the API with the Drive vars set and trigger a poll:
+
+```bash
+export INBOX_PROVIDER=drive
+export DRIVE_FOLDER_ID="<folder-id-from-the-drive-url>"
+export ANTHROPIC_API_KEY="$(security find-generic-password -s ledgerrun-ANTHROPIC_API_KEY -w)"
+uvicorn backend.api.main:app --reload --port 8000     # + Path B's DB/service vars
+
+# In another shell: poll the folder (idempotent — safe to re-run)
+python -m backend.tools.inbox_poller http://127.0.0.1:8000
+```
+
+Each poll lists the folder root for new `.pdf`s, processes them, and moves each
+into its status subfolder (the three subfolders are auto-created on first use).
+Re-running never double-processes — files are recorded *seen* by Drive fileId
+before the move. Config is read once at startup, so restart `uvicorn` after
+changing any of these vars.
+
+---
+
 ## Common tasks
 
 - **Reset the database:** `docker compose down -v && docker compose up -d db`
@@ -268,6 +349,8 @@ unmatched line item), `inv_body_003` (→ submit), `inv_hold_mismatch_005`
   `/api/invoices/process`. To make a matching PDF, add its stem to `_RENDERABLE`
   in `samples/generate_pdfs.py` and re-run the generator.
 - **Process a real PDF:** see Path D.
+- **Read invoices from a Google Drive folder:** see Path E (dev credentials + the
+  credential-free test suite).
 - **Browse the API:** interactive docs at <http://localhost:8000/docs>.
 
 ## Troubleshooting

@@ -1723,3 +1723,22 @@ now once-per-poll regardless — mirrors the other per-request `get_*` factories
 fail-fast across two modules and complicate the test seam for a cosmetic gain).
 
 Validation: full suite 200 passed / 1 skipped; ruff clean.
+
+## 2026-07-01 — RUNBOOK: Drive intake dev & test path (docs)
+
+Post-merge follow-up. Added **Path E** to `docs/RUNBOOK.md` so the Drive folder
+intake can be set up locally and exercised in tests, complementing the org-side
+`drive-intake-setup.md` (no duplication — Path E points to it for SA/folder
+creation).
+
+- **Test:** credential-free suite (`test_drive_client` / `test_drive_inbox` /
+  `test_inbox_fetch`) via `StubDriveClient` — verified 19 passed.
+- **Dev:** the three env vars + `ANTHROPIC_API_KEY`, with two credential-supply
+  options — a key file kept **outside** the repo (only `.env`/`/logs` are
+  gitignored), or inline JSON from the macOS Keychain mirroring the existing
+  `ANTHROPIC_API_KEY` pattern. Documented the path-vs-inline-JSON rule
+  (`GOOGLE_APPLICATION_CREDENTIALS` starting with `{` = inline) and the poll
+  trigger via `inbox_poller`.
+- Cross-linked from the Environment-variables section and Common tasks.
+
+Docs-only — no code change.
