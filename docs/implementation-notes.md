@@ -1624,3 +1624,13 @@ Decisions within U1 (not spelled out in the plan):
   real drive path / deploy.
 
 Validation: `tests/unit/test_drive_client.py` 10 passed; ruff clean.
+
+**U2 (DriveInbox provider):** `backend/inbox/drive.py` — `DriveInbox` implements
+`InboxClient.fetch_messages`: lists root PDFs, downloads each to
+`download_dir/<fileId>.pdf`, emits `InboxMessage(message_id=<fileId>,
+attachment_path=<temp>, document=None)` so the orchestrator takes the real-PDF
+branch. Decision: a per-file download failure is **isolated (logged + skipped)**,
+not raised — one bad file never aborts the poll; it stays in root and is retried
+next fetch. Temp filename keyed by fileId for uniqueness. `on_processed` (the move
+hook) is deferred to U3 per the plan's unit boundaries.
+Validation: `tests/unit/test_drive_inbox.py` 4 passed; ruff clean.
