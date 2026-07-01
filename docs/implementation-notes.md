@@ -1691,3 +1691,35 @@ text layer (the suite stays offline only because its sample PDFs are parseable b
 LayoutLLMClient).
 
 Docs-only unit — no tests.
+
+## 2026-07-01 — Simplify pass (4-angle review: reuse/simplify/efficiency/altitude)
+
+Applied after all 6 units, before code review. Fixes (all within the feature's
+own new code):
+- **Efficiency:** `HttpDriveClient` now refreshes the service-account token only
+  when `.valid` is false, instead of on every REST call — one poll of N files
+  mints one token, not ~3N.
+- **Efficiency/simplify:** `DriveClient.move` now takes the known
+  `source_folder_id` (the watched root the caller just listed from) instead of a
+  `files.get` round-trip to discover the parent; dropped `_file_parent`.
+- **Altitude:** `DriveInbox.on_processed` catches its own `DriveClientError`
+  (logs, leaves the file in root) so "on_processed does not raise" is a real
+  Protocol contract — the generic `fetch_inbox` route no longer needs a
+  provider-specific `try/except` around the hook (mirrors `fetch_messages`).
+- **Simplify:** deduped the double `mark_seen` in `fetch_inbox` (set `invoice =
+  None` on the unexpected-error path, mark seen once, `continue`).
+- **Simplify:** `_StubFile` → `@dataclass`; collapsed the three subfolder helper
+  methods into one find-or-create `_resolve_subfolder` (cache retained).
+- **Altitude/consistency:** `backend.inbox` imports `settings` at module top like
+  the sibling `get_llm_client` factory (was a needless lazy import).
+
+Considered and **skipped** (with reasons): widening `process()`'s isolation to
+cover `ingest`/persist (changes shared orchestrator, affects all callers — out of
+feature scope; route keeps a backstop); two separate credential env vars (the
+plan deliberately chose one path-or-JSON `GOOGLE_APPLICATION_CREDENTIALS`);
+memoizing the inbox instance across requests (test friction, and the token mint is
+now once-per-poll regardless — mirrors the other per-request `get_*` factories); a
+`get_drive_client()` factory in `backend/clients` (would spread settings reads +
+fail-fast across two modules and complicate the test seam for a cosmetic gain).
+
+Validation: full suite 200 passed / 1 skipped; ruff clean.

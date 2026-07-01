@@ -78,9 +78,9 @@ def _settings(**overrides):
 
 
 def _patch_settings(monkeypatch, **overrides):
-    # get_inbox_client does `from backend.config import settings` at call time, so
-    # patching the config singleton is what takes effect.
-    monkeypatch.setattr("backend.config.settings", _settings(**overrides))
+    # get_inbox_client uses the module-level `settings` imported into backend.inbox
+    # (mirroring the get_llm_client factory), so patch that reference.
+    monkeypatch.setattr("backend.inbox.settings", _settings(**overrides))
 
 
 def test_get_inbox_client_defaults_to_mock(monkeypatch):

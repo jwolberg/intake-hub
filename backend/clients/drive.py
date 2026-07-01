@@ -17,6 +17,7 @@ imported lazily (only the real-provider path pulls it in — the same posture as
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Protocol
 
 import httpx
@@ -48,18 +49,18 @@ class DriveClient(Protocol):
         """Return the raw bytes of ``file_id``, or raise ``DriveClientError``."""
         ...
 
-    def move(self, file_id: str, dest: str) -> None:
-        """Move ``file_id`` into the ``dest`` status subfolder (created if absent)."""
+    def move(self, file_id: str, source_folder_id: str, dest: str) -> None:
+        """Move ``file_id`` from ``source_folder_id`` into the ``dest`` status
+        subfolder (created under the source folder if absent). The caller passes
+        the source folder it already knows, so no extra lookup is needed."""
         ...
 
 
+@dataclass
 class _StubFile:
-    __slots__ = ("name", "data", "parent")
-
-    def __init__(self, name: str, data: bytes, parent: str) -> None:
-        self.name = name
-        self.data = data
-        self.parent = parent
+    name: str
+    data: bytes
+    parent: str
 
 
 class StubDriveClient:
@@ -99,11 +100,11 @@ class StubDriveClient:
         except KeyError as exc:
             raise DriveClientError(f"stub: no such file {file_id}") from exc
 
-    def move(self, file_id: str, dest: str) -> None:
+    def move(self, file_id: str, source_folder_id: str, dest: str) -> None:
         if file_id in self.fail_move:
             raise DriveClientError(f"stub: move failed for {file_id}")
         try:
-            self._files[file_id].parent = f"sub::{dest}"
+            self._files[file_id].parent = f"{source_folder_id}::{dest}"
         except KeyError as exc:
             raise DriveClientError(f"stub: no such file {file_id}") from exc
         self.moves.append((file_id, dest))
@@ -165,7 +166,10 @@ class HttpDriveClient:
                     "HttpDriveClient needs credentials_file or credentials_info "
                     "to mint a service-account token"
                 )
-        self._sa_credentials.refresh(Request())
+        # Reuse the token for its ~1h lifetime; only refresh when it is missing or
+        # expired, so one poll of N files does not mint N tokens.
+        if not self._sa_credentials.valid:
+            self._sa_credentials.refresh(Request())
         return self._sa_credentials.token
 
     def _auth_headers(self) -> dict[str, str]:
@@ -201,15 +205,16 @@ class HttpDriveClient:
             raise DriveClientError(f"download failed for {file_id}: {exc}") from exc
         return resp.content
 
-    def move(self, file_id: str, dest: str) -> None:
-        parent = self._file_parent(file_id)
-        dest_id = self._resolve_subfolder(parent, dest)
+    def move(self, file_id: str, source_folder_id: str, dest: str) -> None:
+        # The caller passes the source folder it already listed the file from, so
+        # there is no need to look up the file's current parent first.
+        dest_id = self._resolve_subfolder(source_folder_id, dest)
         try:
             resp = self._client.patch(
                 f"/files/{file_id}",
                 params={
                     "addParents": dest_id,
-                    "removeParents": parent,
+                    "removeParents": source_folder_id,
                     "fields": "id,parents",
                 },
                 headers=self._auth_headers(),
@@ -218,57 +223,36 @@ class HttpDriveClient:
         except httpx.HTTPError as exc:
             raise DriveClientError(f"move failed for {file_id}: {exc}") from exc
 
-    # --- move helpers -------------------------------------------------------
-
-    def _file_parent(self, file_id: str) -> str:
-        try:
-            resp = self._client.get(
-                f"/files/{file_id}",
-                params={"fields": "parents"},
-                headers=self._auth_headers(),
-            )
-            resp.raise_for_status()
-        except httpx.HTTPError as exc:
-            raise DriveClientError(f"lookup failed for {file_id}: {exc}") from exc
-        parents = resp.json().get("parents") or []
-        if not parents:
-            raise DriveClientError(f"file {file_id} has no parent folder")
-        return parents[0]
-
     def _resolve_subfolder(self, parent: str, name: str) -> str:
+        """Find (or create) the ``name`` subfolder under ``parent``, id cached per
+        ``(parent, name)`` so repeated moves in one poll don't re-query."""
         cached = self._subfolder_ids.get((parent, name))
         if cached is not None:
             return cached
-        folder_id = self._find_subfolder(parent, name) or self._create_subfolder(parent, name)
-        self._subfolder_ids[(parent, name)] = folder_id
-        return folder_id
-
-    def _find_subfolder(self, parent: str, name: str) -> str | None:
         q = (
             f"name='{name}' and mimeType='{_FOLDER_MIME}' "
             f"and '{parent}' in parents and trashed=false"
         )
         try:
-            resp = self._client.get(
+            found = self._client.get(
                 "/files",
                 params={"q": q, "fields": "files(id)", "pageSize": 1},
                 headers=self._auth_headers(),
             )
-            resp.raise_for_status()
+            found.raise_for_status()
+            files = found.json().get("files", [])
+            if files:
+                folder_id = files[0]["id"]
+            else:
+                created = self._client.post(
+                    "/files",
+                    params={"fields": "id"},
+                    json={"name": name, "mimeType": _FOLDER_MIME, "parents": [parent]},
+                    headers=self._auth_headers(),
+                )
+                created.raise_for_status()
+                folder_id = created.json()["id"]
         except httpx.HTTPError as exc:
-            raise DriveClientError(f"subfolder lookup failed for {name}: {exc}") from exc
-        files = resp.json().get("files", [])
-        return files[0]["id"] if files else None
-
-    def _create_subfolder(self, parent: str, name: str) -> str:
-        try:
-            resp = self._client.post(
-                "/files",
-                params={"fields": "id"},
-                json={"name": name, "mimeType": _FOLDER_MIME, "parents": [parent]},
-                headers=self._auth_headers(),
-            )
-            resp.raise_for_status()
-        except httpx.HTTPError as exc:
-            raise DriveClientError(f"subfolder create failed for {name}: {exc}") from exc
-        return resp.json()["id"]
+            raise DriveClientError(f"resolve subfolder '{name}' failed: {exc}") from exc
+        self._subfolder_ids[(parent, name)] = folder_id
+        return folder_id

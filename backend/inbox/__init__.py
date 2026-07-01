@@ -19,6 +19,8 @@ from typing import TYPE_CHECKING, Protocol
 
 from pydantic import BaseModel
 
+from backend.config import settings
+
 if TYPE_CHECKING:
     from backend.domain.models import Invoice
 
@@ -158,8 +160,6 @@ def get_inbox_client() -> InboxClient:
     credentials fails fast rather than silently falling back to the mock, so a
     misconfigured deploy is loud instead of quietly serving demo data.
     """
-    from backend.config import settings
-
     provider = (settings.inbox_provider or "mock").strip().lower()
     if provider == "mock":
         return MockInbox()

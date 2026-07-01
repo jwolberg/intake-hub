@@ -86,10 +86,18 @@ class DriveInbox:
 
         The destination reflects the decision **at processing time only** — the
         app does not chase later hub actions (R6). ``message_id`` is the Drive
-        fileId. Called by the fetch route after ``mark_seen``, so a raised move
-        never causes reprocessing (KTD3); the route treats it as best-effort.
+        fileId. Called after ``mark_seen`` (KTD3), so a move failure can never
+        cause reprocessing; a failed move is isolated here (logged, file left in
+        root, retried-safe via ``is_seen``) so the generic fetch route needs no
+        provider-specific error handling — mirroring ``fetch_messages``.
         """
-        self._client.move(message.message_id, _dest_for(invoice))
+        try:
+            self._client.move(message.message_id, self._folder_id, _dest_for(invoice))
+        except DriveClientError:
+            logger.warning(
+                "drive: could not move %s (%s) after processing; file left in root",
+                message.message_id, message.subject,
+            )
 
 
 def _dest_for(invoice: Invoice) -> str:

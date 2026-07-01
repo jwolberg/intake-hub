@@ -39,7 +39,7 @@ def test_download_returns_stored_bytes():
 
 def test_move_relocates_file_and_removes_it_from_root_listing():
     stub = _seeded_stub()
-    stub.move("f1", "submitted")
+    stub.move("f1", ROOT, "submitted")
     assert stub.moves == [("f1", "submitted")]
     # A subsequent root listing no longer returns the moved file.
     assert {f.id for f in stub.list_pdfs(ROOT)} == {"f2"}
@@ -59,7 +59,7 @@ def test_stub_surfaces_typed_errors():
     stub3 = _seeded_stub()
     stub3.fail_move.add("f1")
     with pytest.raises(DriveClientError):
-        stub3.move("f1", "submitted")
+        stub3.move("f1", ROOT, "submitted")
 
 
 def test_stub_download_unknown_file_raises_typed_error():
@@ -133,8 +133,6 @@ def test_http_move_creates_subfolder_when_absent_and_reparents():
 
     def handler(request: httpx.Request) -> httpx.Response:
         calls.append((request.method, request.url.path))
-        if request.method == "GET" and request.url.params.get("fields") == "parents":
-            return httpx.Response(200, json={"parents": [ROOT]})
         if request.method == "GET":  # subfolder lookup — none exists yet
             return httpx.Response(200, json={"files": []})
         if request.method == "POST":  # create subfolder
@@ -149,10 +147,14 @@ def test_http_move_creates_subfolder_when_absent_and_reparents():
             base_url=HttpDriveClient.BASE_URL, transport=httpx.MockTransport(handler)
         ),
     )
-    client.move("f1", "submitted")
+    client.move("f1", ROOT, "submitted")
     methods = [m for m, _ in calls]
     assert "POST" in methods  # subfolder was created
     assert "PATCH" in methods  # file was reparented
+    # No parent-lookup GET: the caller passed the source folder, so move issues
+    # exactly the subfolder lookup + create + reparent (no files.get for parents).
+    patch = next(req for m, req in calls if m == "PATCH")
+    assert patch.endswith("/files/f1")
 
 
 def test_http_errors_are_wrapped_as_typed_error():
