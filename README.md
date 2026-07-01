@@ -57,6 +57,12 @@ intake → parser → extraction → context → catalog → matching → decisi
                      (LLM)      (MCP ref)  (scoped)   (+LLM tie-break)   (submit | hold→exceptions)
 ```
 
+- **Intake** (`backend/inbox`) — invoices arrive from a pluggable inbox behind
+  one client seam: the offline `MockInbox` demo set (default) or a watched
+  **Google Drive folder** (`INBOX_PROVIDER=drive`) that pulls new PDFs and files
+  each into a `submitted`/`needs-review`/`failed` subfolder by its decision. Setup
+  in [`docs/drive-intake-setup.md`](docs/drive-intake-setup.md); dev & test wiring
+  in [`docs/RUNBOOK.md`](docs/RUNBOOK.md) (Path E).
 - **Extraction** (`backend/extraction`) — LLM pulls metadata + line items with
   per-field confidence (real Anthropic provider or an offline stand-in).
 - **Context** (`backend/context`) — ranks sponsor/study/site candidates from the
@@ -98,7 +104,7 @@ a failed invoice exposes **Retry failed stage**.
 ```bash
 pip install -r backend/requirements-dev.txt
 ruff check .          # lint
-pytest -q             # 168 passed, 1 skipped (Postgres round-trip; runs with a live DB)
+pytest -q             # 200 passed, 1 skipped (Postgres round-trip; runs with a live DB)
 ```
 
 Coverage spans every stage (unit), the orchestrator's state transitions +
@@ -112,5 +118,6 @@ stability-at-scale (`tests/integration/test_performance.py`).
 - [`docs/RUNBOOK.md`](docs/RUNBOOK.md) — setup & run (all paths)
 - [`docs/BUILD_PLAN.md`](docs/BUILD_PLAN.md) — phases, tickets, status
 - [`docs/DEPLOY.md`](docs/DEPLOY.md) — Google Cloud Run deployment
+- [`docs/drive-intake-setup.md`](docs/drive-intake-setup.md) — Google Drive folder intake setup
 - [`docs/CHALLENGE_ASSESSMENT.md`](docs/CHALLENGE_ASSESSMENT.md) — requirement status
 - [`docs/implementation-notes.md`](docs/implementation-notes.md) — running decisions log
