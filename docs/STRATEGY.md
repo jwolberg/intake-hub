@@ -1,9 +1,9 @@
 ---
-name: InvoiceScreener
+name: IntakeHub
 last_updated: 2026-05-26
 ---
 
-# InvoiceScreener Strategy
+# IntakeHub Strategy
 
 ## Target problem
 
@@ -22,7 +22,7 @@ transparent, explainable rationale a reviewer can audit.
 
 ## Who it's for
 
-**Primary:** Invoice Operations Reviewer — they're hiring InvoiceScreener to
+**Primary:** Invoice Operations Reviewer — they're hiring IntakeHub to
 *focus only on the invoices the AI flagged, and trust the rest were handled.*
 
 ## Key metrics

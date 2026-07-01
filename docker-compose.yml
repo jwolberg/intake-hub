@@ -6,15 +6,15 @@ services:
   db:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: invoicescreener
-      POSTGRES_PASSWORD: invoicescreener
-      POSTGRES_DB: invoicescreener
+      POSTGRES_USER: intakehub
+      POSTGRES_PASSWORD: intakehub
+      POSTGRES_DB: intakehub
     ports:
       - "5432:5432"
     volumes:
       - db_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U invoicescreener"]
+      test: ["CMD-SHELL", "pg_isready -U intakehub"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -24,7 +24,7 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     environment:
-      DATABASE_URL: postgresql+psycopg://invoicescreener:invoicescreener@db:5432/invoicescreener
+      DATABASE_URL: postgresql+psycopg://intakehub:intakehub@db:5432/intakehub
       MCP_REFERENCE_URL: http://mcp-reference:8100
       CLINRUN_URL: http://mock-clinrun:8200
       # OD-2 real LLM provider. Read from the host env at `up` time; empty →

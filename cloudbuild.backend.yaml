@@ -8,7 +8,7 @@ steps:
       - -f
       - backend/Dockerfile
       - -t
-      - us-central1-docker.pkg.dev/ledgerrun-1/invoicescreener/backend:latest
+      - us-central1-docker.pkg.dev/ledgerrun-1/intakehub/backend:latest
       - .
 images:
-  - us-central1-docker.pkg.dev/ledgerrun-1/invoicescreener/backend:latest
+  - us-central1-docker.pkg.dev/ledgerrun-1/intakehub/backend:latest

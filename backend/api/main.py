@@ -40,7 +40,7 @@ from backend.parser.raster import (
     render_pdf_bytes,
 )
 
-logger = logging.getLogger("invoicescreener.api")
+logger = logging.getLogger("intakehub.api")
 
 
 @asynccontextmanager
@@ -53,7 +53,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="InvoiceScreener", version="0.0.1", lifespan=lifespan)
+app = FastAPI(title="IntakeHub", version="0.0.1", lifespan=lifespan)
 
 # The hub is served from a different origin (Vite :5173) than the API (:8000),
 # so browser fetches need CORS. Origins are configurable via CORS_ORIGINS.
@@ -74,7 +74,7 @@ def health() -> dict:
             conn.execute(text("SELECT 1"))
     except SQLAlchemyError:
         db_status = "down"
-    return {"status": "ok", "service": "invoicescreener-api", "db": db_status}
+    return {"status": "ok", "service": "intakehub-api", "db": db_status}
 
 
 # --- dependencies (overridable in tests) ------------------------------------

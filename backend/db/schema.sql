@@ -1,4 +1,4 @@
--- InvoiceScreener persistence schema (PRD §11, ARCHITECTURE.md §12).
+-- IntakeHub persistence schema (PRD §11, ARCHITECTURE.md §12).
 --
 -- Stage outputs are persisted, not just final state, so the hub can render an
 -- invoice at its latest completed stage and reruns can diff against prior

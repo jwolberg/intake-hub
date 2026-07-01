@@ -1,6 +1,6 @@
 # Runbook — Dev Setup & Run
 
-Practical setup and run instructions for InvoiceScreener (the AI-first clinical
+Practical setup and run instructions for IntakeHub (the AI-first clinical
 trial invoice intake/matching/decisioning workflow). For *what* it does see
 [`PRD.md`](./PRD.md); for *how* it's structured see [`ARCHITECTURE.md`](./ARCHITECTURE.md);
 for status see [`BUILD_PLAN.md`](./BUILD_PLAN.md).
@@ -79,7 +79,7 @@ runs.
 
 | Variable | Default (Compose) | Local override example |
 | --- | --- | --- |
-| `DATABASE_URL` | `postgresql+psycopg://invoicescreener:invoicescreener@db:5432/invoicescreener` | `...@localhost:5432/...` |
+| `DATABASE_URL` | `postgresql+psycopg://intakehub:intakehub@db:5432/intakehub` | `...@localhost:5432/...` |
 | `MCP_REFERENCE_URL` | `http://mcp-reference:8100` | `http://localhost:8100` |
 | `CLINRUN_URL` | `http://mock-clinrun:8200` | `http://localhost:8200` |
 | `VITE_API_URL` (frontend) | `http://localhost:8000` | — |
@@ -165,7 +165,7 @@ source .venv/bin/activate
 pip install -r backend/requirements-dev.txt
 
 # 3. run the API against the local-mapped services
-export DATABASE_URL=postgresql+psycopg://invoicescreener:invoicescreener@localhost:5432/invoicescreener
+export DATABASE_URL=postgresql+psycopg://intakehub:intakehub@localhost:5432/intakehub
 export MCP_REFERENCE_URL=http://localhost:8100
 export CLINRUN_URL=http://localhost:8200
 uvicorn backend.api.main:app --reload --port 8000
@@ -215,7 +215,7 @@ skip-guarded and only runs when a real Postgres is reachable.
 
 ```bash
 docker compose up -d db
-DATABASE_URL=postgresql+psycopg://invoicescreener:invoicescreener@localhost:5432/invoicescreener \
+DATABASE_URL=postgresql+psycopg://intakehub:intakehub@localhost:5432/intakehub \
   pytest tests/integration/test_postgres_repository.py -q
 ```
 

@@ -123,7 +123,7 @@ Files created/modified: see Code Changes.
 
 ## Validation
 - How tested: `ruff check .` (lint), `pytest -q` (unit), and a FastAPI `TestClient` smoke check of `/health`.
-- Lint/test results: ruff — all checks passed; pytest — 4 passed; `GET /health` → 200 `{"status":"ok","service":"invoicescreener-api","db":"down"}` with no DB running.
+- Lint/test results: ruff — all checks passed; pytest — 4 passed; `GET /health` → 200 `{"status":"ok","service":"intake-api","db":"down"}` with no DB running.
 - Manual verification: `docker compose up` (db + api + hub); API at `:8000/health`, hub at `:5173` (requires Docker; not exercised in this environment).
 - Visible user outcome: a bootable API + hub shell; the hub displays live API status. No invoice behavior yet (Phase 1).
 

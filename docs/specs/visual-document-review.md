@@ -25,7 +25,7 @@ corrections (P2-C3) far faster and more confident.
 Reference implementation studied (read-only, not vendored): the OpenEMR
 `oe-module-clinical-copilot` module's OCR → vision-extraction → SVG-overlay
 review pipeline. We adapt its **word-index citation** design (below) to
-InvoiceScreener's Python/FastAPI + React stack and existing pipeline.
+IntakeHub's Python/FastAPI + React stack and existing pipeline.
 
 ## 2. Scope & Doc Change (read this first)
 
@@ -79,15 +79,15 @@ Why word indices instead of coordinates: the model cannot hallucinate a box — 
 can only point at OCR words that actually exist, and the box is computed from real
 OCR geometry. This is the crux of making the highlights trustworthy.
 
-## 4. Architecture (InvoiceScreener adaptation)
+## 4. Architecture (IntakeHub adaptation)
 
-Maps each reference component to an InvoiceScreener seam. We reuse existing
+Maps each reference component to an IntakeHub seam. We reuse existing
 interfaces (`LLMClient`, the clients layer, the staged pipeline, the detail
 payload, P2-C3 corrections, the audit trail) rather than inventing parallel ones.
 
 ### 4.1 Backend components
 
-| Reference (PHP) | InvoiceScreener (Python) | Notes |
+| Reference (PHP) | IntakeHub (Python) | Notes |
 |---|---|---|
 | `ImagickPageImageProducer` + `page-image.php` | `backend/parser/raster.py` (`render_pages`) + `GET /api/invoices/:id/pages/:n/image` | PyMuPDF/`pdf2image` for PDF; Pillow for images (OD-8). |
 | `TesseractPageWordExtractor` + `TesseractTsvParser` | `backend/ocr/` (`OCRClient` protocol; `TesseractOCRClient`; `StubOCRClient`) | New clients-style seam; offline stub (OD-6). |

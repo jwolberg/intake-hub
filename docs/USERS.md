@@ -1,6 +1,6 @@
-# Users: InvoiceScreener
+# Users: IntakeHub
 
-This document describes who InvoiceScreener is for and the jobs they hire it to do.
+This document describes who IntakeHub is for and the jobs they hire it to do.
 It is derived from [`STRATEGY.md`](../STRATEGY.md) and [`PRD.md`](./PRD.md), and it
 reflects the product's core principle: **the AI processes and decides on each
 invoice first; people review and intervene afterward.** That principle shapes every
@@ -23,7 +23,7 @@ first-pass work. When a tradeoff arises, the primary persona wins.
 
 The person responsible for validating invoice processing outcomes after the AI has
 extracted, matched, and decided. They are the reason the post-decision QC surface
-exists. Before InvoiceScreener, this person *was* the pipeline — opening each
+exists. Before IntakeHub, this person *was* the pipeline — opening each
 emailed invoice, figuring out which sponsor/study/site it belonged to, matching
 line items by hand, and deciding whether it was clean enough to submit.
 
@@ -47,7 +47,7 @@ didn't need it.
 - **Fix and move on.** Correct a bad extraction or match, rerun, or escalate, with
   the correction reflected in the outcome.
 
-### What they need from InvoiceScreener
+### What they need from IntakeHub
 
 - A list view that surfaces status, decision, confidence, and exception count, with
   filters for *held / failed / needs-review / low-confidence / mismatched-metadata /
@@ -98,7 +98,7 @@ and the queue.
 - **Stand behind decisions.** Use the audit trail of AI and human actions when
   questioned about an outcome.
 
-### What they need from InvoiceScreener
+### What they need from IntakeHub
 
 - Aggregate visibility into processing status, submitted-vs-held counts, exception
   patterns, and failure modes.
@@ -133,7 +133,7 @@ in a small team it may be the same person wearing a second hat.
   conflicts with its protocol number — and decide the correct disposition.
 - **Close the loop** so the invoice reaches a terminal, audited state.
 
-### What they need from InvoiceScreener
+### What they need from IntakeHub
 
 - Escalated invoices clearly distinguished in the queue.
 - The same explainable detail view the Reviewer used, plus the reviewer's note and

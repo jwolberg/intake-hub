@@ -1,4 +1,4 @@
-// Thin client for the InvoiceScreener API (PRD §13). Reads list/inspect the
+// Thin client for the IntakeHub API (PRD §13). Reads list/inspect the
 // invoices the AI has decided on; the POST helpers drive the post-decision human
 // QC actions (PRD FR10): correct, review, escalate, note, rerun.
 

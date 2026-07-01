@@ -1,6 +1,6 @@
 # Deploy — Google Cloud (Cloud Run)
 
-**Status: DRAFT.** First-pass deployment guide for getting InvoiceScreener onto
+**Status: DRAFT.** First-pass deployment guide for getting IntakeHub onto
 Google Cloud. It targets **Cloud Run** for the containers and **Cloud SQL for
 PostgreSQL** for persistence. For local setup see [`RUNBOOK.md`](./RUNBOOK.md);
 for structure see [`ARCHITECTURE.md`](./ARCHITECTURE.md).
@@ -22,9 +22,9 @@ state. Secrets (the Anthropic key) come from Secret Manager. The alternative
 | Local (Compose) | Cloud |
 | --- | --- |
 | `db` (postgres:16) | Cloud SQL for PostgreSQL 16 |
-| `api` (FastAPI) | Cloud Run service `invoicescreener-api` |
-| `mcp-reference` (stub) | Cloud Run service `invoicescreener-mcp` (internal ingress) |
-| `mock-clinrun` (stub) | Cloud Run service `invoicescreener-clinrun` (internal ingress) |
+| `api` (FastAPI) | Cloud Run service `intakehub-api` |
+| `mcp-reference` (stub) | Cloud Run service `intakehub-mcp` (internal ingress) |
+| `mock-clinrun` (stub) | Cloud Run service `intakehub-clinrun` (internal ingress) |
 | `hub` (Vite dev server) | static build served by Cloud Run / Firebase Hosting |
 | `ANTHROPIC_API_KEY` (Keychain) | Secret Manager → env var |
 
@@ -68,23 +68,23 @@ Make them before the first deploy (tracked as follow-ups, see end of doc):
 ## 1. Artifact Registry (image host)
 
 ```bash
-gcloud artifacts repositories create invoicescreener \
+gcloud artifacts repositories create intakehub \
   --repository-format=docker --location="$REGION"
-export IMG="$REGION-docker.pkg.dev/$PROJECT_ID/invoicescreener"
+export IMG="$REGION-docker.pkg.dev/$PROJECT_ID/intakehub"
 ```
 
 ## 2. Cloud SQL (PostgreSQL)
 
 ```bash
-gcloud sql instances create invoicescreener-db \
+gcloud sql instances create intakehub-db \
   --database-version=POSTGRES_16 --tier=db-f1-micro --region="$REGION"
 
-gcloud sql databases create invoicescreener --instance=invoicescreener-db
-gcloud sql users create invoicescreener \
-  --instance=invoicescreener-db --password='CHANGE_ME_STRONG'
+gcloud sql databases create intakehub --instance=intakehub-db
+gcloud sql users create intakehub \
+  --instance=intakehub-db --password='CHANGE_ME_STRONG'
 
 # Connection name is PROJECT:REGION:INSTANCE — used by the Cloud Run socket mount.
-export INSTANCE_CONN="$(gcloud sql instances describe invoicescreener-db \
+export INSTANCE_CONN="$(gcloud sql instances describe intakehub-db \
   --format='value(connectionName)')"
 ```
 
@@ -93,7 +93,7 @@ Cloud Run connects to Cloud SQL over a Unix socket at
 socket (no TCP host/port):
 
 ```
-DATABASE_URL=postgresql+psycopg://invoicescreener:CHANGE_ME_STRONG@/invoicescreener?host=/cloudsql/PROJECT:REGION:INSTANCE
+DATABASE_URL=postgresql+psycopg://intakehub:CHANGE_ME_STRONG@/intakehub?host=/cloudsql/PROJECT:REGION:INSTANCE
 ```
 
 ## 3. The Anthropic key → Secret Manager
@@ -134,21 +134,21 @@ gcloud builds submit --tag "$IMG/backend:latest" .
 ### 4a. Stub services (deploy first — the API needs their URLs)
 
 ```bash
-gcloud run deploy invoicescreener-mcp \
+gcloud run deploy intakehub-mcp \
   --image "$IMG/backend:latest" --region "$REGION" \
   --ingress internal --no-allow-unauthenticated \
   --command uvicorn \
   --args backend.clients.stub_servers.mcp_app:app,--host,0.0.0.0,--port,8080
 
-gcloud run deploy invoicescreener-clinrun \
+gcloud run deploy intakehub-clinrun \
   --image "$IMG/backend:latest" --region "$REGION" \
   --ingress internal --no-allow-unauthenticated \
   --command uvicorn \
   --args backend.clients.stub_servers.clinrun_app:app,--host,0.0.0.0,--port,8080
 
-export MCP_URL="$(gcloud run services describe invoicescreener-mcp \
+export MCP_URL="$(gcloud run services describe intakehub-mcp \
   --region "$REGION" --format='value(status.url)')"
-export CLINRUN_URL="$(gcloud run services describe invoicescreener-clinrun \
+export CLINRUN_URL="$(gcloud run services describe intakehub-clinrun \
   --region "$REGION" --format='value(status.url)')"
 ```
 
@@ -161,14 +161,14 @@ export CLINRUN_URL="$(gcloud run services describe invoicescreener-clinrun \
 ### 4b. The API
 
 ```bash
-gcloud run deploy invoicescreener-api \
+gcloud run deploy intakehub-api \
   --image "$IMG/backend:latest" --region "$REGION" \
   --allow-unauthenticated \
   --add-cloudsql-instances "$INSTANCE_CONN" \
   --set-secrets "ANTHROPIC_API_KEY=ledgerrun-anthropic-api-key:latest" \
-  --set-env-vars "^@^DATABASE_URL=postgresql+psycopg://invoicescreener:CHANGE_ME_STRONG@/invoicescreener?host=/cloudsql/$INSTANCE_CONN@MCP_REFERENCE_URL=$MCP_URL@CLINRUN_URL=$CLINRUN_URL@LLM_MODEL=claude-opus-4-7"
+  --set-env-vars "^@^DATABASE_URL=postgresql+psycopg://intakehub:CHANGE_ME_STRONG@/intakehub?host=/cloudsql/$INSTANCE_CONN@MCP_REFERENCE_URL=$MCP_URL@CLINRUN_URL=$CLINRUN_URL@LLM_MODEL=claude-opus-4-7"
 
-export API_URL="$(gcloud run services describe invoicescreener-api \
+export API_URL="$(gcloud run services describe intakehub-api \
   --region "$REGION" --format='value(status.url)')"
 curl "$API_URL/health"   # expect {"status":"ok",...,"db":"up"}
 ```
@@ -195,7 +195,7 @@ VITE_API_URL="$API_URL" npm ci && npm run build   # -> frontend/dist
 
 **B. Cloud Run (static via nginx):** add a production Dockerfile that builds the
 bundle and serves `dist/` with nginx on `$PORT`, then `gcloud run deploy
-invoicescreener-hub`. (The existing `frontend/Dockerfile` is dev-only — do not
+intakehub-hub`. (The existing `frontend/Dockerfile` is dev-only — do not
 ship it.)
 
 After the hub is live, add its origin to the API's `CORS_ORIGINS` and redeploy
@@ -217,26 +217,30 @@ key fixes locally; see RUNBOOK).
 - Cloud Run scales to zero — idle cost is ~the Cloud SQL instance only. Use
   `db-f1-micro` for demo; size up for real load.
 - Set `--min-instances=0` (demo) or `1` (avoid cold starts) on the API.
-- Logs: `gcloud run services logs read invoicescreener-api --region "$REGION"`.
+- Logs: `gcloud run services logs read intakehub-api --region "$REGION"`.
 - Cloud SQL is **not** scale-to-zero; stop the instance when idle to save cost.
 
 ## Deployment record (2026-05-30, project `ledgerrun-1`, region `us-central1`)
 
-Live services (all `--allow-unauthenticated`):
+Live services (all `--allow-unauthenticated`). **Note:** this record predates the
+rename to `intakehub`; the services were originally deployed as `invoicescreener-*`
+(hash `o27sizgahq`). Redeploying under the `intakehub-*` names below regenerates a
+**new** URL hash per service — the `<hash>` placeholders resolve only after the
+next deploy.
 
 | Service | URL |
 | --- | --- |
-| Hub | https://invoicescreener-hub-o27sizgahq-uc.a.run.app |
-| API | https://invoicescreener-api-o27sizgahq-uc.a.run.app |
-| mcp-reference (stub) | https://invoicescreener-mcp-o27sizgahq-uc.a.run.app |
-| mock-clinrun (stub) | https://invoicescreener-clinrun-o27sizgahq-uc.a.run.app |
+| Hub | https://intakehub-hub-&lt;hash&gt;-uc.a.run.app |
+| API | https://intakehub-api-&lt;hash&gt;-uc.a.run.app |
+| mcp-reference (stub) | https://intakehub-mcp-&lt;hash&gt;-uc.a.run.app |
+| mock-clinrun (stub) | https://intakehub-clinrun-&lt;hash&gt;-uc.a.run.app |
 
-- **Cloud SQL**: `invoicescreener-db` (PostgreSQL **15** — this gcloud maxes at 15),
+- **Cloud SQL**: `intakehub-db` (PostgreSQL **15** — this gcloud maxes at 15),
   `db-f1-micro`. Connected via the `/cloudsql/...` socket.
 - **Secret Manager**: `ledgerrun-anthropic-api-key`, `ledgerrun-database-url`,
   `ledgerrun-db-password`. The API reads `DATABASE_URL` from Secret Manager.
 - **Images**: built on Cloud Build (`cloudbuild.backend.yaml`,
-  `cloudbuild.hub.yaml`) → Artifact Registry repo `invoicescreener`. Backend
+  `cloudbuild.hub.yaml`) → Artifact Registry repo `intakehub`. Backend
   `Dockerfile` now honors `$PORT`; hub uses `frontend/Dockerfile.prod` (Vite
   build → nginx on 8080, `VITE_API_URL` baked at build time).
 - Seeded 4 PDF-backed invoices via `python -m backend.tools.seed_cloud <API_URL>`,

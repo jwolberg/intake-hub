@@ -1,4 +1,4 @@
-# Architecture: InvoiceScreener
+# Architecture: IntakeHub
 
 This document describes the technical architecture for the AI-first clinical trial
 invoice intake, matching, and decisioning workflow. It is derived from
@@ -33,7 +33,7 @@ true, this document states *how* the system is structured to make it true.
 
 ```
                 ┌────────────────────────────────────────────┐
-   Email /      │              InvoiceScreener                │
+   Email /      │            IntakeHub               │
    Sample   ───▶│                                             │
    Invoices     │   Intake → Pipeline → Decision → Hub        │
                 │                  │            │             │

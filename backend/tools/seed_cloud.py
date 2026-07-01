@@ -6,7 +6,7 @@ API reads off local disk — this carries the PDF **in the request** as base64
 persists the bytes (``invoices.source_pdf``), so the deployed hub gets real
 source documents: page-image preview *and* the "Open original PDF" download.
 
-    python -m backend.tools.seed_cloud https://invoicescreener-api-...run.app
+    python -m backend.tools.seed_cloud https://intakehub-api-...run.app
 
 Offline-friendly: the controlled sample PDFs extract via the offline
 ``LayoutLLMClient`` (no API key needed), exactly as the local PDF path does.

@@ -31,7 +31,7 @@ class Settings:
         return cls(
             database_url=os.environ.get(
                 "DATABASE_URL",
-                "postgresql+psycopg://invoicescreener:invoicescreener@db:5432/invoicescreener",
+                "postgresql+psycopg://intakehub:intakehub@db:5432/intakehub",
             ),
             mcp_reference_url=os.environ.get(
                 "MCP_REFERENCE_URL", "http://mcp-reference:8100"

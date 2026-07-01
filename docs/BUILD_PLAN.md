@@ -1,8 +1,8 @@
 # Build Plan
 
 ## Project
-- Name: InvoiceScreener — AI-First Clinical Trial Invoice Intake, Matching & Decisioning
-- Summary: Clinical trial site invoices arrive in inconsistent formats and require per-invoice judgment (sponsor/study/site + catalog matching) that doesn't reduce to fixed rules. InvoiceScreener processes each invoice end to end and decides submit-to-ClinRun vs. hold-for-exception *before* any human touches it, then exposes explainable outcomes for post-decision QC.
+- Name: IntakeHub — AI-First Clinical Trial Invoice Intake, Matching & Decisioning
+- Summary: Clinical trial site invoices arrive in inconsistent formats and require per-invoice judgment (sponsor/study/site + catalog matching) that doesn't reduce to fixed rules. IntakeHub processes each invoice end to end and decides submit-to-ClinRun vs. hold-for-exception *before* any human touches it, then exposes explainable outcomes for post-decision QC.
 
 ## Source of Truth
 - What must ship / requirements: /docs/PRD.md
@@ -603,7 +603,7 @@ IMAP/Gmail ("if time allows") stays deferred behind the same interface.
 - **Phase 4 (Visual Document Review) is COMPLETE** — P4-T1..T6 all shipped and browser-verified on branch `p2-track-c-reviewer-hub`. The only remaining open prior phase is **Phase 3 — Hardening & Polish**.
 - **PICK UP HERE (next session) → P3-T1 — Failure isolation, retry & recovery.** Retryable vs terminal failure states; resume from a failed stage without redoing successful upstream work; low-confidence → hold (PRD §14, FR11; ARCHITECTURE §15). Files: `/backend/orchestrator/**`, `/backend/clients/**`. Depends on P1-T9, P2-A3 (done). Note the current orchestrator already isolates per-invoice failures (`_fail` marks `failed` + an exception, never propagates) and distinguishes retryable `catalog_fetch_failed` from deliberate holds; P3-T1 formalizes retry/resume (e.g. re-enter from the failed stage, bounded retries for transient client errors) and adds the explicit low-confidence→hold guard end-to-end. Then P3-T2 (scenario suite over the eight PRD §18 scenarios), P3-T3 (unit/integration coverage), P3-T4 (observability), P3-T5 (performance), P3-T6 (demo seed set), P3-T7 (docs/README).
 - Still OPEN — **Phase 1 exit gate (live stack)**: deferred only because the Docker daemon is unavailable in the dev session. Run once Docker is up, before demo:
-  1. `docker compose up -d db` then `DATABASE_URL=postgresql+psycopg://invoicescreener:invoicescreener@localhost:5432/invoicescreener pytest tests/integration/test_postgres_repository.py` — un-skips the Postgres round-trip.
+  1. `docker compose up -d db` then `DATABASE_URL=postgresql+psycopg://intakehub:intakehub@localhost:5432/intakehub pytest tests/integration/test_postgres_repository.py` — un-skips the Postgres round-trip.
   2. `docker compose up` — API lifespan `init_schema` + reflection + the mcp-reference/mock-clinrun services end-to-end.
   3. Open the hub (`:5173`), POST a sample to `/api/invoices/process`, confirm it lists + detail renders.
 

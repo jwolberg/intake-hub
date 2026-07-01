@@ -175,7 +175,7 @@ daemon socket), so `PostgresRepository` was NOT run against a real database. The
 round-trip test (`tests/integration/test_postgres_repository.py`) is
 **skip-guarded** and skips when no DB is reachable. To validate:
 `docker compose up` (full stack), or `docker compose up -d db` then
-`DATABASE_URL=postgresql+psycopg://invoicescreener:invoicescreener@localhost:5432/invoicescreener pytest tests/integration/test_postgres_repository.py`.
+`DATABASE_URL=postgresql+psycopg://intake:intake@localhost:5432/intake pytest tests/integration/test_postgres_repository.py`.
 Everything else (API + pipeline + orchestrator) is validated in-process.
 
 **Validation:** `ruff` clean; `pytest -q` → **21 passed, 1 skipped** (the Postgres
@@ -789,14 +789,14 @@ round-trip test passes against the live DB
 (`DATABASE_URL=...@localhost:5432/... pytest tests/integration/test_postgres_repository.py`
 → 1 passed). (2) `docker compose up` brings up db/api/hub/mcp-reference/
 mock-clinrun; `/health` reports `db: up`; schema bootstrap runs on lifespan.
-(3) The hub serves at `http://127.0.0.1:5173` (`<title>InvoiceScreener</title>`,
+(3) The hub serves at `http://127.0.0.1:5173` (`<title>Intake</title>`,
 `main.jsx`) and CORS preflight from that origin succeeds for GET and the POST QC
 actions. Remaining: a human visual click-through of the hub UI in a browser.
 
 **Env note (not a code issue).** A stray host `voicerace` Vite dev server is bound
 to `[::1]:5173`; since macOS resolves `localhost`→IPv6 first, `http://localhost:5173`
 hits *that* app, not ours. Use `http://127.0.0.1:5173` (or stop the other server)
-to reach the InvoiceScreener hub.
+to reach the Intake hub.
 
 ## 2026-05-27 — Reviewer hub restyle to ClinRun look (user-requested)
 
@@ -1502,7 +1502,7 @@ against a live `DATABASE_URL`, like the rest of the Postgres repository.
 ## 2026-06-04 — Production real-provider egress verified + graceful fallback
 
 **Finding (verification request).** Confirmed production has **no live
-`ANTHROPIC_API_KEY`**: the Cloud Run service `invoicescreener-api` (`ledgerrun-1`)
+`ANTHROPIC_API_KEY`**: the Cloud Run service `intake-api` (`ledgerrun-1`)
 binds only `MCP_REFERENCE_URL/CLINRUN_URL/LLM_MODEL/CORS_ORIGINS/DATABASE_URL`;
 the secret exists in Secret Manager but is unbound. Re-test (bound the key on a
 fresh revision, posted one sample) reproduced the original failure —
@@ -1533,3 +1533,66 @@ follow-up in DEPLOY.md.
 (4 new: fallback degrades on SDK + built-in connection errors, re-raises
 non-connection errors, passes through on success). The 1 skip remains the Postgres
 round-trip.
+
+## 2026-07-01 — Product rename: InvoiceScreener → Intake
+
+**Decision (user):** Rename the product from **InvoiceScreener** to **Intake**,
+broadening the framing from clinical-trial invoices toward general small-business
+document ingestion. Depth chosen: "everything incl. deploy."
+
+**What changed:** `InvoiceScreener` → `Intake` and `invoicescreener` → `intake`
+across all prose/UI and identifiers — README, docs, FastAPI title, logger name
+(`intake.api`), health `service` string, Postgres db/user/name (docker-compose,
+`config.py` default, RUNBOOK/DEPLOY examples), docker/Cloud Run service names,
+Artifact Registry repo (`intake`), and `frontend/package*.json` name
+(`intake-hub`). Suite: 179 passed / 1 skipped; ruff clean.
+
+**Deliberately NOT renamed — `ledgerrun*`:** this token is not the product name.
+`ledgerrun-1` is the **immutable GCP project ID**; `ledgerrun.com` / "Ledger Run"
+is the **external challenge-issuing company** (brand palette in `styles.css`,
+contact in `challenge.md`); `ledgerrun-ANTHROPIC_API_KEY` /
+`ledgerrun-anthropic-api-key` are real **Keychain / Secret Manager** resource
+names. Renaming any of these would corrupt infra or misattribute an external
+brand. Left untouched (9 files).
+
+**Follow-ups the user must do (out of my reach):**
+- Rename the repo directory + git remote (still `ledgerrun`).
+- Redeploy Cloud Run under the `intake-*` service names → regenerates the URL
+  hash (old `invoicescreener-*-o27sizgahq` links are retired; README/DEPLOY now
+  use `<hash>` placeholders). Also create Artifact Registry repo `intake` and
+  Cloud SQL db `intake` before deploy.
+- Local dev: `docker compose down -v` to drop the old `invoicescreener` volume;
+  a fresh `up` creates the `intake` database.
+
+**Not done (separate, larger change):** the product *positioning* in
+STRATEGY/PRD/USERS still describes clinical-trial invoices specifically. Only the
+name was changed here; broadening the documented problem/persona to general SMB
+document ingestion is a follow-on repositioning.
+
+## 2026-07-01 — Product rename refined: Intake → IntakeHub
+
+**Decision (user):** Rename the product from **Intake** to **IntakeHub** to avoid
+collision with the word "intake" — which is also the first pipeline **stage**
+(`backend/intake/`) and a common noun ("invoice intake", "email intake").
+
+**What changed (product name + product-owned identifiers):** display name
+`Intake` → `IntakeHub` (README, UI title/h1, FastAPI title, STRATEGY/USERS/
+ARCHITECTURE/RUNBOOK/DEPLOY/BUILD_PLAN/specs headers); identifiers `intake` →
+`intakehub` — Postgres db/user (docker-compose, `config.py` default, RUNBOOK/
+DEPLOY/BUILD_PLAN examples), logger (`intakehub.api`), health `service`
+(`intakehub-api`), Cloud Run services (`intakehub-api/-hub/-mcp/-clinrun`),
+Cloud SQL `intakehub-db`, Artifact Registry repo `intakehub`, `frontend`
+package (`intakehub-hub`). Suite: 179 passed / 1 skipped; ruff clean.
+
+**Deliberately NOT changed — the word `intake` where it means the stage or the
+common noun:** the `backend/intake/` stage module and its imports
+(`from backend.intake import ingest`), the ARCHITECTURE stage nodes/boxes, stage
+lists, and phrases like "invoice intake" / "Mock Inbox Intake" / "Email Intake" /
+"Google Drive Folder Intake". Renaming these would reintroduce the collision.
+Historical log entries above (the InvoiceScreener → Intake step) were left as
+written to preserve the record.
+
+**Git remote:** origin repointed to `git@github.com:jwolberg/intake-hub.git`
+(GitHub, `jwolberg` SSH creds, same as `workspace/volscan`). Note the GitHub repo
+slug is `intake-hub` (hyphenated) while the in-app product identifier is
+`intakehub` (unhyphenated) — an intentional, user-specified difference.

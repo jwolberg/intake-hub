@@ -1,4 +1,4 @@
-# InvoiceScreener
+# IntakeHub
 
 An **AI-first** workflow for clinical-trial site invoices: it interprets an
 emailed invoice, resolves its sponsor/study/site context, matches line items to
@@ -7,7 +7,7 @@ exceptions — without a human gate before decisioning**. Reviewers then get a
 clear *post-decision* QC hub to understand outcomes, validate risk cases, and
 intervene (correct / rerun / escalate / retry).
 
-- **Live Dashboard page: https://invoicescreener-hub-o27sizgahq-uc.a.run.app/**
+- **Live Dashboard page:** _redeploying under the new `intakehub-hub` service — Cloud Run regenerates the URL hash on the next deploy (see [`docs/DEPLOY.md`](docs/DEPLOY.md)). The prior `invoicescreener-hub-…run.app` link is retired._
 - **Demo video: https://www.loom.com/share/0975477394ed4b47895f41821fdd3438**
 #
 ## Overview page ##

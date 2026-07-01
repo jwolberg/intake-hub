@@ -53,7 +53,7 @@ export default function App() {
   return (
     <div className="app">
       <header className="app-bar">
-        <h1>InvoiceScreener</h1>
+        <h1>IntakeHub</h1>
         <span className="api-status">{health}</span>
       </header>
 

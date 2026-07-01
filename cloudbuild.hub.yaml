@@ -9,7 +9,7 @@ steps:
       - --build-arg
       - VITE_API_URL=${_API_URL}
       - -t
-      - us-central1-docker.pkg.dev/ledgerrun-1/invoicescreener/hub:latest
+      - us-central1-docker.pkg.dev/ledgerrun-1/intakehub/hub:latest
       - .
 images:
-  - us-central1-docker.pkg.dev/ledgerrun-1/invoicescreener/hub:latest
+  - us-central1-docker.pkg.dev/ledgerrun-1/intakehub/hub:latest
