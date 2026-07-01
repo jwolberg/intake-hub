@@ -22,6 +22,14 @@ class Settings:
     # confidence); otherwise it falls back to the offline stand-in (network-free).
     anthropic_api_key: str | None
     llm_model: str
+    # Drive folder intake (feat: Drive folder intake). ``inbox_provider`` selects
+    # the invoice source: ``mock`` (default, offline demo set) or ``drive`` (a
+    # watched Google Drive folder). The two drive vars are only required when
+    # ``drive`` is selected; ``google_application_credentials`` is either a path to
+    # a service-account key file or the inline JSON of that key.
+    inbox_provider: str
+    drive_folder_id: str | None
+    google_application_credentials: str | None
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -40,6 +48,11 @@ class Settings:
             cors_origins=tuple(o.strip() for o in origins.split(",") if o.strip()),
             anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY") or None,
             llm_model=os.environ.get("LLM_MODEL", "claude-opus-4-7"),
+            inbox_provider=os.environ.get("INBOX_PROVIDER", "mock"),
+            drive_folder_id=os.environ.get("DRIVE_FOLDER_ID") or None,
+            google_application_credentials=(
+                os.environ.get("GOOGLE_APPLICATION_CREDENTIALS") or None
+            ),
         )
 
 

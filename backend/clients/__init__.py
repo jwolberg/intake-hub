@@ -20,9 +20,16 @@ from .clinrun import (
     StubClinRunClient,
     SubmissionResult,
 )
+from .drive import (
+    DriveClient,
+    DriveFile,
+    HttpDriveClient,
+    StubDriveClient,
+)
 from .errors import (
     CatalogNotFound,
     ClinRunClientError,
+    DriveClientError,
     ReferenceClientError,
     ReferenceUnavailable,
     SubmissionFailed,
@@ -52,8 +59,12 @@ __all__ = [
     "CatalogNotFound",
     "ClinRunClient",
     "ClinRunClientError",
+    "DriveClient",
+    "DriveClientError",
+    "DriveFile",
     "FallbackLLMClient",
     "HttpClinRunClient",
+    "HttpDriveClient",
     "HttpMCPReferenceClient",
     "LLMClient",
     "MCPReferenceClient",
@@ -63,6 +74,7 @@ __all__ = [
     "ReferenceClientError",
     "ReferenceUnavailable",
     "StubClinRunClient",
+    "StubDriveClient",
     "StubLLMClient",
     "StubMCPReferenceClient",
     "StubOCRClient",

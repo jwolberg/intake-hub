@@ -5,6 +5,9 @@ piece of logic between "received email" and the existing pipeline), and the
 repository idempotency primitives — all offline, no PDF rendering, no network.
 """
 
+import types
+
+import pytest
 from backend.db.repository import InMemoryRepository
 from backend.inbox import DEMO_STEMS, InboxMessage, MockInbox, message_to_sample
 
@@ -59,3 +62,76 @@ def test_repository_seen_message_idempotency():
     repo.mark_seen("m1")  # idempotent
     assert repo.is_seen("m1") is True
     assert repo.is_seen("m2") is False
+
+
+# --- provider selection (U4) ------------------------------------------------
+
+
+def _settings(**overrides):
+    base = {
+        "inbox_provider": "mock",
+        "drive_folder_id": None,
+        "google_application_credentials": None,
+    }
+    base.update(overrides)
+    return types.SimpleNamespace(**base)
+
+
+def _patch_settings(monkeypatch, **overrides):
+    # get_inbox_client uses the module-level `settings` imported into backend.inbox
+    # (mirroring the get_llm_client factory), so patch that reference.
+    monkeypatch.setattr("backend.inbox.settings", _settings(**overrides))
+
+
+def test_get_inbox_client_defaults_to_mock(monkeypatch):
+    from backend.inbox import get_inbox_client
+
+    _patch_settings(monkeypatch, inbox_provider="mock")
+    assert isinstance(get_inbox_client(), MockInbox)
+
+
+def test_get_inbox_client_selects_drive_when_configured(monkeypatch):
+    from backend.inbox import get_inbox_client
+    from backend.inbox.drive import DriveInbox
+
+    _patch_settings(
+        monkeypatch,
+        inbox_provider="drive",
+        drive_folder_id="folder-123",
+        google_application_credentials="/path/to/sa.json",
+    )
+    client = get_inbox_client()
+    # A DriveInbox is built; no network is touched (token minting is lazy).
+    assert isinstance(client, DriveInbox)
+
+
+def test_get_inbox_client_drive_missing_config_fails_fast(monkeypatch):
+    from backend.inbox import get_inbox_client
+
+    # drive selected but no folder id -> clear error, not a silent mock fallback.
+    _patch_settings(
+        monkeypatch,
+        inbox_provider="drive",
+        drive_folder_id=None,
+        google_application_credentials="/path/to/sa.json",
+    )
+    with pytest.raises(ValueError, match="DRIVE_FOLDER_ID"):
+        get_inbox_client()
+
+    # drive selected with a folder but no credentials -> clear error.
+    _patch_settings(
+        monkeypatch,
+        inbox_provider="drive",
+        drive_folder_id="folder-123",
+        google_application_credentials=None,
+    )
+    with pytest.raises(ValueError, match="GOOGLE_APPLICATION_CREDENTIALS"):
+        get_inbox_client()
+
+
+def test_get_inbox_client_unknown_provider_raises(monkeypatch):
+    from backend.inbox import get_inbox_client
+
+    _patch_settings(monkeypatch, inbox_provider="imap")
+    with pytest.raises(ValueError, match="unknown INBOX_PROVIDER"):
+        get_inbox_client()

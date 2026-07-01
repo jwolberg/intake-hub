@@ -26,3 +26,12 @@ class ClinRunClientError(Exception):
 
 class SubmissionFailed(ClinRunClientError):
     """Backend rejected or could not accept the submission (retryable)."""
+
+
+class DriveClientError(Exception):
+    """Base error for the Google Drive intake client.
+
+    A list/download/move failure is surfaced as this typed error (never a raw
+    ``httpx``/transport exception) so the fetch loop can isolate a single bad file
+    without aborting the whole poll (see ``fetch_inbox``).
+    """

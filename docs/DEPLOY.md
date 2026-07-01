@@ -179,6 +179,14 @@ Notes:
 - `CORS_ORIGINS` must include the hub's deployed origin once §5 is done
   (add it to `--set-env-vars`), or the browser hub will be blocked by CORS.
 - The schema is created on first startup by `init_schema` — no migration job.
+- **Google Drive folder intake (optional).** To read invoices from a watched
+  Drive folder instead of the mock set, add `INBOX_PROVIDER=drive` and
+  `DRIVE_FOLDER_ID=<id>` to `--set-env-vars`, and provide the service-account key
+  as a secret — either mount it and point `GOOGLE_APPLICATION_CREDENTIALS` at the
+  path, or pass the inline JSON via `--set-secrets`
+  (`GOOGLE_APPLICATION_CREDENTIALS=drive-sa-key:latest`). The local ephemeral
+  download path needs no volume (KTD5). Full setup:
+  [`drive-intake-setup.md`](./drive-intake-setup.md).
 
 ## 5. The reviewer hub (frontend)
 
