@@ -1776,3 +1776,25 @@ supply the SA key as **inline JSON in `.env`** (`config` already treats a leadin
 > Drive-monitoring feature (that runs `INBOX_PROVIDER=drive`), and `seed_hub` (the
 > demo path) is unaffected. Follow-up: either COPY `samples/` into the image or point
 > `MockInbox` at the mounted path.
+
+### DM-2 — Compose wiring + `.env.example`
+- `api` service now forwards `INBOX_PROVIDER` / `DRIVE_FOLDER_ID` /
+  `GOOGLE_APPLICATION_CREDENTIALS` (each `${VAR:-default}`, default = mock/empty),
+  so the Docker path can actually select Drive — previously only `ANTHROPIC_API_KEY`
+  was passed and Drive was unreachable via Compose.
+- Added a **`poller`** sidecar (built from `backend/Dockerfile`) that runs
+  `inbox_poller --interval ${INBOX_POLL_INTERVAL:-60} http://api:8000`,
+  `restart: unless-stopped`, `depends_on: api`.
+- **Decision — `profiles: ["drive"]` on the poller.** The plain demo
+  (`docker compose up`) must not spin a polling loop, so the sidecar only starts
+  under `docker compose --profile drive up`. Trade-off: Drive users type one extra
+  flag; in exchange the default demo stays a clean 5-service stack and there's no
+  loop hammering the (broken-for-mock) fetch route. The `api` itself carries no
+  profile — it serves both modes; only the *monitor* is Drive-specific.
+- `.env.example` documents every knob and the two SA-key forms, leading with
+  inline JSON per the chosen approach. `.env` stays gitignored; `.env.example` is
+  tracked (verified `git check-ignore` clears it).
+- Validated with `docker compose config`: poller absent by default / present under
+  `--profile drive`; `INBOX_POLL_INTERVAL`, `INBOX_PROVIDER`, `DRIVE_FOLDER_ID`,
+  and inline-JSON credentials all substitute correctly (SA JSON has no `$`, so
+  Compose interpolation leaves it intact).
