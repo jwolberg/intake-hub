@@ -243,6 +243,15 @@ def _categorize_and_file(
     force the post (the minimal duplicate-resolution path; v1 only holds dups).
     """
     categorization = categorize(invoice.id, extraction, llm, source=source)
+    # A human category correction (R10/AE2) is pinned as a fixed, confident input,
+    # exactly like a metadata correction — the AI's original stays on the audit event.
+    corrected_category = corrections.category_overlay(repo.get_audit(invoice.id))
+    if corrected_category:
+        categorization = categorization.model_copy(update={
+            "category": corrected_category,
+            "category_confidence": 1.0,
+            "category_evidence": "corrected by reviewer",
+        })
     _advance(repo, invoice, InvoiceStatus.CLASSIFIED)
     record(repo, invoice.id, AuditAction.CLASSIFIED, details={
         "document_type": categorization.document_type.value,

@@ -59,5 +59,6 @@ def test_status_values_cover_state_machine():
         "classified", "categorized", "posted",
         "context_resolved", "catalog_matched",
         "submitted", "held", "failed", "rerun_requested", "corrected", "escalated",
+        "rejected",
     }
     assert {s.value for s in InvoiceStatus} == expected

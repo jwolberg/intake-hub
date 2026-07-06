@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
-import { getHealth, getInvoice, getMetrics, listInvoices } from "./api.js";
+import { getHealth, getInvoice, getMetrics, getNotifications, listInvoices } from "./api.js";
 import InvoiceDetail from "./components/InvoiceDetail.jsx";
 import InvoiceList from "./components/InvoiceList.jsx";
 import MetricsBar from "./components/MetricsBar.jsx";
@@ -15,10 +15,15 @@ export default function App() {
   const [detail, setDetail] = useState(null);
   const [error, setError] = useState(null);
   const [health, setHealth] = useState("…");
+  const [heldCount, setHeldCount] = useState(0);
 
   const refresh = useCallback(() => {
     listInvoices().then(setInvoices).catch((e) => setError(String(e)));
     getMetrics().then(setMetrics).catch((e) => setError(String(e)));
+    // Held-item notification digest (R18) — badge in the app bar.
+    getNotifications()
+      .then((n) => setHeldCount(n.held_count ?? 0))
+      .catch((e) => setError(String(e)));
   }, []);
 
   const loadDetail = useCallback((id) => {
@@ -54,7 +59,10 @@ export default function App() {
     <div className="app">
       <header className="app-bar">
         <h1>IntakeHub</h1>
-        <span className="api-status">{health}</span>
+        <span className="api-status">
+          {heldCount > 0 && <span className="badge held">{heldCount} held</span>}{" "}
+          {health}
+        </span>
       </header>
 
       {error && <p className="error">{error}</p>}

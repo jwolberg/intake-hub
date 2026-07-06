@@ -398,6 +398,63 @@ def test_confirm_citation_unknown_invoice_404(client):
     assert resp.status_code == 404
 
 
+# --- category correction, reject, review queue (U10) ------------------------
+
+# An ambiguous expense (office vs supplies) holds for low_category_confidence with
+# the runner-up offered as a candidate — the AE2 review scenario.
+AMBIGUOUS = {
+    "source": {"channel": "email", "message_id": "m-amb", "subject": "Depot order",
+               "sender": "orders@depot.example"},
+    "document": {
+        "metadata": {"vendor_name": "Depot", "invoice_date": "2026-03-01",
+                     "currency": "USD", "total_amount": "30.00"},
+        "line_items": [{"raw_description": "office supplies", "quantity": "1",
+                        "unit_price": "30.00", "total": "30.00"}],
+    },
+}
+
+
+def test_held_item_shows_candidate_categories_and_correction_files_it(client):
+    # AE2: a held ambiguous item surfaces candidate categories; correcting the
+    # category posts it, with the AI original preserved as an overlay.
+    invoice_id = client.post("/api/invoices/process", json=AMBIGUOUS).json()["id"]
+    detail = client.get(f"/api/invoices/{invoice_id}").json()
+    assert detail["invoice"]["status"] == "held"
+    assert detail["categorization"]["alternates"]  # candidate categories shown
+
+    corrected = client.post(
+        f"/api/invoices/{invoice_id}/corrections/category",
+        json={"category": "Office expense", "reason": "it's software/office"},
+    ).json()
+    assert corrected["invoice"]["status"] == "corrected"
+    assert corrected["corrections"]["category"] == "Office expense"
+
+    reran = client.post(f"/api/invoices/{invoice_id}/rerun", json={}).json()
+    assert reran["invoice"]["status"] == "posted"
+
+
+def test_reject_non_receipt_removes_from_queue_and_writes_no_row(client):
+    # AE4: rejecting a non-receipt takes it out of the queue and never files it.
+    invoice_id = client.post("/api/invoices/process", json=_sample(HOLDS)).json()["id"]
+    rejected = client.post(f"/api/invoices/{invoice_id}/reject", json={"note": "spam"}).json()
+    assert rejected["invoice"]["status"] == "rejected"
+
+    # gone from the review queue; the audit shows the human rejection
+    queue_ids = {r["id"] for r in client.get("/api/review-queue").json()}
+    assert invoice_id not in queue_ids
+    assert any(e["action"] == "rejected" for e in rejected["audit"])
+
+
+def test_review_queue_lists_held_items_by_reason(client):
+    client.post("/api/invoices/process", json=_sample(HOLDS))
+    client.post("/api/invoices/process", json=AMBIGUOUS)
+    queue = client.get("/api/review-queue").json()
+    assert len(queue) == 2
+    assert all(row["reason"] for row in queue)  # each carries its primary hold reason
+    # grouped/ordered by reason
+    assert [r["reason"] for r in queue] == sorted(r["reason"] for r in queue)
+
+
 def test_metrics_endpoint(client):
     client.post("/api/invoices/process", json=_sample(POSTS))
     client.post("/api/invoices/process", json=_sample(HOLDS))

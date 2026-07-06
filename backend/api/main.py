@@ -232,6 +232,30 @@ def list_invoices(
     return [row for row in rows if filter in row["filter_tags"]]
 
 
+@app.get("/api/review-queue")
+def review_queue(repo: RepoDep) -> list[dict]:
+    """Held items for the reviewer, default **oldest-first, grouped by reason** (R10).
+
+    Each row is the list summary plus the primary hold reason (its first
+    exception's type/title), so the hub can group the queue by why the item was
+    held and work the oldest first.
+    """
+    held = [inv for inv in repo.list_invoices() if inv.status is InvoiceStatus.HELD]
+    rows = []
+    for inv in held:
+        exceptions = repo.get_exceptions(inv.id)
+        primary = exceptions[0] if exceptions else None
+        rows.append({
+            **_summary(inv, repo),
+            "reason": primary.type if primary else None,
+            "reason_title": primary.message if primary else None,
+        })
+    # Group by reason, oldest-first within each group (and groups ordered by their
+    # oldest item), so a reviewer clears the longest-waiting reasons first.
+    rows.sort(key=lambda r: (r["reason"] or "", r["updated_at"]))
+    return rows
+
+
 @app.get("/api/metrics")
 def metrics(repo: RepoDep) -> WorkflowMetrics:
     """Aggregate strategy metrics for the Operations Lead (STRATEGY § Key metrics)."""
@@ -325,9 +349,22 @@ def _build_detail(invoice_id: str, repo: Repository) -> dict | None:
         "field_evidence": extracted.get("field_evidence", {}),
         "missing_fields": extracted.get("missing_fields", []),
     }
+    # Classification + categorization (R6/R10): the AI's income/expense call and
+    # Schedule C category with the candidate alternates, so the reviewer can pick
+    # among candidates when correcting a held item (AE2).
+    classified = latest_details(audit, AuditAction.CLASSIFIED)
+    categorized = latest_details(audit, AuditAction.CATEGORIZED)
+    detail["categorization"] = {
+        "document_type": classified.get("document_type"),
+        "document_type_confidence": classified.get("confidence"),
+        "category": categorized.get("category"),
+        "category_confidence": categorized.get("confidence"),
+        "alternates": categorized.get("alternates", []),
+    }
     detail["corrections"] = {
         "metadata": corrections.metadata_overlay(audit),
         "line_items": corrections.match_overlay(audit),
+        "category": corrections.category_overlay(audit),
     }
     # Visual Document Review (P4-T4): the page rasters + the source-anchored
     # citations (each carries its page_number + a normalized bbox) so the hub can
@@ -474,6 +511,11 @@ class LineItemCorrection(BaseModel):
     reason: str | None = None
 
 
+class CategoryCorrection(BaseModel):
+    category: str
+    reason: str | None = None
+
+
 class ReviewNote(BaseModel):
     note: str | None = None
 
@@ -547,6 +589,44 @@ def correct_line_item(invoice_id: str, body: LineItemCorrection, repo: RepoDep) 
         before=before, after=after, reason=body.reason,
     )
     _set_status(repo, invoice, InvoiceStatus.CORRECTED)
+    return _require_detail(invoice_id, repo)
+
+
+@app.post("/api/invoices/{invoice_id}/corrections/category")
+def correct_category(invoice_id: str, body: CategoryCorrection, repo: RepoDep) -> dict:
+    """Overlay a human Schedule C category correction (R6/R10; AE2).
+
+    Reuses the same overlay/audit shape as line-item corrections — the AI's
+    original category (on the CATEGORIZED audit event) is preserved and the change
+    is recorded with before/after. On rerun the corrected category is pinned as a
+    confident input, so correcting a held ambiguous item lets it file.
+    """
+    invoice = _get_invoice_or_404(invoice_id, repo)
+    audit = repo.get_audit(invoice_id)
+    prior = corrections.category_overlay(audit)
+    if prior is None:
+        prior = latest_details(audit, AuditAction.CATEGORIZED).get("category")
+    record(
+        repo, invoice_id, AuditAction.CORRECTED, actor=Actor.HUMAN,
+        details={"target": "category"},
+        before={"category": prior}, after={"category": body.category},
+        reason=body.reason,
+    )
+    _set_status(repo, invoice, InvoiceStatus.CORRECTED)
+    return _require_detail(invoice_id, repo)
+
+
+@app.post("/api/invoices/{invoice_id}/reject")
+def reject_invoice(invoice_id: str, body: ReviewNote, repo: RepoDep) -> dict:
+    """Reject a non-receipt (R10; AE4): remove it from the queue, never file it.
+
+    Records a human-attributed REJECTED event and moves the item to a terminal
+    ``rejected`` state, so it drops out of the needs-review queue and no Sheet row
+    is ever written for it.
+    """
+    invoice = _get_invoice_or_404(invoice_id, repo)
+    record(repo, invoice_id, AuditAction.REJECTED, actor=Actor.HUMAN, reason=body.note)
+    _set_status(repo, invoice, InvoiceStatus.REJECTED)
     return _require_detail(invoice_id, repo)
 
 

@@ -9,14 +9,14 @@
 import { useState } from "react";
 
 // PRD §10 Suggested filters, in display order. Keys match the API's FILTER_KEYS.
+// (The clinical-trial mismatched_metadata/unmatched_line_items keys still exist
+// server-side but never match post-pivot, so they're dropped here.)
 const FILTERS = [
-  ["submitted", "Submitted"],
+  ["posted", "Posted"],
   ["held", "Held"],
   ["failed", "Failed"],
   ["needs_review", "Needs review"],
   ["low_confidence", "Low confidence"],
-  ["mismatched_metadata", "Mismatched metadata"],
-  ["unmatched_line_items", "Unmatched line items"],
 ];
 
 function pct(value) {
@@ -79,8 +79,7 @@ export default function InvoiceList({ invoices, onSelect }) {
             <tr>
               <th>Invoice #</th>
               <th>Vendor</th>
-              <th>Sponsor / Study</th>
-              <th className="right">Total</th>
+              <th className="right">Amount</th>
               <th>Decision</th>
               <th>Status</th>
               <th className="right">Confidence</th>
@@ -92,10 +91,6 @@ export default function InvoiceList({ invoices, onSelect }) {
               <tr key={inv.id} onClick={() => onSelect(inv.id)}>
                 <td>{inv.invoice_number ?? inv.id}</td>
                 <td>{inv.vendor_name ?? "—"}</td>
-                <td className="muted">
-                  {inv.sponsor_id ?? "—"}
-                  {inv.study_id ? ` / ${inv.study_id}` : ""}
-                </td>
                 <td className="right">{inv.total_amount ?? "—"}</td>
                 <td>
                   <span className={`badge ${inv.decision ?? "neutral"}`}>

@@ -1986,3 +1986,23 @@ already covers dead-code cleanup. Same end state, no red window.
   404 — U8 catches it to fall back to a full backfill.
 - One-time interactive `backend/tools/gmail_oauth_setup.py` (InstalledAppFlow) mints the
   refresh token; `google-auth-oauthlib` added as a setup-script-only dep.
+
+### U10 — Reviewer hub + API updates
+- **Category correction (R6/R10/AE2):** `POST /api/invoices/{id}/corrections/category`
+  records a CORRECTED overlay (target=category, before/after); `corrections.category_overlay`
+  replays it; the orchestrator tail pins the latest correction (confidence 1.0) so a
+  corrected held item files on rerun. AI original stays on the CATEGORIZED audit event.
+- **Reject (R10/AE4):** `POST /api/invoices/{id}/reject` → new terminal `REJECTED`
+  status (additive enum, like U1) so a non-receipt leaves the queue and never files.
+- **Review queue (R10):** `GET /api/review-queue` returns held items with their primary
+  hold reason, ordered by reason then oldest-first.
+- Detail payload gains a `categorization` block (document_type/category/confidences/
+  alternates) + `corrections.category`, so the hub shows candidate categories on a hold.
+- Frontend repointed to ledger vocab (posted not submitted): deleted the Context
+  Resolution + catalog-matching sections; added a Classification & Category section with
+  candidate alternates + a held-item category-correction control + a Reject button;
+  filter chips posted/held/failed/needs_review/low_confidence; held-count badge from
+  /api/notifications. `npm run build` green.
+- Left in scope-note: `InvoiceMetadata` still carries sponsor/study/etc. fields (render as
+  missing for receipts); review-queue oldest-first reordering of the main list left as a
+  minor follow-up (endpoint available, unused in the list view).

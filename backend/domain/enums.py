@@ -36,6 +36,7 @@ class InvoiceStatus(str, Enum):
     RERUN_REQUESTED = "rerun_requested"
     CORRECTED = "corrected"
     ESCALATED = "escalated"
+    REJECTED = "rejected"       # reviewer discarded a non-receipt (R10/AE4)
 
 
 class Decision(str, Enum):
@@ -115,4 +116,5 @@ class AuditAction(str, Enum):
     RERUN = "rerun"
     RECOVERED = "recovered"
     ESCALATED = "escalated"
+    REJECTED = "rejected"
     NOTE = "note"

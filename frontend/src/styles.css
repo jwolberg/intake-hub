@@ -3,7 +3,7 @@
      action colour, near-navy text on white panels over a very light neutral
      canvas, pill controls, and a soft iridescent gradient used as a sparing
      brand accent. Status colours keep their green/amber/red semantics so a
-     reviewer can triage submitted/held/failed at a glance. */
+     reviewer can triage posted/held/failed at a glance. */
   --primary: #6978e3;       /* brand indigo (softened) */
   --primary-hover: #5563cf;
   --bg: #f6f5f5;            /* brand canvas */
@@ -101,9 +101,9 @@ tbody tr:hover { background: var(--row-hover); }
   font-family: var(--display);
   font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;
 }
-.badge.submit, .badge.submitted { color: var(--submit); background: var(--submit-bg); }
+.badge.submit, .badge.posted { color: var(--submit); background: var(--submit-bg); }
 .badge.hold, .badge.held { color: var(--hold); background: var(--hold-bg); }
-.badge.failed { color: var(--failed); background: var(--failed-bg); }
+.badge.failed, .badge.rejected { color: var(--failed); background: var(--failed-bg); }
 .badge.neutral { color: var(--muted); background: #eef1f4; }
 
 .kv { display: grid; grid-template-columns: 180px 1fr; gap: 0.3rem 1rem; font-size: 0.88rem; }
