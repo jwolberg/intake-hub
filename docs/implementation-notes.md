@@ -2006,3 +2006,73 @@ already covers dead-code cleanup. Same end state, no red window.
 - Left in scope-note: `InvoiceMetadata` still carries sponsor/study/etc. fields (render as
   missing for receipts); review-queue oldest-first reordering of the main list left as a
   minor follow-up (endpoint available, unused in the list view).
+
+### U8 — Gmail inbox provider + encrypted token storage + backfill orchestration (2026-07-06)
+- `backend/inbox/gmail.py`: `GmailInbox(client, *, llm=None, tax_year, label=None,
+  sync_state, history_id=None)`. `sync_state` is a narrow `GmailSyncState` Protocol
+  (`is_seen`/`mark_seen`/`get_sync_history_id`/`set_sync_history_id`) — deliberately
+  shaped so the app's real `Repository` satisfies it with **no adapter** (it already had
+  `is_seen`/`mark_seen`; the two sync-position methods were added to `Repository` in this
+  same ticket), and so is `InMemoryRepository` in tests. `on_processed` is a documented
+  no-op (logs only) — labeling needs Gmail *modify* scope, which this integration
+  deliberately does not request (`gmail.readonly` only, least privilege).
+- **Deviation (flagged, not silently decided):** the U7 `GmailClient` contract has no
+  "what's the mailbox's current historyId" operation — only `history_list(start_id)`.
+  After a backfill, `GmailInbox._bootstrap_history_id` probes `history_list("0")` purely
+  to read back its returned cursor (discarding the changed-ids, already covered by the
+  backfill). Against `StubGmailClient` this reliably yields the real cursor (verified by
+  tests). Against a **real** Gmail mailbox, an arbitrarily old `startHistoryId` will very
+  likely 404 (history retention is ~1 week) — production would then keep re-running full
+  backfills instead of true incremental deltas until some other path seeds a real
+  historyId. This is a known limitation of the current `GmailClient` (U7) contract, not
+  something this ticket could fix without touching `backend/clients/gmail.py` (out of
+  scope — U7's file, owned separately). A cleaner long-term fix: have U7 expose the
+  mailbox's current historyId directly (e.g. from `get_message`, or a dedicated
+  profile-style call).
+- Non-receipt drop: `_classify_and_fetch` calls `get_message(id, fmt="metadata")` only,
+  runs `classify_receipt`, and for a `False` verdict at confidence ≥ 0.7 calls
+  `sync_state.mark_seen` and returns `None` **without ever calling `get_message(fmt="full")`
+  or `get_attachment`** — R17 minimal retention is structural (the body is architecturally
+  unreachable for a drop), not just a "don't persist it" convention.
+- PDF-attachment receipts: added `InboxMessage.attachment_b64: str | None = None` (also
+  threaded through `message_to_sample`'s `source` dict, only when non-empty, so the
+  existing exact-dict-equality test in `test_inbox.py` still passes unchanged) — this is
+  the same field `backend.orchestrator`/`backend.parser` already read for the
+  `seed_cloud.py` cloud-PDF path, so a Gmail PDF attachment takes the identical real-PDF
+  extraction branch with no orchestrator/parser changes.
+- **`_build_gmail_inbox(settings, repo=None)`** — `repo` is injectable (tests pass
+  `InMemoryRepository()` directly, no DB) but defaults to `backend.db.repository.
+  get_repository()` for the running app, which is then passed as **both** the
+  `GmailClient`'s backing repo *and* `GmailInbox`'s `sync_state` (same object — no
+  adapter). `get_inbox_client()`'s own signature is unchanged (still zero args); the
+  `repo=` parameter lives only on the new factory.
+- Fail-fast order matters for testability: `GMAIL_CLIENT_ID`/`_SECRET`/`_REFRESH_TOKEN`
+  are checked *before* `get_repository()` is ever called, so a missing-config test never
+  touches Postgres (mirrors `_build_drive_inbox`'s fail-fast-first shape).
+- Token encryption (`backend/inbox/_crypto.py`, `encrypt_token`/`decrypt_token` over
+  `cryptography.fernet.Fernet`) uses a **lazy import**, matching the KTD1 convention used
+  throughout `backend/clients/`. **Environment check result: `cryptography` is NOT
+  installed in this repo's `.venv`** (nor is `google-auth`, despite both being listed in
+  `backend/requirements.txt` — everything that touches them is already lazily imported, so
+  the gap was invisible until this ticket tried to use one). Per the ticket's own
+  contingency instructions, this is not a hard failure: `_load_refresh_token` catches
+  `TokenCryptoUnavailable` and falls back to reading `GMAIL_REFRESH_TOKEN` from config on
+  every use, **never persisting anything to `oauth_tokens`** (so "never cleartext at rest"
+  still holds — it's "not persisted at all" rather than "persisted encrypted"), logging a
+  warning either way. Added `cryptography>=42,<46` to `backend/requirements.txt` (a real,
+  installable dependency — once it's actually installed in an environment, the encrypted
+  path takes over automatically, no code change needed). The round-trip test
+  (`test_token_encryption_roundtrips_and_is_not_plaintext`) is guarded by
+  `pytest.importorskip("cryptography")`, so the full suite stays green (it SKIPs here, and
+  will start asserting for real the moment the dependency is installed) — this is why the
+  final count is 244 passed / **2** skipped rather than 1.
+- `backend/tools/gmail_revoke.py`: standalone script (not an API route — `backend/api/
+  main.py` is a concurrent unit's file, explicitly out of scope for this ticket) that
+  POSTs to Google's revoke endpoint then clears the `oauth_tokens` row + `gmail_sync_state`
+  cursor, so a subsequent connect needs `gmail_oauth_setup.py` re-run.
+- Schema: `oauth_tokens(provider PK, encrypted_token, updated_at)` and
+  `gmail_sync_state(id PK default 'gmail', history_id, updated_at)`, both idempotent
+  `CREATE TABLE IF NOT EXISTS` like the rest of `schema.sql`.
+- Final state: `.venv/bin/python -m pytest -q` → 244 passed, 2 skipped (was 225/1 before
+  this ticket — +19 new tests, +1 new skip from the cryptography-gated round-trip test);
+  `ruff check backend tests` clean. `backend/api/main.py` was not touched.

@@ -15,7 +15,7 @@ from collections.abc import Mapping
 from functools import lru_cache
 from typing import Protocol
 
-from sqlalchemy import Engine, MetaData, Table, delete, insert, select
+from sqlalchemy import Engine, MetaData, Table, delete, func, insert, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from backend.db.session import get_engine
@@ -56,6 +56,10 @@ class Repository(Protocol):
     def is_appended(self, idempotency_key: str) -> bool: ...
     def record_append(self, idempotency_key: str, sheet_row_ref: str) -> None: ...
     def get_append_ref(self, idempotency_key: str) -> str | None: ...
+    def get_oauth_token(self, provider: str) -> str | None: ...
+    def set_oauth_token(self, provider: str, encrypted: str) -> None: ...
+    def get_sync_history_id(self) -> str | None: ...
+    def set_sync_history_id(self, history_id: str) -> None: ...
 
 
 class InMemoryRepository:
@@ -72,6 +76,8 @@ class InMemoryRepository:
         self._audit: dict[str, list[AuditEvent]] = {}
         self._seen_messages: set[str] = set()
         self._sheet_appends: dict[str, str] = {}
+        self._oauth_tokens: dict[str, str] = {}
+        self._gmail_history_id: str | None = None
 
     def save_invoice(self, invoice: Invoice) -> None:
         self._invoices[invoice.id] = invoice.model_copy(deep=True)
@@ -147,6 +153,18 @@ class InMemoryRepository:
     def get_append_ref(self, idempotency_key: str) -> str | None:
         return self._sheet_appends.get(idempotency_key)
 
+    def get_oauth_token(self, provider: str) -> str | None:
+        return self._oauth_tokens.get(provider)
+
+    def set_oauth_token(self, provider: str, encrypted: str) -> None:
+        self._oauth_tokens[provider] = encrypted
+
+    def get_sync_history_id(self) -> str | None:
+        return self._gmail_history_id
+
+    def set_sync_history_id(self, history_id: str) -> None:
+        self._gmail_history_id = history_id
+
 
 # --- Postgres implementation ------------------------------------------------
 # Reflects the schema created by db.session.init_schema (the canonical DDL), so
@@ -182,6 +200,8 @@ class PostgresRepository:
         self.audit_events = Table("audit_events", md, autoload_with=engine)
         self.seen_messages = Table("seen_messages", md, autoload_with=engine)
         self.sheet_appends = Table("sheet_appends", md, autoload_with=engine)
+        self.oauth_tokens = Table("oauth_tokens", md, autoload_with=engine)
+        self.gmail_sync_state = Table("gmail_sync_state", md, autoload_with=engine)
 
     def save_invoice(self, invoice: Invoice) -> None:
         values = {
@@ -367,6 +387,42 @@ class PostgresRepository:
                 .where(self.sheet_appends.c.idempotency_key == idempotency_key)
             ).scalar()
         return value
+
+    def get_oauth_token(self, provider: str) -> str | None:
+        with self._engine.connect() as conn:
+            value = conn.execute(
+                select(self.oauth_tokens.c.encrypted_token)
+                .where(self.oauth_tokens.c.provider == provider)
+            ).scalar()
+        return value
+
+    def set_oauth_token(self, provider: str, encrypted: str) -> None:
+        stmt = pg_insert(self.oauth_tokens).values(
+            provider=provider, encrypted_token=encrypted,
+        ).on_conflict_do_update(
+            index_elements=[self.oauth_tokens.c.provider],
+            set_={"encrypted_token": encrypted, "updated_at": func.now()},
+        )
+        with self._engine.begin() as conn:
+            conn.execute(stmt)
+
+    def get_sync_history_id(self) -> str | None:
+        with self._engine.connect() as conn:
+            value = conn.execute(
+                select(self.gmail_sync_state.c.history_id)
+                .where(self.gmail_sync_state.c.id == "gmail")
+            ).scalar()
+        return value
+
+    def set_sync_history_id(self, history_id: str) -> None:
+        stmt = pg_insert(self.gmail_sync_state).values(
+            id="gmail", history_id=history_id,
+        ).on_conflict_do_update(
+            index_elements=[self.gmail_sync_state.c.id],
+            set_={"history_id": history_id, "updated_at": func.now()},
+        )
+        with self._engine.begin() as conn:
+            conn.execute(stmt)
 
 
 @lru_cache(maxsize=1)

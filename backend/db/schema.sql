@@ -74,3 +74,26 @@ CREATE TABLE IF NOT EXISTS sheet_appends (
     status          TEXT NOT NULL DEFAULT 'posted',
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- OAuth refresh tokens (feat: solopreneur-ledger pivot, U8), encrypted at rest.
+-- ``provider`` is a fixed key (e.g. 'gmail'); ``encrypted_token`` is Fernet
+-- ciphertext (backend/inbox/_crypto.py) keyed by GMAIL_TOKEN_ENC_KEY — the
+-- refresh token is the key to the mailbox (R20), so it is never written here in
+-- cleartext. Cleared by backend/tools/gmail_revoke.py on revoke.
+CREATE TABLE IF NOT EXISTS oauth_tokens (
+    provider        TEXT PRIMARY KEY,
+    encrypted_token TEXT NOT NULL,
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Gmail incremental sync position (feat: solopreneur-ledger pivot, U8). A
+-- single row (id='gmail'): the last historyId GmailInbox successfully synced
+-- through, so the next fetch can request only the delta (history.list) instead
+-- of re-scanning the whole mailbox. NULL means "no cursor yet" -> the next
+-- fetch does a full backfill (first connect, or after a historyId expired and
+-- the sentinel-bootstrap also failed).
+CREATE TABLE IF NOT EXISTS gmail_sync_state (
+    id          TEXT PRIMARY KEY DEFAULT 'gmail',
+    history_id  TEXT,
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);

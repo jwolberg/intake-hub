@@ -14,6 +14,7 @@ package a real IMAP client imports.
 from __future__ import annotations
 
 import json
+import logging
 import pathlib
 from typing import TYPE_CHECKING, Protocol
 
@@ -23,6 +24,8 @@ from backend.config import settings
 
 if TYPE_CHECKING:
     from backend.domain.models import Invoice
+
+logger = logging.getLogger(__name__)
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 SAMPLES = ROOT / "samples"
@@ -42,8 +45,11 @@ class InboxMessage(BaseModel):
     Carries the envelope a real inbox exposes (id / subject / sender / attachment)
     plus the invoice payload — a parsed ``document`` block and/or a free-text
     ``body`` (PRD §7 Step 1). ``attachment_path`` points at a rendered PDF when one
-    exists, so the reviewer overlay can rasterize the source (P4). ``message_id``
-    is stable so a re-fetch is idempotent (P6-T3).
+    exists, so the reviewer overlay can rasterize the source (P4). ``attachment_b64``
+    carries a PDF attachment's bytes inline (base64) when there is no local file to
+    point at — the Gmail provider's case (U8) — taking the same cloud/inline-PDF
+    branch ``backend.orchestrator``/``backend.parser`` already have for
+    ``seed_cloud.py``. ``message_id`` is stable so a re-fetch is idempotent (P6-T3).
     """
 
     message_id: str
@@ -51,6 +57,7 @@ class InboxMessage(BaseModel):
     sender: str | None = None
     attachment: str | None = None
     attachment_path: str | None = None
+    attachment_b64: str | None = None
     document: dict | None = None
     body: str | None = None
 
@@ -90,6 +97,8 @@ def message_to_sample(message: InboxMessage) -> dict:
         "attachment": message.attachment,
         "attachment_path": message.attachment_path,
     }
+    if message.attachment_b64:
+        source["attachment_b64"] = message.attachment_b64
     sample: dict = {"source": source}
     if message.document is not None:
         sample["document"] = message.document
@@ -156,17 +165,22 @@ def get_inbox_client() -> InboxClient:
 
     ``INBOX_PROVIDER=mock`` (default) replays the offline demo set (PRD §7 Step 1).
     ``INBOX_PROVIDER=drive`` reads real PDFs from a watched Google Drive folder
-    (feat: Drive folder intake). Selecting ``drive`` without a folder id and
-    credentials fails fast rather than silently falling back to the mock, so a
-    misconfigured deploy is loud instead of quietly serving demo data.
+    (feat: Drive folder intake). ``INBOX_PROVIDER=gmail`` reads a connected Gmail
+    mailbox (feat: solopreneur-ledger pivot, U8). Selecting ``drive``/``gmail``
+    without their required config fails fast rather than silently falling back to
+    the mock, so a misconfigured deploy is loud instead of quietly serving demo
+    data.
     """
     provider = (settings.inbox_provider or "mock").strip().lower()
     if provider == "mock":
         return MockInbox()
     if provider == "drive":
         return _build_drive_inbox(settings)
+    if provider == "gmail":
+        return _build_gmail_inbox(settings)
     raise ValueError(
-        f"unknown INBOX_PROVIDER '{settings.inbox_provider}' (expected 'mock' or 'drive')"
+        f"unknown INBOX_PROVIDER '{settings.inbox_provider}' "
+        "(expected 'mock', 'drive', or 'gmail')"
     )
 
 
@@ -199,3 +213,82 @@ def _build_drive_inbox(settings) -> InboxClient:
         client = HttpDriveClient(credentials_file=creds)
     download_dir = pathlib.Path(tempfile.gettempdir()) / "intakehub-drive"
     return DriveInbox(client, settings.drive_folder_id, download_dir)
+
+
+def _build_gmail_inbox(settings, repo=None) -> InboxClient:
+    """Construct a ``GmailInbox`` + ``HttpGmailClient`` from settings (fail-fast).
+
+    Gmail-specific imports are lazy (KTD1) so the default mock path never pulls
+    in ``httpx``/``google-auth``. ``repo`` is injectable so tests can exercise
+    this factory's token/sync-state wiring against an ``InMemoryRepository()``
+    with no database; ``get_inbox_client()`` (the running app) leaves it unset
+    and gets the app's Postgres-backed ``get_repository()`` singleton, which
+    satisfies ``GmailSyncState`` with no adapter (``is_seen``/``mark_seen``
+    already existed on ``Repository``; ``get_sync_history_id``/
+    ``set_sync_history_id`` are added alongside this provider).
+    """
+    from backend.clients import get_llm_client
+    from backend.clients.gmail import HttpGmailClient
+    from backend.db.repository import get_repository
+
+    from .gmail import GmailInbox
+
+    if not settings.gmail_client_id:
+        raise ValueError("INBOX_PROVIDER=gmail requires GMAIL_CLIENT_ID")
+    if not settings.gmail_client_secret:
+        raise ValueError("INBOX_PROVIDER=gmail requires GMAIL_CLIENT_SECRET")
+    if not settings.gmail_refresh_token:
+        raise ValueError("INBOX_PROVIDER=gmail requires GMAIL_REFRESH_TOKEN")
+
+    repo = repo if repo is not None else get_repository()
+    refresh_token = _load_refresh_token(repo, settings)
+
+    client = HttpGmailClient(
+        refresh_token=refresh_token,
+        client_id=settings.gmail_client_id,
+        client_secret=settings.gmail_client_secret,
+    )
+    return GmailInbox(
+        client,
+        llm=get_llm_client(),
+        tax_year=settings.gmail_tax_year,
+        label=settings.gmail_label,
+        sync_state=repo,
+    )
+
+
+def _load_refresh_token(repo, settings) -> str:
+    """Decrypt-on-use the stored refresh token, or encrypt-and-store it on
+    first use (R20: never persisted in cleartext).
+
+    Falls back to reading ``settings.gmail_refresh_token`` straight from
+    config (no DB persistence at all — nothing is ever written in cleartext,
+    it just isn't written) when ``GMAIL_TOKEN_ENC_KEY`` is unset or the
+    ``cryptography`` dependency is not installed. Both cases log loudly, since
+    it means a restart re-reads from the environment instead of the encrypted
+    store.
+    """
+    from . import _crypto
+
+    key = settings.gmail_token_enc_key
+    if not key:
+        logger.warning(
+            "gmail: GMAIL_TOKEN_ENC_KEY not set; refresh token will not be "
+            "persisted at rest (falling back to GMAIL_REFRESH_TOKEN each run)"
+        )
+        return settings.gmail_refresh_token
+
+    try:
+        stored = repo.get_oauth_token("gmail")
+        if stored is not None:
+            return _crypto.decrypt_token(stored, key)
+        repo.set_oauth_token(
+            "gmail", _crypto.encrypt_token(settings.gmail_refresh_token, key)
+        )
+        return settings.gmail_refresh_token
+    except _crypto.TokenCryptoUnavailable:
+        logger.warning(
+            "gmail: 'cryptography' is not installed; refresh token will not be "
+            "persisted at rest (falling back to GMAIL_REFRESH_TOKEN each run)"
+        )
+        return settings.gmail_refresh_token
