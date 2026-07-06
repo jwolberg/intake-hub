@@ -1742,3 +1742,37 @@ creation).
 - Cross-linked from the Environment-variables section and Common tasks.
 
 Docs-only — no code change.
+
+## 2026-07-06 — Drive folder *monitoring* (self-serve intake)
+
+Goal: someone clones the repo from GitHub, sets their own Drive params, and gets
+their folder **continuously monitored** for invoice intake. Today the only trigger
+is a one-shot `inbox_poller` / manual `POST /api/inbox/fetch` — no loop, scheduler,
+or watch channel exists, and Compose never passed the Drive env vars to `api`.
+Decisions (from the user, 2026-07-06): (1) monitor via a **poller sidecar** that
+loops the existing fetch route — reuses the route, no new app dependency, no
+in-process coupling; (2) target **both** self-host Compose and Cloud Run; (3)
+supply the SA key as **inline JSON in `.env`** (`config` already treats a leading
+`{` as inline JSON — no bind-mount needed).
+
+### DM-1 — interval loop in `inbox_poller.py`
+- Added `--interval N` / `--interval=N` and an `INBOX_POLL_INTERVAL` env fallback;
+  flag beats env. Interval `0`/absent keeps the **original one-shot** behavior
+  (exit code reflects the single fetch), so nothing downstream changes.
+- `run_loop` polls forever and **survives transient fetch errors** — a failing
+  tick is logged and retried next interval rather than killing the monitor (a
+  brief API restart / network blip must not stop a long-running watcher). Clean
+  `KeyboardInterrupt` stop.
+- Dependency-free (stdlib `time`/`urllib`); no importers of the module exist
+  (only docs reference the CLI), so the internal rewrite is safe. `run(api)` kept
+  as the single-fetch primitive.
+- Validated: `_parse_interval` cases + a loop that does 3 cycles through a
+  raising `run` and stops cleanly (see session). Ruff clean.
+
+> **Discovered (pre-existing, out of scope):** `POST /api/inbox/fetch` 500s on the
+> **mock** provider under Docker — `MockInbox` reads `/app/samples/inv_clean_001.json`,
+> but samples aren't COPYed into the backend image; the dev override mounts them at
+> the *host* absolute path (for `seed_hub`), not `/app/samples`. Does not affect the
+> Drive-monitoring feature (that runs `INBOX_PROVIDER=drive`), and `seed_hub` (the
+> demo path) is unaffected. Follow-up: either COPY `samples/` into the image or point
+> `MockInbox` at the mounted path.
