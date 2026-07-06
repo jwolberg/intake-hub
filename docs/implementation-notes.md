@@ -1798,3 +1798,31 @@ supply the SA key as **inline JSON in `.env`** (`config` already treats a leadin
   `--profile drive`; `INBOX_POLL_INTERVAL`, `INBOX_PROVIDER`, `DRIVE_FOLDER_ID`,
   and inline-JSON credentials all substitute correctly (SA JSON has no `$`, so
   Compose interpolation leaves it intact).
+
+### DM-3 — self-serve docs (Compose + Cloud Run)
+- **README**: new *Monitor your own Google Drive folder* section — `cp .env.example
+  .env` → `docker compose --profile drive up`, the variable table, and the
+  idempotency/one-interval-latency behavior. This is the front-door for the
+  "anyone clones and monitors their own Drive" goal.
+- **drive-intake-setup.md**: reframed the intro from "org-side" to self-serve;
+  §3 now leads with the `.env` + `--profile drive` Compose path and adds
+  `INBOX_POLL_INTERVAL`; new *Monitoring vs. one-off polls* subsection clarifies
+  the sidecar loops automatically and the manual `inbox_poller` (now with
+  `--interval`) is for local/forced runs.
+- **RUNBOOK.md** Path E: added the `--interval` continuous-monitor command and a
+  callout for the turnkey Compose `--profile drive` path.
+- **DEPLOY.md**: new §7 *Drive monitoring (Cloud Scheduler)* — the cloud has no
+  background loop, so a Cloud Scheduler HTTP job POSTs `/api/inbox/fetch` on a
+  cron (interval = the cron, not `INBOX_POLL_INTERVAL`); OIDC note for a locked-down
+  API; scale-to-zero cost note. Added a follow-up checkbox.
+
+Validation (whole feature): ruff clean; offline Drive suite 19 passed; full suite
+**200 passed / 1 skipped** (baseline). Confirmed the two Drive fail-fast branches
+still raise and the default mock inbox still builds (unchanged demo path). Compose
+profile gating + env/inline-JSON substitution verified via `docker compose config`.
+
+**Not done / follow-ups:** end-to-end against a *real* Drive folder needs a GCP
+service account + shared folder (user-side, no creds on this machine) — the wiring
+and offline suite are proven, the live round-trip is not exercised here. Pre-existing
+mock-inbox-under-Docker 500 (noted under DM-1) left as-is — orthogonal to this
+feature.

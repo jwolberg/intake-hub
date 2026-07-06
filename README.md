@@ -47,6 +47,36 @@ provider (model-derived confidence), export `ANTHROPIC_API_KEY` before `up` (see
 [`docs/RUNBOOK.md`](docs/RUNBOOK.md)). Full local-dev paths (hot reload, tests,
 real-PDF CLI) are in the RUNBOOK; cloud deploy is in [`docs/DEPLOY.md`](docs/DEPLOY.md).
 
+## Monitor your own Google Drive folder
+
+Point IntakeHub at a Google Drive folder and it will **continuously watch** it:
+every new PDF is pulled, run through the pipeline, and filed into a
+`submitted` / `needs-review` / `failed` subfolder by its decision — while the hub
+stays the source of truth for review.
+
+```bash
+cp .env.example .env          # then fill in the values below
+docker compose --profile drive up -d --build
+```
+
+In `.env` set (full walkthrough — create the service account, share the folder —
+in [`docs/drive-intake-setup.md`](docs/drive-intake-setup.md)):
+
+| Variable | Value |
+| --- | --- |
+| `INBOX_PROVIDER` | `drive` |
+| `DRIVE_FOLDER_ID` | the id from the folder's URL |
+| `GOOGLE_APPLICATION_CREDENTIALS` | the service-account key as inline JSON (or a mounted file path) |
+| `ANTHROPIC_API_KEY` | required in practice — real Drive PDFs have no structured block, so without it extraction is blank and everything holds |
+| `INBOX_POLL_INTERVAL` | seconds between folder checks (default `60`) |
+
+The `--profile drive` flag starts a **poller** sidecar that re-checks the folder
+on that interval; the plain `docker compose up` demo omits it. Polling is
+idempotent (each file is keyed by its Drive id and recorded *seen* before it is
+moved), so a restart or blip never double-submits. To watch it work, drop a PDF in
+the folder root and it appears in the hub within one interval. Cloud Run
+deployment (Cloud Scheduler as the poller) is in [`docs/DEPLOY.md`](docs/DEPLOY.md).
+
 ## How it works
 
 Email-shaped invoice → a staged pipeline, each stage a focused module behind the
