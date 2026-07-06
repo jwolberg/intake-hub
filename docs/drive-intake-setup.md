@@ -1,9 +1,14 @@
 # Google Drive Folder Intake — Setup
 
-This is the org-side setup that turns a shared Google Drive folder into the AI's
-inbox. The app **does not** build the Gmail→Drive glue or an OAuth connect flow;
-it reads a folder it has been granted access to. Follow these steps to go from an
-empty folder to processed invoices. (Design: `docs/plans/2026-07-01-001-feat-drive-folder-intake-plan.md`.)
+This is the setup that turns a Google Drive folder into the AI's inbox — anyone
+running IntakeHub can point it at their own folder. The app reads a folder it has
+been granted access to via a **service account**; it deliberately does **not**
+build a Gmail→Drive glue or an end-user OAuth connect flow (get invoices into the
+folder however you like — see step 4). Follow these steps to go from an empty
+folder to a continuously monitored inbox. Once configured, the Compose
+`--profile drive` poller (or a Cloud Scheduler job) watches the folder for you —
+see [`RUNBOOK.md`](./RUNBOOK.md) Path E and [`DEPLOY.md`](./DEPLOY.md).
+(Design: `docs/plans/2026-07-01-001-feat-drive-folder-intake-plan.md`.)
 
 ## How it works
 
@@ -56,19 +61,28 @@ The app creates the three status subfolders automatically on first use.
 
 ## 3. Configure the app
 
-Set these environment variables (see also `docs/RUNBOOK.md` § Environment
-variables and `docs/DEPLOY.md` for the Cloud Run injection):
+The turnkey path is Docker Compose: copy the example env file, fill it in, and
+start the stack **with the `drive` profile** (which adds the polling sidecar):
+
+```bash
+cp .env.example .env          # edit the values below
+docker compose --profile drive up -d --build
+```
+
+`.env` (auto-loaded by Compose; gitignored) sets:
 
 | Variable | Value |
 | --- | --- |
 | `INBOX_PROVIDER` | `drive` |
 | `DRIVE_FOLDER_ID` | the folder id from step 2 |
-| `GOOGLE_APPLICATION_CREDENTIALS` | path to the JSON key file, **or** the key's inline JSON |
+| `GOOGLE_APPLICATION_CREDENTIALS` | the key's **inline JSON** (one line, starting with `{`), or a path to a key file you mount into the container |
 | `ANTHROPIC_API_KEY` | **required in practice** — see the caveat below |
+| `INBOX_POLL_INTERVAL` | seconds between folder checks (default `60`) |
 
 Selecting `INBOX_PROVIDER=drive` without `DRIVE_FOLDER_ID` or
 `GOOGLE_APPLICATION_CREDENTIALS` fails fast at startup rather than silently
-serving the mock demo set.
+serving the mock demo set. (For local hot-reload dev instead of Compose, export
+the same vars and run `uvicorn` — see [`RUNBOOK.md`](./RUNBOOK.md) Path E.)
 
 > **Real PDFs need the LLM key.** The offline extraction stand-in only echoes a
 > structured JSON document; it cannot read an arbitrary PDF's text layer. Live
@@ -78,14 +92,22 @@ serving the mock demo set.
 > automated tests use controlled sample PDFs that the offline `LayoutLLMClient`
 > can parse, which is why the suite stays network-free.)
 
-Trigger a poll:
+### Monitoring vs. one-off polls
+
+Started with `--profile drive` (above), the **poller sidecar** already loops
+`POST /api/inbox/fetch` every `INBOX_POLL_INTERVAL` seconds — the folder is
+monitored, no manual step. To poll once by hand (e.g. local `uvicorn` dev, or to
+force an immediate check):
 
 ```bash
-python -m backend.tools.inbox_poller http://127.0.0.1:8000
+python -m backend.tools.inbox_poller http://127.0.0.1:8000        # one shot
+python -m backend.tools.inbox_poller --interval 60 http://…:8000  # loop locally
 ```
 
 Re-running is idempotent — already-processed files were moved out of root and are
-never reprocessed.
+never reprocessed (each is keyed by its Drive fileId and recorded *seen* before
+the move). In the cloud, a Cloud Scheduler job plays the sidecar's role — see
+[`DEPLOY.md`](./DEPLOY.md).
 
 ## 4. Org-side: auto-save invoice attachments into the folder
 

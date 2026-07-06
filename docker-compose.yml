@@ -32,6 +32,13 @@ services:
       #   ANTHROPIC_API_KEY="$(security find-generic-password \
       #     -s ledgerrun-ANTHROPIC_API_KEY -w)" docker compose up -d --build api
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # Drive folder intake. `mock` (default) serves the offline demo set; `drive`
+      # monitors a Google Drive folder — then DRIVE_FOLDER_ID and the SA key are
+      # required (the app fails fast at startup if either is missing). The key is
+      # a path to a mounted file OR inline JSON (a value starting with `{`).
+      INBOX_PROVIDER: ${INBOX_PROVIDER:-mock}
+      DRIVE_FOLDER_ID: ${DRIVE_FOLDER_ID:-}
+      GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-}
     ports:
       - "8000:8000"
     depends_on:
@@ -69,6 +76,21 @@ services:
       - "5173:5173"
     depends_on:
       - api
+
+  # Drive monitor. Loops `POST /api/inbox/fetch` every INBOX_POLL_INTERVAL seconds
+  # so a watched Drive folder is *continuously* pulled (the app has no internal
+  # scheduler by design — polling only). Gated behind the `drive` profile, so the
+  # plain demo (`docker compose up`) does not start it; enable with
+  # `docker compose --profile drive up -d` once .env sets INBOX_PROVIDER=drive.
+  poller:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: python -m backend.tools.inbox_poller --interval ${INBOX_POLL_INTERVAL:-60} http://api:8000
+    restart: unless-stopped
+    depends_on:
+      - api
+    profiles: ["drive"]
 
 volumes:
   db_data:

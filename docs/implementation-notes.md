@@ -1742,3 +1742,96 @@ creation).
 - Cross-linked from the Environment-variables section and Common tasks.
 
 Docs-only — no code change.
+
+## 2026-07-06 — Drive folder *monitoring* (self-serve intake)
+
+Goal: someone clones the repo from GitHub, sets their own Drive params, and gets
+their folder **continuously monitored** for invoice intake. Today the only trigger
+is a one-shot `inbox_poller` / manual `POST /api/inbox/fetch` — no loop, scheduler,
+or watch channel exists, and Compose never passed the Drive env vars to `api`.
+Decisions (from the user, 2026-07-06): (1) monitor via a **poller sidecar** that
+loops the existing fetch route — reuses the route, no new app dependency, no
+in-process coupling; (2) target **both** self-host Compose and Cloud Run; (3)
+supply the SA key as **inline JSON in `.env`** (`config` already treats a leading
+`{` as inline JSON — no bind-mount needed).
+
+### DM-1 — interval loop in `inbox_poller.py`
+- Added `--interval N` / `--interval=N` and an `INBOX_POLL_INTERVAL` env fallback;
+  flag beats env. Interval `0`/absent keeps the **original one-shot** behavior
+  (exit code reflects the single fetch), so nothing downstream changes.
+- `run_loop` polls forever and **survives transient fetch errors** — a failing
+  tick is logged and retried next interval rather than killing the monitor (a
+  brief API restart / network blip must not stop a long-running watcher). Clean
+  `KeyboardInterrupt` stop.
+- Dependency-free (stdlib `time`/`urllib`); no importers of the module exist
+  (only docs reference the CLI), so the internal rewrite is safe. `run(api)` kept
+  as the single-fetch primitive.
+- Validated: `_parse_interval` cases + a loop that does 3 cycles through a
+  raising `run` and stops cleanly (see session). Ruff clean.
+
+> **Discovered (pre-existing, out of scope):** `POST /api/inbox/fetch` 500s on the
+> **mock** provider under Docker — `MockInbox` reads `/app/samples/inv_clean_001.json`,
+> but samples aren't COPYed into the backend image; the dev override mounts them at
+> the *host* absolute path (for `seed_hub`), not `/app/samples`. Does not affect the
+> Drive-monitoring feature (that runs `INBOX_PROVIDER=drive`), and `seed_hub` (the
+> demo path) is unaffected. Follow-up: either COPY `samples/` into the image or point
+> `MockInbox` at the mounted path.
+
+### DM-2 — Compose wiring + `.env.example`
+- `api` service now forwards `INBOX_PROVIDER` / `DRIVE_FOLDER_ID` /
+  `GOOGLE_APPLICATION_CREDENTIALS` (each `${VAR:-default}`, default = mock/empty),
+  so the Docker path can actually select Drive — previously only `ANTHROPIC_API_KEY`
+  was passed and Drive was unreachable via Compose.
+- Added a **`poller`** sidecar (built from `backend/Dockerfile`) that runs
+  `inbox_poller --interval ${INBOX_POLL_INTERVAL:-60} http://api:8000`,
+  `restart: unless-stopped`, `depends_on: api`.
+- **Decision — `profiles: ["drive"]` on the poller.** The plain demo
+  (`docker compose up`) must not spin a polling loop, so the sidecar only starts
+  under `docker compose --profile drive up`. Trade-off: Drive users type one extra
+  flag; in exchange the default demo stays a clean 5-service stack and there's no
+  loop hammering the (broken-for-mock) fetch route. The `api` itself carries no
+  profile — it serves both modes; only the *monitor* is Drive-specific.
+- `.env.example` documents every knob and the two SA-key forms, leading with
+  inline JSON per the chosen approach. `.env` stays gitignored; `.env.example` is
+  tracked (verified `git check-ignore` clears it).
+- Validated with `docker compose config`: poller absent by default / present under
+  `--profile drive`; `INBOX_POLL_INTERVAL`, `INBOX_PROVIDER`, `DRIVE_FOLDER_ID`,
+  and inline-JSON credentials all substitute correctly (SA JSON has no `$`, so
+  Compose interpolation leaves it intact).
+
+### DM-3 — self-serve docs (Compose + Cloud Run)
+- **README**: new *Monitor your own Google Drive folder* section — `cp .env.example
+  .env` → `docker compose --profile drive up`, the variable table, and the
+  idempotency/one-interval-latency behavior. This is the front-door for the
+  "anyone clones and monitors their own Drive" goal.
+- **drive-intake-setup.md**: reframed the intro from "org-side" to self-serve;
+  §3 now leads with the `.env` + `--profile drive` Compose path and adds
+  `INBOX_POLL_INTERVAL`; new *Monitoring vs. one-off polls* subsection clarifies
+  the sidecar loops automatically and the manual `inbox_poller` (now with
+  `--interval`) is for local/forced runs.
+- **RUNBOOK.md** Path E: added the `--interval` continuous-monitor command and a
+  callout for the turnkey Compose `--profile drive` path.
+- **DEPLOY.md**: new §7 *Drive monitoring (Cloud Scheduler)* — the cloud has no
+  background loop, so a Cloud Scheduler HTTP job POSTs `/api/inbox/fetch` on a
+  cron (interval = the cron, not `INBOX_POLL_INTERVAL`); OIDC note for a locked-down
+  API; scale-to-zero cost note. Added a follow-up checkbox.
+
+Validation (whole feature): ruff clean; offline Drive suite 19 passed; full suite
+**200 passed / 1 skipped** (baseline). Confirmed the two Drive fail-fast branches
+still raise and the default mock inbox still builds (unchanged demo path). Compose
+profile gating + env/inline-JSON substitution verified via `docker compose config`.
+
+**Not done / follow-ups:** end-to-end against a *real* Drive folder needs a GCP
+service account + shared folder (user-side, no creds on this machine) — the wiring
+and offline suite are proven, the live round-trip is not exercised here. Pre-existing
+mock-inbox-under-Docker 500 (noted under DM-1) left as-is — orthogonal to this
+feature.
+
+### DM-3b — README setup expansion (follow-up)
+Per user request, expanded the README's *Monitor your own Google Drive folder*
+section from a config table into a **self-contained, numbered setup guide**
+(prereqs → create SA + key → share folder as Editor → configure `.env` → start
+with `--profile drive` → verify). Inlines the Google-side steps a first-timer
+needs rather than only linking `drive-intake-setup.md` (still linked for the Apps
+Script + full reference). Docs-only; facts kept consistent with the setup doc
+(Editor role, one-line inline JSON, fail-fast).

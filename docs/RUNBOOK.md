@@ -328,8 +328,11 @@ export DRIVE_FOLDER_ID="<folder-id-from-the-drive-url>"
 export ANTHROPIC_API_KEY="$(security find-generic-password -s ledgerrun-ANTHROPIC_API_KEY -w)"
 uvicorn backend.api.main:app --reload --port 8000     # + Path B's DB/service vars
 
-# In another shell: poll the folder (idempotent — safe to re-run)
+# In another shell: poll the folder once (idempotent — safe to re-run)
 python -m backend.tools.inbox_poller http://127.0.0.1:8000
+
+# …or monitor continuously — poll every 60s until Ctrl-C
+python -m backend.tools.inbox_poller --interval 60 http://127.0.0.1:8000
 ```
 
 Each poll lists the folder root for new `.pdf`s, processes them, and moves each
@@ -337,6 +340,13 @@ into its status subfolder (the three subfolders are auto-created on first use).
 Re-running never double-processes — files are recorded *seen* by Drive fileId
 before the move. Config is read once at startup, so restart `uvicorn` after
 changing any of these vars.
+
+> **Turnkey monitoring (Compose).** Instead of running `uvicorn` + the poller by
+> hand, set the Drive vars in `.env` (`cp .env.example .env`) and start the whole
+> stack with the polling sidecar: `docker compose --profile drive up -d --build`.
+> The `poller` service loops the fetch route on `INBOX_POLL_INTERVAL` (default
+> 60s) so the folder is watched with no manual step. See the README's *Monitor
+> your own Google Drive folder* section.
 
 ---
 

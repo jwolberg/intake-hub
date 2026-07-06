@@ -220,6 +220,33 @@ Because the API has the real `ANTHROPIC_API_KEY`, the PDF-backed samples extract
 real metadata — Vendor / Sponsor / Study populate (the failure mode that this
 key fixes locally; see RUNBOOK).
 
+## 7. Drive monitoring (Cloud Scheduler)
+
+The local `poller` sidecar (`docker-compose.yml`, `drive` profile) has no Cloud
+Run equivalent — Cloud Run runs the *web* service, not a background loop. Use
+**Cloud Scheduler** as the poller: a cron job that POSTs the fetch route on an
+interval. First deploy the API with the Drive vars/secret (§4b note), then:
+
+```bash
+# Every 5 minutes, ask the API to pull + process any new Drive PDFs.
+gcloud scheduler jobs create http intakehub-drive-poll \
+  --location "$REGION" \
+  --schedule "*/5 * * * *" \
+  --uri "$API_URL/api/inbox/fetch" \
+  --http-method POST
+```
+
+- The interval is the cron schedule here (not `INBOX_POLL_INTERVAL`, which only
+  drives the local sidecar). `*/5 * * * *` = every 5 min; tighten or loosen to
+  taste. Each run is idempotent — already-seen files are skipped.
+- The API above is `--allow-unauthenticated`, so no auth is needed. If you lock
+  the API down (`--no-allow-unauthenticated`), add OIDC to the job:
+  `--oidc-service-account-email=<SA> --oidc-token-audience="$API_URL"` and grant
+  that SA `roles/run.invoker`.
+- Cloud Run scales to zero between ticks; the scheduled POST cold-starts it, polls,
+  and it idles back down — so monitoring adds ~one invocation per interval, not a
+  standing instance.
+
 ## Cost & ops notes
 
 - Cloud Run scales to zero — idle cost is ~the Cloud SQL instance only. Use
@@ -307,6 +334,9 @@ So the block is **structural, not transient**. Refinements to the original note:
       2026-06-04: failure reproduced — see Known limitation above. Binding the key
       is now safe regardless, thanks to `FallbackLLMClient`, but extraction stays
       offline until egress exists.)
+- [ ] **Drive monitoring in the cloud**: create the Cloud Scheduler job (§7) once
+      the API is deployed with `INBOX_PROVIDER=drive` + the SA-key secret. (Local
+      Compose already monitors via the `poller` sidecar / `drive` profile.)
 - [ ] Replace the `mcp-reference` / `mock-clinrun` stubs with real integrations.
 - [ ] Lock down stub-service auth (currently public per demo decision).
 - [ ] CI/CD: wire the Cloud Build configs into a trigger instead of manual deploys.
