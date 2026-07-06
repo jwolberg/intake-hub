@@ -52,30 +52,75 @@ real-PDF CLI) are in the RUNBOOK; cloud deploy is in [`docs/DEPLOY.md`](docs/DEP
 Point IntakeHub at a Google Drive folder and it will **continuously watch** it:
 every new PDF is pulled, run through the pipeline, and filed into a
 `submitted` / `needs-review` / `failed` subfolder by its decision — while the hub
-stays the source of truth for review.
+stays the source of truth for review. Setup takes about five minutes.
+
+**Prerequisites:** Docker Desktop (or Compose), a Google account, and a Google
+Cloud project. Optional but recommended: an `ANTHROPIC_API_KEY` (without it, real
+PDFs extract blank and every invoice holds).
+
+### 1. Create a service account + key
+
+IntakeHub reads the folder as a **service account** (no end-user OAuth flow). In
+the [Google Cloud console](https://console.cloud.google.com/) → **IAM & Admin →
+Service Accounts**:
+
+1. **Create service account** (e.g. `intake-drive`). No project roles are needed —
+   access is granted per-folder in step 2.
+2. Open it → **Keys → Add key → JSON**, and download the key file. You'll paste its
+   contents into `.env` in step 3.
+
+### 2. Create the Drive folder and share it
+
+1. In [Google Drive](https://drive.google.com/), create (or pick) the folder to
+   watch.
+2. **Share** it with the service account's email
+   (`intake-drive@<project>.iam.gserviceaccount.com`), granting **Editor** —
+   Editor is required because the app *moves* processed files into subfolders.
+3. Copy the folder id from its URL:
+   `https://drive.google.com/drive/folders/`**`<THIS_IS_THE_FOLDER_ID>`**
+
+### 3. Configure `.env`
 
 ```bash
-cp .env.example .env          # then fill in the values below
-docker compose --profile drive up -d --build
+cp .env.example .env          # .env is gitignored
 ```
 
-In `.env` set (full walkthrough — create the service account, share the folder —
-in [`docs/drive-intake-setup.md`](docs/drive-intake-setup.md)):
+Set these (the file has inline comments for each):
 
 | Variable | Value |
 | --- | --- |
 | `INBOX_PROVIDER` | `drive` |
-| `DRIVE_FOLDER_ID` | the id from the folder's URL |
-| `GOOGLE_APPLICATION_CREDENTIALS` | the service-account key as inline JSON (or a mounted file path) |
-| `ANTHROPIC_API_KEY` | required in practice — real Drive PDFs have no structured block, so without it extraction is blank and everything holds |
+| `DRIVE_FOLDER_ID` | the id from step 2 |
+| `GOOGLE_APPLICATION_CREDENTIALS` | the whole service-account JSON key, **on one line** starting with `{` (or an absolute path to a mounted key file) |
+| `ANTHROPIC_API_KEY` | your Anthropic key — required in practice (real Drive PDFs have no structured block, so without it extraction is blank and everything holds) |
 | `INBOX_POLL_INTERVAL` | seconds between folder checks (default `60`) |
 
-The `--profile drive` flag starts a **poller** sidecar that re-checks the folder
-on that interval; the plain `docker compose up` demo omits it. Polling is
-idempotent (each file is keyed by its Drive id and recorded *seen* before it is
-moved), so a restart or blip never double-submits. To watch it work, drop a PDF in
-the folder root and it appears in the hub within one interval. Cloud Run
-deployment (Cloud Scheduler as the poller) is in [`docs/DEPLOY.md`](docs/DEPLOY.md).
+Selecting `drive` without a folder id or key **fails fast at startup** — it never
+silently falls back to the demo set.
+
+### 4. Start with monitoring enabled
+
+```bash
+docker compose --profile drive up -d --build
+```
+
+The `--profile drive` flag adds a **poller** sidecar that re-checks the folder
+every `INBOX_POLL_INTERVAL` seconds (the plain `docker compose up` demo omits it).
+
+### 5. Verify
+
+Drop a PDF into the folder root; within one interval it appears in the hub
+(<http://localhost:5173>) and moves into a `submitted` / `needs-review` / `failed`
+subfolder. Polling is idempotent — each file is keyed by its Drive id and recorded
+*seen* before it is moved, so a restart or network blip never double-submits.
+Follow the poller with `docker compose logs -f poller`.
+
+> **Getting invoices *into* the folder** is up to you (a Gmail filter + Apps
+> Script, a manual drop, any tool that writes to Drive) — IntakeHub treats every
+> new root-level `.pdf` as an invoice. An illustrative Apps Script and the full
+> reference are in [`docs/drive-intake-setup.md`](docs/drive-intake-setup.md).
+> Cloud Run deployment (Cloud Scheduler as the poller) is in
+> [`docs/DEPLOY.md`](docs/DEPLOY.md).
 
 ## How it works
 

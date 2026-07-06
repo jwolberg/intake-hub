@@ -1826,3 +1826,12 @@ service account + shared folder (user-side, no creds on this machine) — the wi
 and offline suite are proven, the live round-trip is not exercised here. Pre-existing
 mock-inbox-under-Docker 500 (noted under DM-1) left as-is — orthogonal to this
 feature.
+
+### DM-3b — README setup expansion (follow-up)
+Per user request, expanded the README's *Monitor your own Google Drive folder*
+section from a config table into a **self-contained, numbered setup guide**
+(prereqs → create SA + key → share folder as Editor → configure `.env` → start
+with `--profile drive` → verify). Inlines the Google-side steps a first-timer
+needs rather than only linking `drive-intake-setup.md` (still linked for the Apps
+Script + full reference). Docs-only; facts kept consistent with the setup doc
+(Editor role, one-line inline JSON, fail-fast).
