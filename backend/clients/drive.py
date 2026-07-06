@@ -4,7 +4,7 @@ Treats a watched Drive folder as the AI's inbox. The ``DriveClient`` protocol
 exposes just the three operations the intake path needs — list the root PDFs,
 download one, and move a processed file into a status subfolder — mirroring the
 ``Protocol`` + ``Http…``/``Stub…`` shape used by the other external clients
-(``backend/clients/clinrun.py``, ``backend/clients/mcp_reference.py``).
+(e.g. ``backend/clients/sheets.py``).
 
 ``HttpDriveClient`` calls the Drive v3 REST API over the existing ``httpx``
 dependency and mints a service-account bearer token with ``google-auth``. Both

@@ -1924,3 +1924,40 @@ already covers dead-code cleanup. Same end state, no red window.
 - Clinical pipeline tests superseded: test_pipeline.py + test_orchestrator.py deleted
   (covered by test_orchestrator_ledger.py); pdf_pipeline/performance/scenarios/metrics/
   exceptions/inbox_fetch realigned to ledger semantics.
+
+## 2026-07-06 — U5 (pure subtraction: delete clinical-trial machinery)
+
+- Deleted `backend/submission/`, `backend/context/`, `backend/catalog/`,
+  `backend/matching/`, `backend/clients/clinrun.py`, `backend/clients/mcp_reference.py`,
+  and their tests (`test_matching.py`, `test_context.py`, `test_catalog.py`).
+- **Also deleted `backend/clients/stub_servers/` in full** (not just the two named
+  app files): once `clinrun_app.py`/`mcp_app.py` were gone, the package held only an
+  `__init__.py` docstring describing removed services — an empty, purposeless
+  package. Confirmed nothing else imports the package path before removing it, and
+  removed the corresponding `mcp-reference`/`mock-clinrun` service blocks (+
+  `depends_on`, `MCP_REFERENCE_URL`/`CLINRUN_URL` env vars) from `docker-compose.yml`;
+  validated with `docker compose config`.
+- `backend/db/repository.py`: dropped the `resolved_context`/`match_results` Table
+  reflections and the `save_context`/`replace_matches` methods (Protocol + both
+  impls). Kept `get_context`/`get_matches` per the ticket's contract, but
+  `PostgresRepository` versions now just `return None`/`return []` — no table access
+  — since those tables no longer exist in schema.sql.
+- **Fallout beyond the named file list** (found via `git grep` after the module
+  deletions broke collection): `tests/integration/test_postgres_repository.py` and
+  `backend/tools/process_pdf.py` were still calling the *pre-U4* `process(..., ref=,
+  clinrun=)` signature (they hadn't been touched by U4's orchestrator rewrite).
+  Updated both to `process(..., llm=, sheets=)`; rewrote the Postgres round-trip
+  test's assertions to expect `detail["context"] is None` / `detail["matches"] == []`
+  (tables removed) and a `POSTED`/`HELD` terminal status instead of the old
+  `"submitted"` string. `tests/unit/test_clients.py` had its MCP/ClinRun-specific
+  tests removed but kept the LLM-client tests (still relevant).
+- Final state: `.venv/bin/python -m pytest -q` → 198 passed, 1 skipped (was 224/1
+  before deletion — delta matches the ~26 deleted tests); `ruff check backend tests`
+  clean; `git grep` for clinrun/mcp_reference/CatalogNotFound/etc. across
+  backend+tests returns zero hits.
+- **Left untouched (out of scope per ticket):** `backend/domain` still defines
+  `ResolvedContext`, `MatchResult`, `CatalogItem`, `ContextCandidate` (and
+  `test_domain.py` still tests them) — dead types, but explicitly deferred; docs
+  (`docs/DEPLOY.md`, `docs/RUNBOOK.md`, `docs/implementation.md`) still mention the
+  deleted stub-server module paths — stale but non-blocking for pytest/ruff, and
+  docs weren't in the ticket's file list.

@@ -54,10 +54,9 @@ def _advance(repo: Repository, invoice: Invoice, status: InvoiceStatus) -> None:
     repo.save_invoice(invoice)
 
 
-# Transient client calls (catalog fetch, submission) get a few in-process attempts
+# Transient client calls (e.g. Sheet append) get a few in-process attempts
 # before the invoice is failed — predictable recovery from a flaky dependency
-# (PRD §14). Non-transient errors (e.g. CatalogNotFound) are not caught here and
-# surface immediately.
+# (PRD §14). Non-transient errors are not caught here and surface immediately.
 _RETRY_ATTEMPTS = 3
 
 

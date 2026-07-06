@@ -36,31 +36,6 @@ CREATE TABLE IF NOT EXISTS line_items (
 );
 CREATE INDEX IF NOT EXISTS idx_line_items_invoice ON line_items(invoice_id);
 
-CREATE TABLE IF NOT EXISTS resolved_context (
-    invoice_id  TEXT PRIMARY KEY REFERENCES invoices(id) ON DELETE CASCADE,
-    sponsor_id  TEXT,
-    study_id    TEXT,
-    site_id     TEXT,
-    confidence  DOUBLE PRECISION NOT NULL DEFAULT 0,
-    candidates  JSONB NOT NULL DEFAULT '[]'::jsonb,
-    warnings    JSONB NOT NULL DEFAULT '[]'::jsonb
-);
-
-CREATE TABLE IF NOT EXISTS match_results (
-    line_item_id              TEXT PRIMARY KEY REFERENCES line_items(id) ON DELETE CASCADE,
-    invoice_id                TEXT NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
-    catalog_item_id           TEXT,
-    catalog_description       TEXT,
-    confidence                DOUBLE PRECISION NOT NULL DEFAULT 0,
-    amount_match              BOOLEAN,
-    quantity_match            BOOLEAN,
-    rationale                 TEXT,
-    requires_exception_review BOOLEAN NOT NULL DEFAULT FALSE,
-    alternates                JSONB NOT NULL DEFAULT '[]'::jsonb,
-    exceptions                JSONB NOT NULL DEFAULT '[]'::jsonb
-);
-CREATE INDEX IF NOT EXISTS idx_match_results_invoice ON match_results(invoice_id);
-
 CREATE TABLE IF NOT EXISTS exceptions (
     id          TEXT PRIMARY KEY,
     invoice_id  TEXT NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
@@ -80,14 +55,6 @@ CREATE TABLE IF NOT EXISTS audit_events (
     timestamp   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_audit_events_invoice ON audit_events(invoice_id, timestamp);
-
-CREATE TABLE IF NOT EXISTS catalog_cache (
-    sponsor_id  TEXT NOT NULL,
-    study_id    TEXT NOT NULL,
-    items       JSONB NOT NULL DEFAULT '[]'::jsonb,
-    fetched_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (sponsor_id, study_id)
-);
 
 -- Inbox idempotency (P6-T3): message ids already ingested, so re-fetching a mock
 -- inbox never double-processes the same email (PRD §14, §7 Step 1 "Mock inbox").

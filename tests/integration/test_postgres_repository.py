@@ -10,8 +10,9 @@ import json
 import pathlib
 
 import pytest
-from backend.clients import PassthroughLLMClient, StubClinRunClient, StubMCPReferenceClient
+from backend.clients import PassthroughLLMClient, StubSheetsClient
 from backend.db.session import get_engine, init_schema
+from backend.domain import InvoiceStatus
 from backend.orchestrator import process
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -35,15 +36,16 @@ def test_postgres_round_trip(pg_repo):
     sample = json.loads((SAMPLES / "inv_clean_001.json").read_text())
     invoice = process(
         sample, pg_repo,
-        llm=PassthroughLLMClient(), ref=StubMCPReferenceClient(), clinrun=StubClinRunClient(),
+        llm=PassthroughLLMClient(), sheets=StubSheetsClient(),
     )
 
     reloaded = pg_repo.get_invoice(invoice.id)
     assert reloaded is not None
-    assert reloaded.status.value == "submitted"
+    assert reloaded.status in (InvoiceStatus.POSTED, InvoiceStatus.HELD)
 
     detail = pg_repo.get_detail(invoice.id)
     assert len(detail["line_items"]) == 4
-    assert detail["context"].sponsor_id == "sponsor_001"
     assert detail["line_items"][0].total is not None  # NUMERIC round-trip
-    assert [e.action.value for e in detail["audit"]][-1] == "submitted"
+    assert detail["context"] is None  # resolved_context table removed (U5)
+    assert detail["matches"] == []  # match_results table removed (U5)
+    assert len(detail["audit"]) > 0

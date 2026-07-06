@@ -23,7 +23,6 @@ from backend.domain import (
     Actor,
     AuditAction,
     AuditEvent,
-    ContextCandidate,
     Decision,
     ExceptionRecord,
     Invoice,
@@ -45,9 +44,7 @@ class Repository(Protocol):
     def get_source_pdf(self, invoice_id: str) -> bytes | None: ...
     def replace_line_items(self, invoice_id: str, items: list[LineItem]) -> None: ...
     def get_line_items(self, invoice_id: str) -> list[LineItem]: ...
-    def save_context(self, ctx: ResolvedContext) -> None: ...
     def get_context(self, invoice_id: str) -> ResolvedContext | None: ...
-    def replace_matches(self, invoice_id: str, matches: list[MatchResult]) -> None: ...
     def get_matches(self, invoice_id: str) -> list[MatchResult]: ...
     def add_exceptions(self, exceptions: list[ExceptionRecord]) -> None: ...
     def get_exceptions(self, invoice_id: str) -> list[ExceptionRecord]: ...
@@ -101,15 +98,9 @@ class InMemoryRepository:
     def get_line_items(self, invoice_id: str) -> list[LineItem]:
         return [i.model_copy(deep=True) for i in self._line_items.get(invoice_id, [])]
 
-    def save_context(self, ctx: ResolvedContext) -> None:
-        self._context[ctx.invoice_id] = ctx.model_copy(deep=True)
-
     def get_context(self, invoice_id: str) -> ResolvedContext | None:
         stored = self._context.get(invoice_id)
         return stored.model_copy(deep=True) if stored else None
-
-    def replace_matches(self, invoice_id: str, matches: list[MatchResult]) -> None:
-        self._matches[invoice_id] = [m.model_copy(deep=True) for m in matches]
 
     def get_matches(self, invoice_id: str) -> list[MatchResult]:
         return [m.model_copy(deep=True) for m in self._matches.get(invoice_id, [])]
@@ -187,8 +178,6 @@ class PostgresRepository:
         md = MetaData()
         self.invoices = Table("invoices", md, autoload_with=engine)
         self.line_items = Table("line_items", md, autoload_with=engine)
-        self.resolved_context = Table("resolved_context", md, autoload_with=engine)
-        self.match_results = Table("match_results", md, autoload_with=engine)
         self.exceptions = Table("exceptions", md, autoload_with=engine)
         self.audit_events = Table("audit_events", md, autoload_with=engine)
         self.seen_messages = Table("seen_messages", md, autoload_with=engine)
@@ -271,63 +260,15 @@ class PostgresRepository:
             ).mappings().all()
         return [LineItem(**dict(r)) for r in rows]
 
-    def save_context(self, ctx: ResolvedContext) -> None:
-        values = {
-            "invoice_id": ctx.invoice_id, "sponsor_id": ctx.sponsor_id,
-            "study_id": ctx.study_id, "site_id": ctx.site_id, "confidence": ctx.confidence,
-            "candidates": [c.model_dump(mode="json") for c in ctx.candidates],
-            "warnings": list(ctx.warnings),
-        }
-        update = {k: v for k, v in values.items() if k != "invoice_id"}
-        stmt = pg_insert(self.resolved_context).values(**values).on_conflict_do_update(
-            index_elements=[self.resolved_context.c.invoice_id], set_=update,
-        )
-        with self._engine.begin() as conn:
-            conn.execute(stmt)
-
     def get_context(self, invoice_id: str) -> ResolvedContext | None:
-        with self._engine.connect() as conn:
-            row = conn.execute(
-                select(self.resolved_context).where(
-                    self.resolved_context.c.invoice_id == invoice_id)
-            ).mappings().first()
-        if not row:
-            return None
-        return ResolvedContext(
-            invoice_id=row["invoice_id"], sponsor_id=row["sponsor_id"],
-            study_id=row["study_id"], site_id=row["site_id"], confidence=row["confidence"],
-            candidates=[ContextCandidate(**c) for c in row["candidates"]],
-            warnings=list(row["warnings"]),
-        )
-
-    def replace_matches(self, invoice_id: str, matches: list[MatchResult]) -> None:
-        rows = [{
-            "line_item_id": m.line_item_id, "invoice_id": invoice_id,
-            "catalog_item_id": m.catalog_item_id, "catalog_description": m.catalog_description,
-            "confidence": m.confidence, "amount_match": m.amount_match,
-            "quantity_match": m.quantity_match, "rationale": m.rationale,
-            "requires_exception_review": m.requires_exception_review,
-            "alternates": list(m.alternates), "exceptions": list(m.exceptions),
-        } for m in matches]
-        with self._engine.begin() as conn:
-            conn.execute(
-                delete(self.match_results).where(self.match_results.c.invoice_id == invoice_id)
-            )
-            if rows:
-                conn.execute(insert(self.match_results), rows)
+        # Context resolution was part of the clinical-trial pipeline (removed);
+        # no `resolved_context` table exists anymore, so there is nothing to read.
+        return None
 
     def get_matches(self, invoice_id: str) -> list[MatchResult]:
-        with self._engine.connect() as conn:
-            rows = conn.execute(
-                select(self.match_results).where(self.match_results.c.invoice_id == invoice_id)
-            ).mappings().all()
-        return [MatchResult(
-            line_item_id=r["line_item_id"], catalog_item_id=r["catalog_item_id"],
-            catalog_description=r["catalog_description"], confidence=r["confidence"],
-            amount_match=r["amount_match"], quantity_match=r["quantity_match"],
-            rationale=r["rationale"], requires_exception_review=r["requires_exception_review"],
-            alternates=list(r["alternates"]), exceptions=list(r["exceptions"]),
-        ) for r in rows]
+        # Catalog matching was part of the clinical-trial pipeline (removed); no
+        # `match_results` table exists anymore, so there is nothing to read.
+        return []
 
     def add_exceptions(self, exceptions: list[ExceptionRecord]) -> None:
         if not exceptions:
