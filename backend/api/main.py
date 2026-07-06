@@ -32,6 +32,7 @@ from backend.db.repository import Repository, get_repository
 from backend.domain import Actor, AuditAction, Decision, InvoiceMetadata, InvoiceStatus
 from backend.domain.taxonomy import is_retryable
 from backend.inbox import InboxClient, get_inbox_client, message_to_sample
+from backend.ledger_integrity import posted_items, sample_posted
 from backend.orchestrator import process, recover, rerun
 from backend.parser.raster import (
     RenderedPage,
@@ -235,6 +236,41 @@ def list_invoices(
 def metrics(repo: RepoDep) -> WorkflowMetrics:
     """Aggregate strategy metrics for the Operations Lead (STRATEGY § Key metrics)."""
     return compute_metrics(repo)
+
+
+@app.get("/api/notifications")
+def notifications(repo: RepoDep) -> dict:
+    """Held-item notification surface (R18).
+
+    A queryable digest so the reviewer knows when items need attention: the total
+    held count plus a breakdown by hold reason (so a flood of one kind — e.g. a
+    backfill of low-category-confidence items — is visible at a glance). Kept
+    minimal; a push/badge mechanism is deferred.
+    """
+    held = [i for i in repo.list_invoices() if i.status is InvoiceStatus.HELD]
+    by_reason: dict[str, int] = {}
+    for inv in held:
+        for exc in repo.get_exceptions(inv.id):
+            by_reason[exc.type] = by_reason.get(exc.type, 0) + 1
+    return {"held_count": len(held), "by_reason": by_reason}
+
+
+class SpotCheckRequest(BaseModel):
+    k: int = 5
+
+
+@app.post("/api/spot-check")
+def spot_check(body: SpotCheckRequest, repo: RepoDep) -> dict:
+    """Return a bounded random sample of posted items for reviewer confirmation (R15).
+
+    Records a system-attributed audit event on each sampled item so the spot-check
+    itself is on the audit trail (why an already-posted row resurfaced for review).
+    """
+    sample = sample_posted(posted_items(repo.list_invoices()), body.k)
+    for inv in sample:
+        record(repo, inv.id, AuditAction.NOTE, actor=Actor.SYSTEM,
+               reason="spot-check sample", details={"spot_check": True})
+    return {"count": len(sample), "sampled": [_summary(inv, repo) for inv in sample]}
 
 
 @app.get("/api/invoices/{invoice_id}/trace")

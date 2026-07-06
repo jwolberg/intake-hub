@@ -1961,3 +1961,18 @@ already covers dead-code cleanup. Same end state, no red window.
   (`docs/DEPLOY.md`, `docs/RUNBOOK.md`, `docs/implementation.md`) still mention the
   deleted stub-server module paths — stale but non-blocking for pytest/ruff, and
   docs weren't in the ticket's file list.
+
+### U9 — Review-integrity: duplicate holds, notifications, spot-check
+- New `backend/ledger_integrity` (pure helpers over `Invoice` lists): `find_duplicate`
+  (same vendor + exact amount within a ±3-day window → the prior posted item),
+  `posted_items`, `sample_posted` (bounded, injectable RNG).
+- Orchestrator: a duplicate of an already-posted item is **held** `suspected_duplicate`
+  instead of double-posting (R19). The check runs only on the first pass —
+  `rerun`/`recover` pass `check_duplicates=False`, so a reviewer who judges a held dup
+  to be distinct can **rerun to force the post** (the minimal v1 resolution path;
+  full dedup/merge is out of scope).
+- API: `GET /api/notifications` (held count + by-reason digest, R18);
+  `POST /api/spot-check` (bounded random sample of posted items + a system NOTE audit
+  event on each, R15). **Decision:** reused `AuditAction.NOTE` with
+  `details.spot_check=True` for the sampling event rather than adding a new enum member
+  (keeps U1 closed; the trace still shows the event).

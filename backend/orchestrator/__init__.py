@@ -42,6 +42,7 @@ from backend.exceptions import from_decision
 from backend.extraction import extract
 from backend.extraction.citations import resolve_citations, synthesize_citations
 from backend.intake import ingest
+from backend.ledger_integrity import find_duplicate, posted_items
 from backend.ocr import OCRClient
 from backend.parser import parse
 from backend.parser.pdf import LayoutLLMClient
@@ -226,6 +227,7 @@ def _categorize_and_file(
     *,
     llm: LLMClient,
     sheets: SheetsClient,
+    check_duplicates: bool = True,
 ) -> None:
     """Pipeline tail shared by ``process``, ``rerun``, and ``recover``: classify
     income/expense, assign a Schedule C category, decide, then file to the Sheet
@@ -234,6 +236,11 @@ def _categorize_and_file(
     Categorization is re-run each pass (it is cheap and deterministic offline), so
     a rerun after a metadata correction re-derives the type/category from the
     corrected extraction. Category corrections as pinned overlays are a later unit.
+
+    ``check_duplicates`` guards auto-file against posting the same transaction twice
+    (R19). It is on for a first pass and *off* for ``rerun``/``recover``, so a
+    reviewer who judges a held suspected-duplicate to be distinct can rerun it to
+    force the post (the minimal duplicate-resolution path; v1 only holds dups).
     """
     categorization = categorize(invoice.id, extraction, llm, source=source)
     _advance(repo, invoice, InvoiceStatus.CLASSIFIED)
@@ -256,15 +263,46 @@ def _categorize_and_file(
     invoice.decision = decision.decision
     invoice.decision_confidence = decision.confidence
 
-    if decision.decision is Decision.SUBMIT:
-        _file_to_sheet(repo, invoice, categorization, source, sheets, decision)
-    else:
-        repo.add_exceptions(from_decision(invoice.id, decision))
-        _advance(repo, invoice, InvoiceStatus.HELD)
-        record(repo, invoice.id, AuditAction.HELD, reason=decision.rationale, details={
-            "confidence": decision.confidence,
-            "risk_flags": [f.model_dump(mode="json") for f in decision.risk_flags],
-        })
+    if decision.decision is not Decision.SUBMIT:
+        _hold(repo, invoice, decision.rationale, decision.confidence, decision.risk_flags,
+              from_decision(invoice.id, decision))
+        return
+
+    # An auto-file candidate that duplicates an already-posted item is held rather
+    # than double-posted (R19) — checked only on the first pass (see docstring).
+    if check_duplicates:
+        dup = find_duplicate(invoice, posted_items(repo.list_invoices()))
+        if dup is not None:
+            _hold_duplicate(repo, invoice, dup, decision)
+            return
+
+    _file_to_sheet(repo, invoice, categorization, source, sheets, decision)
+
+
+def _hold(repo, invoice, rationale, confidence, risk_flags, exceptions) -> None:
+    """Record a hold: persist its exceptions, advance to HELD, and audit it."""
+    repo.add_exceptions(exceptions)
+    _advance(repo, invoice, InvoiceStatus.HELD)
+    record(repo, invoice.id, AuditAction.HELD, reason=rationale, details={
+        "confidence": confidence,
+        "risk_flags": [f.model_dump(mode="json") for f in risk_flags],
+    })
+
+
+def _hold_duplicate(repo: Repository, invoice: Invoice, dup: Invoice, decision) -> None:
+    """Hold an item that duplicates an already-posted one (R19), naming the match."""
+    reason = (
+        f"looks like a duplicate of already-posted item {dup.id} "
+        f"({dup.metadata.vendor_name}, {dup.metadata.total_amount})"
+    )
+    repo.add_exceptions([build_exception(invoice.id, "suspected_duplicate", message=reason)])
+    invoice.decision = Decision.HOLD
+    _advance(repo, invoice, InvoiceStatus.HELD)
+    record(repo, invoice.id, AuditAction.HELD, reason=reason, details={
+        "confidence": decision.confidence,
+        "duplicate_of": dup.id,
+        "risk_flags": [f.model_dump(mode="json") for f in decision.risk_flags],
+    })
 
 
 def _source_ref(source: dict) -> str | None:
@@ -352,7 +390,10 @@ def rerun(
     _advance(repo, invoice, InvoiceStatus.RERUN_REQUESTED)
 
     try:
-        _categorize_and_file(repo, invoice, extraction, source, llm=llm, sheets=sheets)
+        # Rerun bypasses duplicate detection: a reviewer rerunning a held item has
+        # judged it distinct, so the dup guard must not re-hold it (R19 resolution).
+        _categorize_and_file(repo, invoice, extraction, source,
+                             llm=llm, sheets=sheets, check_duplicates=False)
     except Exception as exc:  # same isolation contract as process
         _fail(repo, invoice, "stage_failure", str(exc))
 
@@ -397,7 +438,10 @@ def recover(
             extraction = _reextract(repo, invoice_id, audit, llm)
             invoice.metadata = extraction.metadata
             repo.replace_line_items(invoice_id, extraction.line_items)
-        _categorize_and_file(repo, invoice, extraction, source, llm=llm, sheets=sheets)
+        # Recovery re-drives a failed post; the dup guard already ran on the first
+        # pass, so skip it (a Sheet-write failure is not a duplicate signal).
+        _categorize_and_file(repo, invoice, extraction, source,
+                             llm=llm, sheets=sheets, check_duplicates=False)
     except Exception as exc:  # same isolation contract as process
         _fail(repo, invoice, "stage_failure", str(exc))
 
