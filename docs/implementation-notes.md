@@ -1877,3 +1877,17 @@ already covers dead-code cleanup. Same end state, no red window.
   content as data. U4 turns the flag into a `suspected_adversarial` hold.
 - Did not strictly red-first here (inline build); tests pin the confidence/adjudication
   boundary that gates hold-vs-file, per the execution note's intent.
+
+### U3 — Google Sheets output client + Postgres idempotency ledger (subagent)
+- Triad mirrors `HttpDriveClient` exactly (Protocol + Stub + Http, injectable
+  `token_provider`/`httpx.Client`, lazy google-auth, `drive.file` scope). Single op
+  `append_row(values) -> row_ref`; `HttpSheetsClient` lazily creates the spreadsheet
+  + header on first append.
+- `sheet_appends(idempotency_key, sheet_row_ref, status)` is the **source-of-truth
+  dedup gate**; the Sheet is a projection. Repo gains `is_appended`/`record_append`/
+  `get_append_ref` (both InMemory + Postgres, mirroring is_seen/mark_seen).
+- `append_filed_row(repo, client, *, idempotency_key, row)` does check→append→record;
+  it does **not** retry internally by design — the caller's `_retry()`/hold owns retry
+  semantics (U4). Known narrow window: append succeeds then record fails → a retry
+  re-appends; acceptable for single-tenant v1 (Postgres is the gate, per Key Decisions).
+- POSTED audit event is U4's job (orchestrator tail), not U3.

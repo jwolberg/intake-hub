@@ -32,6 +32,7 @@ from .errors import (
     DriveClientError,
     ReferenceClientError,
     ReferenceUnavailable,
+    SheetsClientError,
     SubmissionFailed,
 )
 from .llm import (
@@ -46,6 +47,13 @@ from .mcp_reference import (
     HttpMCPReferenceClient,
     MCPReferenceClient,
     StubMCPReferenceClient,
+)
+from .sheets import (
+    LEDGER_HEADERS,
+    HttpSheetsClient,
+    SheetsClient,
+    StubSheetsClient,
+    build_ledger_row,
 )
 from .vision import (
     OfflineVisionLLMClient,
@@ -66,6 +74,8 @@ __all__ = [
     "HttpClinRunClient",
     "HttpDriveClient",
     "HttpMCPReferenceClient",
+    "HttpSheetsClient",
+    "LEDGER_HEADERS",
     "LLMClient",
     "MCPReferenceClient",
     "OCRClient",
@@ -73,16 +83,20 @@ __all__ = [
     "PassthroughLLMClient",
     "ReferenceClientError",
     "ReferenceUnavailable",
+    "SheetsClient",
+    "SheetsClientError",
     "StubClinRunClient",
     "StubDriveClient",
     "StubLLMClient",
     "StubMCPReferenceClient",
     "StubOCRClient",
+    "StubSheetsClient",
     "StubVisionLLMClient",
     "SubmissionFailed",
     "SubmissionResult",
     "TesseractOCRClient",
     "VisionLLMClient",
+    "build_ledger_row",
     "get_clinrun_client",
     "get_llm_client",
     "get_ocr_client",

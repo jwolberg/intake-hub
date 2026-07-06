@@ -35,3 +35,12 @@ class DriveClientError(Exception):
     ``httpx``/transport exception) so the fetch loop can isolate a single bad file
     without aborting the whole poll (see ``fetch_inbox``).
     """
+
+
+class SheetsClientError(Exception):
+    """Base error for the Google Sheets ledger client.
+
+    A transient transport/HTTP error surfaced here is retryable (mirrors
+    ``SubmissionFailed``), so the orchestrator can retry an append before holding
+    the item.
+    """

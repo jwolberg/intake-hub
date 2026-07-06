@@ -95,3 +95,15 @@ CREATE TABLE IF NOT EXISTS seen_messages (
     message_id  TEXT PRIMARY KEY,
     seen_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Sheet-append idempotency (feat: solopreneur-ledger pivot, U3): source-of-truth
+-- dedup gate for appends to the user's Google Sheet ledger. The Sheet is a
+-- projection of this table, not the other way around — a retry after a
+-- crashed/partial append checks this table first, so the same filed item is
+-- never posted to the Sheet twice.
+CREATE TABLE IF NOT EXISTS sheet_appends (
+    idempotency_key TEXT PRIMARY KEY,
+    sheet_row_ref   TEXT,
+    status          TEXT NOT NULL DEFAULT 'posted',
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);

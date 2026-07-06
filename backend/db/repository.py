@@ -56,6 +56,9 @@ class Repository(Protocol):
     def get_detail(self, invoice_id: str) -> dict | None: ...
     def is_seen(self, message_id: str) -> bool: ...
     def mark_seen(self, message_id: str) -> None: ...
+    def is_appended(self, idempotency_key: str) -> bool: ...
+    def record_append(self, idempotency_key: str, sheet_row_ref: str) -> None: ...
+    def get_append_ref(self, idempotency_key: str) -> str | None: ...
 
 
 class InMemoryRepository:
@@ -71,6 +74,7 @@ class InMemoryRepository:
         self._exceptions: dict[str, list[ExceptionRecord]] = {}
         self._audit: dict[str, list[AuditEvent]] = {}
         self._seen_messages: set[str] = set()
+        self._sheet_appends: dict[str, str] = {}
 
     def save_invoice(self, invoice: Invoice) -> None:
         self._invoices[invoice.id] = invoice.model_copy(deep=True)
@@ -143,6 +147,15 @@ class InMemoryRepository:
     def mark_seen(self, message_id: str) -> None:
         self._seen_messages.add(message_id)
 
+    def is_appended(self, idempotency_key: str) -> bool:
+        return idempotency_key in self._sheet_appends
+
+    def record_append(self, idempotency_key: str, sheet_row_ref: str) -> None:
+        self._sheet_appends[idempotency_key] = sheet_row_ref
+
+    def get_append_ref(self, idempotency_key: str) -> str | None:
+        return self._sheet_appends.get(idempotency_key)
+
 
 # --- Postgres implementation ------------------------------------------------
 # Reflects the schema created by db.session.init_schema (the canonical DDL), so
@@ -179,6 +192,7 @@ class PostgresRepository:
         self.exceptions = Table("exceptions", md, autoload_with=engine)
         self.audit_events = Table("audit_events", md, autoload_with=engine)
         self.seen_messages = Table("seen_messages", md, autoload_with=engine)
+        self.sheet_appends = Table("sheet_appends", md, autoload_with=engine)
 
     def save_invoice(self, invoice: Invoice) -> None:
         values = {
@@ -387,6 +401,31 @@ class PostgresRepository:
         )
         with self._engine.begin() as conn:
             conn.execute(stmt)
+
+    def is_appended(self, idempotency_key: str) -> bool:
+        with self._engine.connect() as conn:
+            row = conn.execute(
+                select(self.sheet_appends.c.idempotency_key)
+                .where(self.sheet_appends.c.idempotency_key == idempotency_key)
+            ).first()
+        return row is not None
+
+    def record_append(self, idempotency_key: str, sheet_row_ref: str) -> None:
+        stmt = pg_insert(self.sheet_appends).values(
+            idempotency_key=idempotency_key, sheet_row_ref=sheet_row_ref,
+        ).on_conflict_do_nothing(
+            index_elements=[self.sheet_appends.c.idempotency_key],
+        )
+        with self._engine.begin() as conn:
+            conn.execute(stmt)
+
+    def get_append_ref(self, idempotency_key: str) -> str | None:
+        with self._engine.connect() as conn:
+            value = conn.execute(
+                select(self.sheet_appends.c.sheet_row_ref)
+                .where(self.sheet_appends.c.idempotency_key == idempotency_key)
+            ).scalar()
+        return value
 
 
 @lru_cache(maxsize=1)
