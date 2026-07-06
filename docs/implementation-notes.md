@@ -1976,3 +1976,13 @@ already covers dead-code cleanup. Same end state, no red window.
   event on each, R15). **Decision:** reused `AuditAction.NOTE` with
   `details.spot_check=True` for the sampling event rather than adding a new enum member
   (keeps U1 closed; the trace still shows the event).
+
+### U7 — Gmail client + user-OAuth token seam (subagent)
+- `backend/clients/gmail.py` triad mirrors `HttpDriveClient` but with **user-OAuth**
+  (refresh token → access token via `google.oauth2.credentials`) since personal Gmail
+  can't use a service account. `walk_parts` (recursive MIME) + `decode_b64url`
+  (re-adds stripped padding) are standalone + characterization-tested.
+- Resync signal: `GmailHistoryExpired(GmailClientError, resync=True)` on `history.list`
+  404 — U8 catches it to fall back to a full backfill.
+- One-time interactive `backend/tools/gmail_oauth_setup.py` (InstalledAppFlow) mints the
+  refresh token; `google-auth-oauthlib` added as a setup-script-only dep.

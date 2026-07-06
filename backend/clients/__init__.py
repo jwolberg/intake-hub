@@ -22,7 +22,17 @@ from .drive import (
 )
 from .errors import (
     DriveClientError,
+    GmailClientError,
     SheetsClientError,
+)
+from .gmail import (
+    GmailAttachment,
+    GmailClient,
+    GmailMessage,
+    HttpGmailClient,
+    StubGmailClient,
+    decode_b64url,
+    walk_parts,
 )
 from .llm import (
     AnthropicLLMClient,
@@ -52,7 +62,12 @@ __all__ = [
     "DriveClientError",
     "DriveFile",
     "FallbackLLMClient",
+    "GmailAttachment",
+    "GmailClient",
+    "GmailClientError",
+    "GmailMessage",
     "HttpDriveClient",
+    "HttpGmailClient",
     "HttpSheetsClient",
     "LEDGER_HEADERS",
     "LLMClient",
@@ -62,6 +77,7 @@ __all__ = [
     "SheetsClient",
     "SheetsClientError",
     "StubDriveClient",
+    "StubGmailClient",
     "StubLLMClient",
     "StubOCRClient",
     "StubSheetsClient",
@@ -69,12 +85,14 @@ __all__ = [
     "TesseractOCRClient",
     "VisionLLMClient",
     "build_ledger_row",
+    "decode_b64url",
     "get_llm_client",
     "get_ocr_client",
     "get_sheets_client",
     "get_vision_llm_client",
     "locate_value",
     "parse_json_or_raise",
+    "walk_parts",
 ]
 
 
