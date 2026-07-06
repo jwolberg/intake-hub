@@ -1835,3 +1835,27 @@ with `--profile drive` → verify). Inlines the Google-side steps a first-timer
 needs rather than only linking `drive-intake-setup.md` (still linked for the Apps
 Script + full reference). Docs-only; facts kept consistent with the setup doc
 (Editor role, one-line inline JSON, fail-fast).
+
+---
+
+## feat: Solopreneur income/expense ledger pivot (plan 2026-07-06-001)
+
+### U1 — Domain reshape (enums, taxonomy, category/type models)
+**Deviation from plan (additive, not rename):** the plan frames U1 as *renaming*
+`context_resolved`/`catalog_matched`→`classified`/`categorized` and
+`submitted`→`posted`, and *removing* the sponsor/catalog hold codes. Removing the
+old `InvoiceStatus`/`AuditAction` members in U1 would break 22 live references
+(orchestrator, audit/metrics, 3 test files) and turn the suite red for the U1–U4
+window. To keep **every commit green**, U1 is purely additive: it *adds*
+`CLASSIFIED`/`CATEGORIZED`/`POSTED`, the five ledger hold codes
+(`ambiguous_income_expense`, `low_category_confidence`, `suspected_duplicate`,
+`suspected_adversarial`, `sheet_write_failed`), a `DocumentType` enum, and a
+`CategorizationResult` model — and **leaves the clinical-trial enum members + hold
+codes in place**. Their removal moves to **U5**, where the full-suite-green gate
+already covers dead-code cleanup. Same end state, no red window.
+- `CategorizationResult` is the matching-analog stage contract (U2 produces it,
+  U4's decision consumes its two confidences via weakest-link `min()`): annotated
+  cells for `document_type` and `category` (value+confidence+evidence), `alternates`
+  for the reviewer (R10), and an `adversarial` flag (R16). Confidences default to
+  0.0 / `UNKNOWN` so the offline/Fallback path holds rather than mis-files.
+- U1's "removed code absent" edge-case test is deferred to U5 (codes still present here).

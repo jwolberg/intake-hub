@@ -51,9 +51,13 @@ def test_decision_result_structure():
 
 
 def test_status_values_cover_state_machine():
-    # Guards against accidental drift from ARCHITECTURE.md §6 states.
+    # Guards against accidental drift from ARCHITECTURE.md §6 states. The ledger
+    # states (classified/categorized/posted) coexist with the clinical-trial
+    # states until U5 removes the latter.
     expected = {
-        "received", "parsed", "extracted", "context_resolved", "catalog_matched",
+        "received", "parsed", "extracted",
+        "classified", "categorized", "posted",
+        "context_resolved", "catalog_matched",
         "submitted", "held", "failed", "rerun_requested", "corrected", "escalated",
     }
     assert {s.value for s in InvoiceStatus} == expected

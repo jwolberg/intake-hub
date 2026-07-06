@@ -21,6 +21,7 @@ from .enums import (
     AuditAction,
     CitationStatus,
     Decision,
+    DocumentType,
     InvoiceStatus,
     Severity,
 )
@@ -202,6 +203,33 @@ class MatchResult(BaseModel):
     requires_exception_review: bool = False
     alternates: list[str] = Field(default_factory=list)
     exceptions: list[str] = Field(default_factory=list)
+
+
+class CategorizationResult(BaseModel):
+    """Output of the classify+categorize stage (R5/R6), shaped like ``MatchResult``.
+
+    Carries the income/expense determination and the Schedule C category, each as
+    an annotated cell (value + confidence + evidence), plus ranked ``alternates``
+    for the reviewer (R10/AE2) and an ``adversarial`` flag raised when the source
+    content looks spoofed/injection-style (R16). The decision engine consumes the
+    two confidences through its weakest-link ``min()`` exactly as it consumed the
+    context/match confidences before the pivot.
+
+    Confidences default to ``0.0`` and ``document_type`` to ``UNKNOWN`` so the
+    offline / ``FallbackLLMClient`` path yields a hold (never a silent mis-file)
+    when the model can't be reached.
+    """
+
+    invoice_id: str
+    document_type: DocumentType = DocumentType.UNKNOWN
+    document_type_confidence: float = 0.0
+    document_type_evidence: str | None = None
+    category: str | None = None
+    category_confidence: float = 0.0
+    category_evidence: str | None = None
+    alternates: list[str] = Field(default_factory=list)
+    rationale: str | None = None
+    adversarial: bool = False
 
 
 class RiskFlag(BaseModel):
