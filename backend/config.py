@@ -30,6 +30,11 @@ class Settings:
     inbox_provider: str
     drive_folder_id: str | None
     google_application_credentials: str | None
+    # Google Sheets ledger output (feat: solopreneur-ledger pivot). When both a
+    # service-account credential (``google_application_credentials``) and a
+    # spreadsheet id are set, filed items append to that user-owned Sheet;
+    # otherwise the offline ``StubSheetsClient`` is used (network-free dev/tests).
+    sheets_spreadsheet_id: str | None
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -53,6 +58,7 @@ class Settings:
             google_application_credentials=(
                 os.environ.get("GOOGLE_APPLICATION_CREDENTIALS") or None
             ),
+            sheets_spreadsheet_id=os.environ.get("SHEETS_SPREADSHEET_ID") or None,
         )
 
 

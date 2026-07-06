@@ -1891,3 +1891,36 @@ already covers dead-code cleanup. Same end state, no red window.
   semantics (U4). Known narrow window: append succeeds then record fails → a retry
   re-appends; acceptable for single-tenant v1 (Postgres is the gate, per Key Decisions).
 - POSTED audit event is U4's job (orchestrator tail), not U3.
+
+### U4 — Orchestrator surgery: repoint the pipeline tail
+- New tail `_categorize_and_file` (replaces `_resolve_match_decide`): categorize →
+  decide → `_file_to_sheet`-or-hold. `decide(extraction, categorization)` rewritten
+  to weakest-link `min(extraction, document_type, category)` confidence with ledger
+  hold reasons. `process/rerun/recover` lose `ref/clinrun/catalog_cache`, gain `sheets`.
+- **Decisions:**
+  - **Idempotency key = `invoice.id`** (not message_id+line_index): document-level v1
+    means one row per item, and invoice.id is stable across process/rerun/recover, so
+    a rerun/recover never double-posts. (`_source_ref` still uses message_id/attachment
+    for the Sheet's display-only Source column.)
+  - **Persistent `sheet_write_failed` → FAILED (not HELD)**, mirroring the old
+    `submission_failed` path, so it plugs into the existing `/retry`→`recover()`
+    machinery. Plan text said "hold"; FAILED-retryable is the mechanically-consistent
+    reading ("mirrors SubmissionFailed") and preserves the item. In-process `_retry`
+    handles transient failures before the item ever fails.
+  - **Critical field = `total_amount` only** (dropped `missing_invoice_number`):
+    solopreneur receipts frequently have no invoice number.
+  - **Receipt filter (U6) is NOT wired into `process()`** — it's email-facing, and the
+    folder-watcher/mock validation path treats all inputs as receipts (per the plan).
+    `classify_receipt` is consumed by U8's Gmail provider instead.
+  - Categorization is persisted on the CLASSIFIED/CATEGORIZED audit events (no new
+    table), mirroring how extraction confidence rides the EXTRACTED event. Rerun
+    re-runs categorize from the corrected extraction; pinned category-correction
+    overlays are deferred to U10.
+- Backend follow-through for the pivot: `audit/metrics.py` counts POSTED (field names
+  unchanged; vocab rename deferred to U10); `inbox/drive.py` folder `submitted`→`posted`
+  (`POSTED_DIR`); `api/main.py` `get_pipeline_clients` → {llm, sheets}; added
+  `get_sheets_client()` + `SHEETS_SPREADSHEET_ID`/`sheets_spreadsheet_id` config
+  (offline StubSheetsClient default; HttpSheetsClient when creds+sheet id set).
+- Clinical pipeline tests superseded: test_pipeline.py + test_orchestrator.py deleted
+  (covered by test_orchestrator_ledger.py); pdf_pipeline/performance/scenarios/metrics/
+  exceptions/inbox_fetch realigned to ledger semantics.

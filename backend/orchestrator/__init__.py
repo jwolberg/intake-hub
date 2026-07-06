@@ -19,25 +19,18 @@ from datetime import datetime, timezone
 
 from backend import corrections
 from backend.audit import latest_details, record
-from backend.catalog import CatalogCache, InMemoryCatalogCache, fetch
-from backend.clients import (
-    get_clinrun_client,
-    get_llm_client,
-    get_ocr_client,
-    get_reference_client,
-)
-from backend.clients.clinrun import ClinRunClient
-from backend.clients.errors import CatalogNotFound, ReferenceUnavailable, SubmissionFailed
+from backend.categorize import categorize
+from backend.clients import get_llm_client, get_ocr_client, get_sheets_client
+from backend.clients.errors import SheetsClientError
 from backend.clients.llm import LLMClient, PassthroughLLMClient
-from backend.clients.mcp_reference import MCPReferenceClient
-from backend.context import resolve
-from backend.corrections import apply_match_overlay
+from backend.clients.sheets import SheetsClient, append_filed_row, build_ledger_row
 from backend.db.repository import Repository
 from backend.decision import decide
 from backend.domain import (
     Actor,
     AuditAction,
     AuditEvent,
+    CategorizationResult,
     Decision,
     ExtractionResult,
     Invoice,
@@ -49,12 +42,10 @@ from backend.exceptions import from_decision
 from backend.extraction import extract
 from backend.extraction.citations import resolve_citations, synthesize_citations
 from backend.intake import ingest
-from backend.matching import match
 from backend.ocr import OCRClient
 from backend.parser import parse
 from backend.parser.pdf import LayoutLLMClient
 from backend.parser.raster import is_rasterizable, render_pages
-from backend.submission import submit_invoice
 
 
 def _advance(repo: Repository, invoice: Invoice, status: InvoiceStatus) -> None:
@@ -167,15 +158,12 @@ def process(
     repo: Repository,
     *,
     llm: LLMClient | None = None,
-    ref: MCPReferenceClient | None = None,
-    clinrun: ClinRunClient | None = None,
+    sheets: SheetsClient | None = None,
     ocr: OCRClient | None = None,
-    catalog_cache: CatalogCache | None = None,
 ) -> Invoice:
-    """Run one invoice end-to-end to a terminal state, persisting as it goes."""
+    """Run one item end-to-end to a terminal state, persisting as it goes."""
     llm = llm or get_llm_client()
-    ref = ref or get_reference_client()
-    clinrun = clinrun or get_clinrun_client()
+    sheets = sheets or get_sheets_client()
     ocr = ocr or get_ocr_client()
 
     invoice = ingest(sample)
@@ -224,72 +212,53 @@ def process(
             "citations": [c.model_dump(mode="json") for c in extraction.citations],
         })
 
-        _resolve_match_decide(
-            repo, invoice, extraction, source,
-            llm=llm, ref=ref, clinrun=clinrun, catalog_cache=catalog_cache,
-        )
+        _categorize_and_file(repo, invoice, extraction, source, llm=llm, sheets=sheets)
     except Exception as exc:  # stage failure: isolate, mark failed, never propagate
         _fail(repo, invoice, "stage_failure", str(exc))
 
     return invoice
 
 
-def _resolve_match_decide(
+def _categorize_and_file(
     repo: Repository,
     invoice: Invoice,
     extraction: ExtractionResult,
     source: dict,
     *,
     llm: LLMClient,
-    ref: MCPReferenceClient,
-    clinrun: ClinRunClient,
-    catalog_cache: CatalogCache | None,
-    match_corrections: list[AuditEvent] | None = None,
+    sheets: SheetsClient,
 ) -> None:
-    """Pipeline tail shared by ``process`` and ``rerun``: resolve context, fetch
-    catalog, match line items, decide, then submit or hold.
+    """Pipeline tail shared by ``process``, ``rerun``, and ``recover``: classify
+    income/expense, assign a Schedule C category, decide, then file to the Sheet
+    (via the Postgres dedup ledger) or hold.
 
-    ``match_corrections`` (rerun only) pins human-corrected line matches as fixed
-    inputs; on a first pass there are none and matching runs unmodified.
+    Categorization is re-run each pass (it is cheap and deterministic offline), so
+    a rerun after a metadata correction re-derives the type/category from the
+    corrected extraction. Category corrections as pinned overlays are a later unit.
     """
-    ctx = resolve(invoice.id, extraction.metadata, source, ref)
-    repo.save_context(ctx)
-    _advance(repo, invoice, InvoiceStatus.CONTEXT_RESOLVED)
-    record(repo, invoice.id, AuditAction.CONTEXT_RESOLVED, details={
-        "sponsor_id": ctx.sponsor_id, "study_id": ctx.study_id,
-        "site_id": ctx.site_id, "confidence": ctx.confidence,
-        "warnings": ctx.warnings, "candidates": len(ctx.candidates),
+    categorization = categorize(invoice.id, extraction, llm, source=source)
+    _advance(repo, invoice, InvoiceStatus.CLASSIFIED)
+    record(repo, invoice.id, AuditAction.CLASSIFIED, details={
+        "document_type": categorization.document_type.value,
+        "confidence": categorization.document_type_confidence,
+        "evidence": categorization.document_type_evidence,
+        "adversarial": categorization.adversarial,
+    })
+    _advance(repo, invoice, InvoiceStatus.CATEGORIZED)
+    record(repo, invoice.id, AuditAction.CATEGORIZED, details={
+        "category": categorization.category,
+        "confidence": categorization.category_confidence,
+        "evidence": categorization.category_evidence,
+        "alternates": categorization.alternates,
+        "rationale": categorization.rationale,
     })
 
-    try:
-        catalog = _retry(lambda: fetch(ctx, ref, cache=catalog_cache), on=ReferenceUnavailable)
-        catalog_available = True
-    except CatalogNotFound:
-        # scope known but no catalog → deliberate hold (catalog_unavailable)
-        catalog, catalog_available = [], False
-    except ReferenceUnavailable as exc:
-        # transport/API error → retryable failure, not a hold (PRD §15)
-        _fail(repo, invoice, "catalog_fetch_failed", str(exc))
-        return
-
-    matches = match(extraction.line_items, catalog, llm)
-    if match_corrections:
-        matches = apply_match_overlay(matches, match_corrections)
-    repo.replace_matches(invoice.id, matches)
-    _advance(repo, invoice, InvoiceStatus.CATALOG_MATCHED)
-    record(repo, invoice.id, AuditAction.CATALOG_MATCHED, details={
-        "catalog_available": catalog_available,
-        "catalog_size": len(catalog),
-        "matched": sum(1 for m in matches if m.catalog_item_id),
-        "total": len(matches),
-    })
-
-    decision = decide(extraction, ctx, matches, catalog_available)
+    decision = decide(extraction, categorization)
     invoice.decision = decision.decision
     invoice.decision_confidence = decision.confidence
 
     if decision.decision is Decision.SUBMIT:
-        _submit(repo, invoice, extraction.metadata, ctx, matches, clinrun, decision)
+        _file_to_sheet(repo, invoice, categorization, source, sheets, decision)
     else:
         repo.add_exceptions(from_decision(invoice.id, decision))
         _advance(repo, invoice, InvoiceStatus.HELD)
@@ -299,20 +268,44 @@ def _resolve_match_decide(
         })
 
 
-def _submit(repo, invoice, metadata, ctx, matches, clinrun, decision) -> None:
+def _source_ref(source: dict) -> str | None:
+    """A human-facing reference for the Sheet's Source column — a message id,
+    attachment name, or subject. (A Gmail permalink is added by the Gmail path.)"""
+    return source.get("message_id") or source.get("attachment") or source.get("subject")
+
+
+def _file_to_sheet(
+    repo: Repository,
+    invoice: Invoice,
+    categorization: CategorizationResult,
+    source: dict,
+    sheets: SheetsClient,
+    decision,
+) -> None:
+    """Append one row to the ledger Sheet, gated by the Postgres dedup ledger.
+
+    The idempotency key is the invoice id — stable across retries, rerun, and
+    recover — so a transient append failure retried in-process (or a later
+    recover) never posts the same item twice (document-level, one row per item).
+    A persistent append failure marks the item ``failed`` with a retryable
+    ``sheet_write_failed`` exception (mirrors the old submission-failure path), so
+    the item is preserved and recoverable via ``/retry`` rather than silently lost.
+    """
+    row = build_ledger_row(invoice, categorization, _source_ref(source))
     try:
-        result = _retry(
-            lambda: submit_invoice(invoice, metadata, ctx, matches, clinrun),
-            on=SubmissionFailed,
+        outcome = _retry(
+            lambda: append_filed_row(repo, sheets, idempotency_key=invoice.id, row=row),
+            on=SheetsClientError,
         )
-    except SubmissionFailed as exc:
-        _fail(repo, invoice, "submission_failed", str(exc))
+    except SheetsClientError as exc:
+        _fail(repo, invoice, "sheet_write_failed", str(exc))
         return
-    _advance(repo, invoice, InvoiceStatus.SUBMITTED)
-    # Record risk flags on submit too (symmetric with held) so the detail view's
-    # Decision section can show visibility-only medium/low flags (PRD §10).
-    record(repo, invoice.id, AuditAction.SUBMITTED, reason=decision.rationale, details={
-        "reference_id": result.reference_id,
+    _advance(repo, invoice, InvoiceStatus.POSTED)
+    # Record risk flags on the POSTED event too (symmetric with held) so the detail
+    # view's Decision section can show visibility-only medium/low flags.
+    record(repo, invoice.id, AuditAction.POSTED, reason=decision.rationale, details={
+        "sheet_row_ref": outcome.sheet_row_ref,
+        "deduped": outcome.deduped,
         "risk_flags": [f.model_dump(mode="json") for f in decision.risk_flags],
     })
 
@@ -331,23 +324,19 @@ def rerun(
     repo: Repository,
     *,
     llm: LLMClient | None = None,
-    ref: MCPReferenceClient | None = None,
-    clinrun: ClinRunClient | None = None,
-    catalog_cache: CatalogCache | None = None,
+    sheets: SheetsClient | None = None,
 ) -> Invoice:
-    """Re-enter the pipeline for an existing invoice using corrected data as fixed
-    inputs (PRD FR10; ARCHITECTURE.md §6, §11).
+    """Re-enter the pipeline for an existing item using corrected data as fixed
+    inputs (R10; PRD FR10).
 
     Parsing and extraction are *not* re-run: their outputs (source text, metadata,
-    line items) are reused, with human corrections applied on top — corrected
-    metadata fields become verified inputs (confidence 1.0, no longer missing) and
-    corrected line matches are pinned. Context, catalog, matching, and the decision
-    recompute from those inputs, so a correction that resolves the original hold
-    reason lets the invoice submit on rerun.
+    line items) are reused, with human metadata corrections applied on top —
+    corrected fields become verified inputs (confidence 1.0, no longer missing).
+    Categorization and the decision recompute from those inputs, so a correction
+    that resolves the original hold reason lets the item file on rerun.
     """
     llm = llm or get_llm_client()
-    ref = ref or get_reference_client()
-    clinrun = clinrun or get_clinrun_client()
+    sheets = sheets or get_sheets_client()
 
     invoice = repo.get_invoice(invoice_id)
     if invoice is None:
@@ -364,11 +353,7 @@ def rerun(
     _advance(repo, invoice, InvoiceStatus.RERUN_REQUESTED)
 
     try:
-        _resolve_match_decide(
-            repo, invoice, extraction, source,
-            llm=llm, ref=ref, clinrun=clinrun, catalog_cache=catalog_cache,
-            match_corrections=audit,
-        )
+        _categorize_and_file(repo, invoice, extraction, source, llm=llm, sheets=sheets)
     except Exception as exc:  # same isolation contract as process
         _fail(repo, invoice, "stage_failure", str(exc))
 
@@ -380,22 +365,19 @@ def recover(
     repo: Repository,
     *,
     llm: LLMClient | None = None,
-    ref: MCPReferenceClient | None = None,
-    clinrun: ClinRunClient | None = None,
-    catalog_cache: CatalogCache | None = None,
+    sheets: SheetsClient | None = None,
 ) -> Invoice:
-    """Resume a FAILED invoice from where it failed, reusing successful upstream
+    """Resume a FAILED item from where it failed, reusing successful upstream
     outputs (P3-T1; PRD §15 "provide retry option", §14 retry/recovery).
 
     If extraction had succeeded (an ``EXTRACTED`` event exists), its persisted
-    metadata + line items are reused — so a catalog or submission failure retries
-    *without* re-extracting. If extraction itself failed, it is re-run from the
-    persisted source text. Then context → catalog → match → decide → submit/hold
-    runs again, with the in-process retry on transient client errors.
+    metadata + line items are reused — so a Sheet-write failure retries *without*
+    re-extracting. If extraction itself failed, it is re-run from the persisted
+    source text. Then categorize → decide → file/hold runs again, with the
+    in-process retry on transient Sheet errors.
     """
     llm = llm or get_llm_client()
-    ref = ref or get_reference_client()
-    clinrun = clinrun or get_clinrun_client()
+    sheets = sheets or get_sheets_client()
 
     invoice = repo.get_invoice(invoice_id)
     if invoice is None:
@@ -416,11 +398,7 @@ def recover(
             extraction = _reextract(repo, invoice_id, audit, llm)
             invoice.metadata = extraction.metadata
             repo.replace_line_items(invoice_id, extraction.line_items)
-        _resolve_match_decide(
-            repo, invoice, extraction, source,
-            llm=llm, ref=ref, clinrun=clinrun, catalog_cache=catalog_cache,
-            match_corrections=audit,
-        )
+        _categorize_and_file(repo, invoice, extraction, source, llm=llm, sheets=sheets)
     except Exception as exc:  # same isolation contract as process
         _fail(repo, invoice, "stage_failure", str(exc))
 
@@ -478,12 +456,7 @@ def _reconstruct_extraction(
 
 
 def process_all(samples: list[dict], repo: Repository, **clients) -> list[Invoice]:
-    """Process many invoices; a failure in one never stops the others (PRD §14).
-
-    A single catalog cache is shared across the batch (unless the caller passes
-    one) so invoices for the same sponsor/study fetch the catalog once.
-    """
-    clients.setdefault("catalog_cache", InMemoryCatalogCache())
+    """Process many items; a failure in one never stops the others (PRD §14)."""
     results: list[Invoice] = []
     for sample in samples:
         try:

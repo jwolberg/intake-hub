@@ -1,50 +1,59 @@
-"""Unit tests for strategy metric instrumentation (P2-B4; STRATEGY § Key metrics)."""
-
-import json
-import pathlib
+"""Unit tests for strategy metric instrumentation (STRATEGY § Key metrics)."""
 
 from backend.audit import record
 from backend.audit.metrics import compute_metrics
-from backend.clients import PassthroughLLMClient, StubClinRunClient, StubMCPReferenceClient
+from backend.clients import PassthroughLLMClient, StubSheetsClient
 from backend.db.repository import InMemoryRepository
 from backend.domain import Actor, AuditAction
 from backend.orchestrator import process
 
-SAMPLES = pathlib.Path(__file__).resolve().parents[2] / "samples"
+# A clean expense: clear vendor + a categorizable line + a total → posted.
+CLEAN_EXPENSE = {
+    "source": {"channel": "email", "message_id": "m-clean",
+               "subject": "Your receipt from Notion", "sender": "billing@notion.so"},
+    "document": {
+        "metadata": {"invoice_number": "N-1", "vendor_name": "Notion",
+                     "currency": "USD", "total_amount": "10.00"},
+        "line_items": [{"raw_description": "Notion subscription",
+                        "quantity": "1", "unit_price": "10.00", "total": "10.00"}],
+    },
+}
 
-
-def _stubs():
-    return {"llm": PassthroughLLMClient(), "ref": StubMCPReferenceClient(),
-            "clinrun": StubClinRunClient()}
-
-
-def _load(name):
-    return json.loads((SAMPLES / name).read_text())
+# No categorizable keyword → held (no Sheet write).
+UNCATEGORIZABLE = {
+    "source": {"channel": "email", "message_id": "m-hold", "subject": "note",
+               "sender": "someone@example.com"},
+    "document": {
+        "metadata": {"vendor_name": "Bob", "total_amount": "10.00"},
+        "line_items": [{"raw_description": "thing", "quantity": "1",
+                        "unit_price": "10.00", "total": "10.00"}],
+    },
+}
 
 
 def _seed():
-    """One auto-submit + one hold."""
+    """One auto-posted item + one hold, against the same repository."""
     repo = InMemoryRepository()
-    submitted = process(_load("inv_clean_001.json"), repo, **_stubs())
-    held = process(_load("inv_hold_unmatched_002.json"), repo, **_stubs())
-    return repo, submitted, held
+    posted = process(CLEAN_EXPENSE, repo, llm=PassthroughLLMClient(), sheets=StubSheetsClient())
+    held = process(UNCATEGORIZABLE, repo, llm=PassthroughLLMClient(), sheets=StubSheetsClient())
+    return repo, posted, held
 
 
 def test_throughput_and_auto_submit_rate():
-    repo, _submitted, _held = _seed()
+    repo, _posted, _held = _seed()
     m = compute_metrics(repo)
     assert (m.total, m.submitted, m.held, m.failed) == (2, 1, 1, 0)
     assert m.auto_submit_rate == 0.5
     # no human has touched anything yet
-    assert m.false_submit_rate == 0.0      # 0 of 1 submits known-wrong
+    assert m.false_submit_rate == 0.0      # 0 of 1 posts known-wrong
     assert m.hold_precision is None        # no hold dispositioned yet → no data
 
 
 def test_false_submit_and_hold_precision_from_human_outcomes():
-    repo, submitted, held = _seed()
-    # a human had to correct an auto-submitted invoice → it was a false submit
-    record(repo, submitted.id, AuditAction.CORRECTED, actor=Actor.HUMAN,
-           before={"sponsor_name": "X"}, after={"sponsor_name": "Y"}, reason="wrong sponsor")
+    repo, posted, held = _seed()
+    # a human had to correct an auto-posted invoice → it was a false submit
+    record(repo, posted.id, AuditAction.CORRECTED, actor=Actor.HUMAN,
+           before={"vendor_name": "X"}, after={"vendor_name": "Y"}, reason="wrong vendor")
     # a human escalated the held invoice → the hold genuinely needed a human
     record(repo, held.id, AuditAction.ESCALATED, actor=Actor.HUMAN, reason="needs finance")
 
@@ -54,9 +63,9 @@ def test_false_submit_and_hold_precision_from_human_outcomes():
 
 
 def test_hold_reviewed_without_correction_lowers_precision():
-    repo, _submitted, held = _seed()
+    repo, _posted, held = _seed()
     # process a second hold and have a human review it but take no corrective action
-    held2 = process(_load("inv_hold_mismatch_005.json"), repo, **_stubs())
+    held2 = process(UNCATEGORIZABLE, repo, llm=PassthroughLLMClient(), sheets=StubSheetsClient())
     record(repo, held.id, AuditAction.ESCALATED, actor=Actor.HUMAN, reason="needs finance")
     record(repo, held2.id, AuditAction.REVIEWED, actor=Actor.HUMAN, reason="false alarm")
 

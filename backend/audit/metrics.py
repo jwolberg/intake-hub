@@ -39,7 +39,7 @@ if TYPE_CHECKING:
 # needed a human (vs. merely being looked at).
 _CONFIRMS_HUMAN_NEEDED = {AuditAction.CORRECTED, AuditAction.ESCALATED}
 # The AI's autonomous decision is the first terminal outcome it recorded.
-_DECISION_ACTIONS = {AuditAction.SUBMITTED, AuditAction.HELD}
+_DECISION_ACTIONS = {AuditAction.POSTED, AuditAction.HELD}
 
 
 class WorkflowMetrics(BaseModel):
@@ -72,7 +72,7 @@ def compute_metrics(repo: Repository) -> WorkflowMetrics:
     invoices = repo.list_invoices()
 
     # Throughput counts reflect *current* status (what the operator sees now).
-    submitted = [i for i in invoices if i.status is InvoiceStatus.SUBMITTED]
+    submitted = [i for i in invoices if i.status is InvoiceStatus.POSTED]
     held = [i for i in invoices if i.status is InvoiceStatus.HELD]
     failed = [i for i in invoices if i.status is InvoiceStatus.FAILED]
 
@@ -92,7 +92,7 @@ def compute_metrics(repo: Repository) -> WorkflowMetrics:
         audit = repo.get_audit(inv.id)
         first = _first_decision(audit)
         human = {e.action for e in audit if e.actor is Actor.HUMAN}
-        if first is AuditAction.SUBMITTED:
+        if first is AuditAction.POSTED:
             auto_submits += 1
             # An autonomous submit a human later had to correct/escalate was wrong.
             if _CONFIRMS_HUMAN_NEEDED & human:

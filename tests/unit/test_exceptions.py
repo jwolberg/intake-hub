@@ -6,12 +6,12 @@ orchestrator only emit registered codes, and that severities are consistent.
 
 from backend.decision import decide
 from backend.domain import (
+    CategorizationResult,
     Decision,
+    DocumentType,
     ExtractionResult,
     InvoiceMetadata,
     LineItem,
-    MatchResult,
-    ResolvedContext,
     Severity,
 )
 from backend.domain.taxonomy import REGISTRY, severity_of, title_of
@@ -64,9 +64,17 @@ def _hold_decision():
         field_confidence={"invoice_number": 0.95},
         missing_fields=["total_amount", "due_date"],  # critical + optional
     )
-    ctx = ResolvedContext(invoice_id="inv")  # unresolved
-    matches = [MatchResult(line_item_id="line", catalog_item_id=None, confidence=0.0)]
-    return decide(extraction, ctx, matches, catalog_available=False)
+    # Low-confidence categorization (unresolved document type, no category) so
+    # the decision holds on ambiguous_income_expense + low_category_confidence
+    # in addition to the missing-total/missing-optional-fields flags above.
+    categorization = CategorizationResult(
+        invoice_id="inv",
+        document_type=DocumentType.UNKNOWN,
+        document_type_confidence=0.0,
+        category=None,
+        category_confidence=0.0,
+    )
+    return decide(extraction, categorization)
 
 
 def test_decision_only_emits_registered_codes_with_consistent_severity():

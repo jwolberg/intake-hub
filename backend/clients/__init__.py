@@ -101,6 +101,7 @@ __all__ = [
     "get_llm_client",
     "get_ocr_client",
     "get_reference_client",
+    "get_sheets_client",
     "get_vision_llm_client",
     "locate_value",
     "parse_json_or_raise",
@@ -137,6 +138,30 @@ def get_llm_client() -> LLMClient:
         )
         return FallbackLLMClient(primary, PassthroughLLMClient())
     return PassthroughLLMClient()
+
+
+def get_sheets_client() -> SheetsClient:
+    """Default Sheets ledger client.
+
+    When a service-account credential *and* a target spreadsheet id are both
+    configured, returns the live ``HttpSheetsClient`` (service-account auth,
+    ``drive.file`` scope), mirroring the Drive service-account pattern. Otherwise
+    returns the offline ``StubSheetsClient`` so dev/tests append network-free — the
+    folder-watcher validation path proves the flow without any Google credentials.
+    The real-credential deploy wiring is documented in U11 (docs/DEPLOY.md).
+    """
+    creds = settings.google_application_credentials
+    sheet_id = settings.sheets_spreadsheet_id
+    if creds and sheet_id:
+        creds = creds.strip()
+        if creds.startswith("{"):
+            import json
+
+            return HttpSheetsClient(
+                spreadsheet_id=sheet_id, credentials_info=json.loads(creds)
+            )
+        return HttpSheetsClient(spreadsheet_id=sheet_id, credentials_file=creds)
+    return StubSheetsClient()
 
 
 def get_ocr_client() -> OCRClient:

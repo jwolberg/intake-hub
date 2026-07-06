@@ -1,21 +1,25 @@
-"""Stage: decisioning.
+"""Stage: decisioning (ledger pivot).
 
-Full submit/hold policy (PRD FR6, §9, §16; ARCHITECTURE.md §10). Runs before any
-human QC and never requires human approval to reach a decision.
+Full auto-file/hold policy for the income/expense ledger (R7; carried over from
+the clinical-trial decision engine unchanged in spirit). Runs before any human QC
+and never requires human approval to reach a decision.
 
-The policy is data-driven and severity-graded (PRD §16):
+The policy is data-driven and severity-graded:
 
 - **High** — blocking. Any high-severity flag forces a ``hold``.
 - **Medium** — visibility only. Surfaced on the result but does not block a submit.
 - **Low** — informational (e.g. a missing optional field).
 
-It consumes every prior stage's confidence: context resolution, per-field
-extraction confidence (P2-A1), and line-item match confidence. Low confidence
-anywhere resolves toward a hold — a submit is never silent when the model is
-unsure. ``decision_confidence`` is the combined (weakest-link) stage confidence —
-the AI's certainty in what it extracted/matched — for both submit and hold, so a
-low value *explains* a hold (held because uncertain) and is honest in the UI. The
-hold *reason* is a separate signal carried in ``risk_flags``.
+It consumes every prior stage's confidence via a weakest-link ``min()``: per-field
+extraction confidence, the income/expense determination, and the Schedule C
+category confidence. Low confidence anywhere resolves toward a hold — an auto-file
+is never silent when the model is unsure. ``decision_confidence`` is that combined
+stage confidence for both submit and hold, so a low value *explains* a hold (held
+because uncertain) and is honest in the UI. The hold *reason* is a separate signal
+carried in ``risk_flags``.
+
+The categorize stage's ``adversarial`` flag forces a hold (R16): auto-filing a
+document whose content looks spoofed/injection-style is exactly what we must not do.
 """
 
 from __future__ import annotations
@@ -23,11 +27,11 @@ from __future__ import annotations
 from decimal import Decimal
 
 from backend.domain import (
+    CategorizationResult,
     Decision,
     DecisionResult,
+    DocumentType,
     ExtractionResult,
-    MatchResult,
-    ResolvedContext,
     RiskFlag,
     Severity,
 )
@@ -35,49 +39,34 @@ from backend.domain.taxonomy import severity_of
 
 _TOTAL_TOLERANCE = Decimal("0.01")
 
-# Confidence thresholds (PRD §16: low blocks, medium is visibility-only).
-_CONTEXT_HOLD = 0.6
+# Confidence thresholds (low blocks, medium is visibility-only).
 _EXTRACTION_HOLD = 0.5
 _EXTRACTION_WATCH = 0.8
-_MATCH_HOLD = 0.5
-_MATCH_WATCH = 0.85
-_DECISION_FLOOR = 0.8  # submit only when confident; below this → hold for review
+_TYPE_HOLD = 0.7        # income/expense below this → ambiguous_income_expense (block)
+_CATEGORY_HOLD = 0.7    # category confidence below this → low_category_confidence (block)
+_DECISION_FLOOR = 0.8   # file only when confident; below this → hold for review
 
-# Header fields that must be present to submit (PRD FR8, §16).
-_CRITICAL_FIELDS = {"invoice_number": "missing_invoice_number",
-                    "total_amount": "missing_total"}
+# The one header field a ledger row cannot do without is the amount. Unlike the
+# clinical-trial engine we do not require an invoice number — solopreneur receipts
+# frequently have none (see implementation-notes U4).
+_CRITICAL_FIELDS = {"total_amount": "missing_total"}
 
 _ACTIONS = {
-    "unresolved_sponsor": "Confirm the correct sponsor/study/site",
-    "unresolved_study": "Confirm the correct sponsor/study/site",
-    "unresolved_site": "Confirm the correct sponsor/study/site",
-    "context_unresolved": "Confirm the correct sponsor/study/site",
-    "context_ambiguity": "Confirm the correct sponsor/study/site before submission",
-    "context_mismatch": "Reconcile the invoice metadata against the reference data",
-    "catalog_unavailable": "Retry catalog fetch or escalate",
-    "missing_invoice_number": "Add the missing invoice number",
-    "missing_total": "Add the missing invoice total",
+    "suspected_adversarial": "Verify the source; the content looks spoofed before filing",
+    "ambiguous_income_expense": "Confirm whether this is income or an expense",
+    "low_category_confidence": "Confirm or correct the Schedule C category",
+    "suspected_duplicate": "Confirm this is not a duplicate of an already-filed item",
+    "sheet_write_failed": "Retry the Sheet append",
+    "missing_total": "Add the missing amount",
     "low_extraction_confidence": "Re-extract or verify the low-confidence fields",
-    "unmatched_line_item": "Map or reject the unmatched line item(s)",
-    "amount_mismatch": "Reconcile the line amount against the catalog price",
-    "quantity_mismatch": "Reconcile the line quantity/total against the catalog price",
-    "low_match_confidence": "Verify the low-confidence line-item matches",
-    "total_mismatch": "Reconcile line items against the invoice total",
-    "low_confidence": "Review the invoice; overall confidence is below the submit threshold",
-}
-
-# Context warning codes (emitted by the context stage) grouped by decision flag.
-_AMBIGUITY_WARNINGS = {"ambiguous_context", "multiple_site_candidates"}
-_MISMATCH_WARNINGS = {
-    "sponsor_mismatch", "study_mismatch", "protocol_mismatch", "site_mismatch",
+    "total_mismatch": "Reconcile line items against the total",
+    "low_confidence": "Review the item; overall confidence is below the file threshold",
 }
 
 
 def decide(
     extraction: ExtractionResult,
-    ctx: ResolvedContext,
-    matches: list[MatchResult],
-    catalog_available: bool,
+    categorization: CategorizationResult,
 ) -> DecisionResult:
     metadata = extraction.metadata
     line_items = extraction.line_items
@@ -87,26 +76,23 @@ def decide(
         # Severity comes from the canonical taxonomy — one source of truth.
         flags.append(RiskFlag(type=code, severity=severity_of(code), message=message))
 
-    # --- Context (FR8: unresolved sponsor/study/site, ambiguity, mismatch) ---
-    if not ctx.sponsor_id:
-        flag("unresolved_sponsor", "sponsor could not be resolved")
-    elif not ctx.study_id:
-        flag("unresolved_study", "study could not be resolved for the sponsor")
-    elif not ctx.site_id:
-        flag("unresolved_site", "site could not be resolved for the study")
-    elif ctx.confidence < _CONTEXT_HOLD:
-        flag("context_unresolved",
-             f"sponsor/study/site resolved only with low confidence ({round(ctx.confidence, 3)})")
-    if any(w in _AMBIGUITY_WARNINGS for w in ctx.warnings):
-        flag("context_ambiguity", "multiple plausible sponsor/study/site candidates matched")
-    mismatches = sorted(w for w in ctx.warnings if w in _MISMATCH_WARNINGS)
-    if mismatches:
-        flag("context_mismatch",
-             "invoice metadata conflicts with reference data: " + ", ".join(mismatches))
+    # --- Adversarial / spoofed content (R16): block regardless of confidence ---
+    if categorization.adversarial:
+        flag("suspected_adversarial",
+             "document content contains instruction-like text; treated as untrusted")
 
-    # --- Catalog ---
-    if not catalog_available:
-        flag("catalog_unavailable", "catalog could not be fetched for the resolved scope")
+    # --- Income vs expense (R5) ---
+    if (categorization.document_type is DocumentType.UNKNOWN
+            or categorization.document_type_confidence < _TYPE_HOLD):
+        flag("ambiguous_income_expense",
+             "could not confidently classify income vs expense "
+             f"({round(categorization.document_type_confidence, 3)})")
+
+    # --- Schedule C category (R6) ---
+    if not categorization.category or categorization.category_confidence < _CATEGORY_HOLD:
+        flag("low_category_confidence",
+             "category could not be assigned with confidence "
+             f"({round(categorization.category_confidence, 3)})")
 
     # --- Extraction completeness + confidence ---
     for field, flag_type in _CRITICAL_FIELDS.items():
@@ -120,39 +106,30 @@ def decide(
     extraction_conf = _extraction_confidence(extraction)
     if extraction_conf < _EXTRACTION_HOLD:
         flag("low_extraction_confidence",
-             f"extraction confidence {extraction_conf} below the submit threshold")
+             f"extraction confidence {extraction_conf} below the file threshold")
     elif extraction_conf < _EXTRACTION_WATCH:
         flag("moderate_extraction_confidence",
              f"some extracted fields are only moderately confident ({extraction_conf})")
 
-    # --- Matching ---
-    if any(m.catalog_item_id is None for m in matches):
-        n = sum(1 for m in matches if m.catalog_item_id is None)
-        flag("unmatched_line_item", f"{n} line item(s) could not be matched to the catalog")
-    if any(m.amount_match is False for m in matches):
-        flag("amount_mismatch", "a line amount disagrees with the catalog price")
-    if any(m.quantity_match is False for m in matches):
-        flag("quantity_mismatch", "a line quantity/total disagrees with the catalog price")
-
-    match_conf = _match_confidence(matches)
-    if match_conf < _MATCH_HOLD:
-        flag("low_match_confidence",
-             f"line-item match confidence {match_conf} below the submit threshold")
-    elif match_conf < _MATCH_WATCH:
-        flag("weak_match", f"some line items matched only weakly ({match_conf})")
-
     # --- Totals ---
     line_total = sum((li.total for li in line_items if li.total is not None), Decimal("0"))
     total = metadata.total_amount
-    if total is not None and abs(line_total - total) > _TOTAL_TOLERANCE:
-        flag("total_mismatch", "line items do not sum to the invoice total")
+    if total is not None and line_items and abs(line_total - total) > _TOTAL_TOLERANCE:
+        flag("total_mismatch", "line items do not sum to the total")
 
     # --- Decide ---
-    decision_confidence = round(min(ctx.confidence, extraction_conf, match_conf), 3)
+    decision_confidence = round(
+        min(
+            extraction_conf,
+            categorization.document_type_confidence,
+            categorization.category_confidence,
+        ),
+        3,
+    )
     high = [f for f in flags if f.severity is Severity.HIGH]
     if not high and decision_confidence < _DECISION_FLOOR:
         flag("low_confidence",
-             f"overall decision confidence {decision_confidence} below the submit threshold")
+             f"overall decision confidence {decision_confidence} below the file threshold")
         high = [f for f in flags if f.severity is Severity.HIGH]
 
     if high:
@@ -167,13 +144,13 @@ def decide(
     return DecisionResult(
         decision=Decision.SUBMIT,
         confidence=decision_confidence,
-        rationale="Context resolved, all line items matched, and totals reconcile.",
+        rationale="Classified and categorized with high confidence; filed to the ledger.",
         risk_flags=flags,
     )
 
 
 def _extraction_confidence(extraction: ExtractionResult) -> float:
-    """Weakest-link confidence over populated header fields + line items (P2-A1)."""
+    """Weakest-link confidence over populated header fields + line items."""
     populated = [
         conf for field, conf in extraction.field_confidence.items()
         if field not in extraction.missing_fields
@@ -184,9 +161,3 @@ def _extraction_confidence(extraction: ExtractionResult) -> float:
     ]
     scores = populated + items
     return round(min(scores), 3) if scores else 0.0
-
-
-def _match_confidence(matches: list[MatchResult]) -> float:
-    """Weakest confidence among *matched* items (unmatched is flagged separately)."""
-    matched = [m.confidence for m in matches if m.catalog_item_id is not None]
-    return round(min(matched), 3) if matched else 1.0

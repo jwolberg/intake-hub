@@ -25,7 +25,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from backend import corrections
 from backend.audit import latest_details, record
 from backend.audit.metrics import WorkflowMetrics, compute_metrics
-from backend.clients import get_clinrun_client, get_llm_client, get_reference_client
+from backend.clients import get_llm_client, get_sheets_client
 from backend.config import settings
 from backend.db import get_engine, init_schema
 from backend.db.repository import Repository, get_repository
@@ -86,8 +86,7 @@ def get_repo() -> Repository:
 def get_pipeline_clients() -> dict:
     return {
         "llm": get_llm_client(),
-        "ref": get_reference_client(),
-        "clinrun": get_clinrun_client(),
+        "sheets": get_sheets_client(),
     }
 
 
@@ -118,7 +117,7 @@ _SUBMIT_CONFIDENCE_WATCH = 0.75
 # Filter keys the API accepts (PRD §10). Statuses double as tags so the same
 # membership test serves every chip.
 FILTER_KEYS = {
-    "submitted", "held", "failed", "needs_review",
+    "posted", "held", "failed", "needs_review",
     "low_confidence", "mismatched_metadata", "unmatched_line_items",
 }
 
