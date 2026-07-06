@@ -1859,3 +1859,21 @@ already covers dead-code cleanup. Same end state, no red window.
   for the reviewer (R10), and an `adversarial` flag (R16). Confidences default to
   0.0 / `UNKNOWN` so the offline/Fallback path holds rather than mis-files.
 - U1's "removed code absent" edge-case test is deferred to U5 (codes still present here).
+
+### U2 — Classification + categorization stage
+- **Decisions (deferred-to-impl resolved):** document-level categorization (one
+  category per document, matching `CategorizationResult`); line-item-level deferred.
+  Fixed Schedule C constant `SCHEDULE_C_CATEGORIES` (common Part II expense lines +
+  one income bucket); custom categories deferred per Scope Boundaries.
+- Modeled on `matching`: keyword-scored candidates → ambiguity gap → advisory LLM
+  adjudication. **Clear cases never call the LLM**, so the offline folder-watcher
+  validation path files them deterministically; only ambiguous/unclear items
+  adjudicate, and offline that degrades to a *hold* (Passthrough echo / Fallback on
+  connection error both keep the low-confidence heuristic, never crash).
+- **Confidence bar:** an unresolved category race is capped at `_AMBIGUOUS_CAP=0.7`,
+  below the decision floor (0.8), so ambiguity holds unless the LLM lifts it (AE2).
+- **R16 adversarial flag:** heuristic scan for injection-style directives in the
+  document text sets `adversarial=True`; the LLM step has no tool access and treats
+  content as data. U4 turns the flag into a `suspected_adversarial` hold.
+- Did not strictly red-first here (inline build); tests pin the confidence/adjudication
+  boundary that gates hold-vs-file, per the execution note's intent.
