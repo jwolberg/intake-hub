@@ -1,178 +1,141 @@
 # IntakeHub
 
-An **AI-first** workflow for clinical-trial site invoices: it interprets an
-emailed invoice, resolves its sponsor/study/site context, matches line items to
-the sponsor+study catalog, and **decides to submit to ClinRun or hold for
-exceptions — without a human gate before decisioning**. Reviewers then get a
-clear *post-decision* QC hub to understand outcomes, validate risk cases, and
-intervene (correct / rerun / escalate / retry).
+An **AI-first** workflow that turns a solopreneur's emailed receipts into a
+categorized **income/expense ledger** in a Google Sheet. It reads a receipt from
+your inbox, extracts the vendor / date / amount with per-field confidence,
+classifies it **income vs. expense** and assigns a **Schedule C category**, and
+then **decides on its own to file it to the Sheet or hold it for review — with no
+human gate before decisioning**. Reviewers get a clear *post-decision* QC hub to
+confirm outcomes, correct a category, resolve holds, or reject a non-receipt.
 
-- **Live Dashboard page:** _redeploying under the new `intakehub-hub` service — Cloud Run regenerates the URL hash on the next deploy (see [`docs/DEPLOY.md`](docs/DEPLOY.md)). The prior `invoicescreener-hub-…run.app` link is retired._
-- **Demo video: https://www.loom.com/share/0975477394ed4b47895f41821fdd3438**
-#
-## Overview page ##
-- Summary of invoices received as pdf in inbox
-- Key invoice information (Invoice #, Vendor, Sponsor, Amount, Status, Confidence Score, # of exceptions)
- ![Invoice summary: ](docs/img/summary.png)
- #
-## Key Features of Invoice Page ##
-- Decision status, confidence, and reasoning
-- Exception call outs: type, severity, human-readable context
-- Link to viewable source PDF
-- Line-item extracted metadata, with callout to value, confidence, evidence, and override
-- Matching of line item charge to catalog items
-![Invoice page 1 of 3: ](docs/img/inv1.png)
-![Invoice page 2 of 3: ](docs/img/inv2.png)
-![Invoice page 3 of 3: ](docs/img/inv3.png)
+The hard part was already solved — reading messy documents, extracting with
+confidence, deciding autonomously whether to file, and leaving an audit trail.
+This is that engine, pointed at a solopreneur's tax-time paperwork.
 
+> **Note on docs:** the product-facing docs (this README, ARCHITECTURE) describe
+> the ledger product. `PRD.md` / `STRATEGY.md` / `USERS.md` are being refreshed
+> from the prior clinical-trial framing in a follow-up docs pass.
 
-#
+## What it does
 
-[`docs/CHALLENGE_ASSESSMENT.md`](docs/CHALLENGE_ASSESSMENT.md) for a
-requirement-by-requirement status.
+- **Ingests receipts** from a pluggable inbox: a connected **Gmail mailbox**
+  (`INBOX_PROVIDER=gmail`), a watched **Google Drive folder** (`INBOX_PROVIDER=drive`),
+  or the offline demo set (default). No source is privileged.
+- **Filters receipts from noise** — newsletters and personal mail are dropped
+  before they ever become ledger candidates (minimal retention; email content is
+  treated as untrusted data, not instructions).
+- **Extracts + classifies + categorizes** each receipt with per-field confidence.
+- **Files or holds** by confidence: a confident receipt appends one row to your
+  Google Sheet (type, category, vendor, date, amount, source); an uncertain one is
+  held with a typed reason. Low confidence never silently files.
+- **Protects the ledger after the fact** — suspected duplicates are held (never
+  double-posted), holds surface in a notification digest, and posted rows can be
+  spot-checked.
+- **Keeps you in control** — a reviewer hub to correct a category, resolve a
+  hold, reject a non-receipt, or rerun, all as append-only audit overlays that
+  never mutate the AI's original output.
+
+Your Sheet is **user-owned and portable** — the app appends to it, but Postgres is
+the ledger of record, so the Sheet is a durable projection you can take anywhere.
 
 ## Quickstart (Docker, ~1 command)
 
 ```bash
-docker compose up -d --build                           # db + api + hub + stubs
-python -m backend.tools.seed_hub http://localhost:8000 # seed the demo invoices
+docker compose up -d --build                           # db + api + hub
+python -m backend.tools.seed_hub http://localhost:8000 # seed the demo documents
 # → API  http://localhost:8000  (/docs)
 # → Hub  http://localhost:5173
 ```
 
-Open the hub, click an invoice, and use **View source** (page image + the AI's
+Open the hub, click an item, and use **View source** (page image + the AI's
 highlight boxes, plus **Open original PDF**). No API key or network is required —
-the offline extractor handles the controlled sample PDFs. To use the real LLM
-provider (model-derived confidence), export `ANTHROPIC_API_KEY` before `up` (see
-[`docs/RUNBOOK.md`](docs/RUNBOOK.md)). Full local-dev paths (hot reload, tests,
-real-PDF CLI) are in the RUNBOOK; cloud deploy is in [`docs/DEPLOY.md`](docs/DEPLOY.md).
+the offline extractor handles the controlled sample PDFs and the ledger append
+uses an in-memory stub. To use the real LLM provider (model-derived confidence),
+export `ANTHROPIC_API_KEY` before `up` (see [`docs/RUNBOOK.md`](docs/RUNBOOK.md)).
+Full local-dev paths (hot reload, tests, real-PDF CLI) are in the RUNBOOK; cloud
+deploy is in [`docs/DEPLOY.md`](docs/DEPLOY.md).
 
-## Monitor your own Google Drive folder
+## Connect a real source
 
-Point IntakeHub at a Google Drive folder and it will **continuously watch** it:
-every new PDF is pulled, run through the pipeline, and filed into a
-`submitted` / `needs-review` / `failed` subfolder by its decision — while the hub
-stays the source of truth for review. Setup takes about five minutes.
+**Gmail mailbox** — the headline source. A one-time interactive OAuth setup mints
+a read-only refresh token; the poller then backfills the tax year and watches
+forward, filing confident receipts to your Sheet. Personal Gmail uses installed-app
+user-OAuth (a service account can't read a personal mailbox). Step-by-step —
+OAuth client, single-user "production" consent, the setup script, the Sheets
+service account, and at-rest token encryption — is in
+[`docs/gmail-sheets-setup.md`](docs/gmail-sheets-setup.md) (dev & test wiring:
+[`docs/RUNBOOK.md`](docs/RUNBOOK.md) Paths F & G).
 
-**Prerequisites:** Docker Desktop (or Compose), a Google account, and a Google
-Cloud project. Optional but recommended: an `ANTHROPIC_API_KEY` (without it, real
-PDFs extract blank and every invoice holds).
-
-### 1. Create a service account + key
-
-IntakeHub reads the folder as a **service account** (no end-user OAuth flow). In
-the [Google Cloud console](https://console.cloud.google.com/) → **IAM & Admin →
-Service Accounts**:
-
-1. **Create service account** (e.g. `intake-drive`). No project roles are needed —
-   access is granted per-folder in step 2.
-2. Open it → **Keys → Add key → JSON**, and download the key file. You'll paste its
-   contents into `.env` in step 3.
-
-### 2. Create the Drive folder and share it
-
-1. In [Google Drive](https://drive.google.com/), create (or pick) the folder to
-   watch.
-2. **Share** it with the service account's email
-   (`intake-drive@<project>.iam.gserviceaccount.com`), granting **Editor** —
-   Editor is required because the app *moves* processed files into subfolders.
-3. Copy the folder id from its URL:
-   `https://drive.google.com/drive/folders/`**`<THIS_IS_THE_FOLDER_ID>`**
-
-### 3. Configure `.env`
+**Google Drive folder** — point IntakeHub at a folder and it continuously watches
+it: every new PDF is pulled, run through the pipeline, and moved into a
+`posted` / `needs-review` / `failed` subfolder by its decision, while the hub stays
+the source of truth for review. Setup is in
+[`docs/drive-intake-setup.md`](docs/drive-intake-setup.md) (dev & test:
+[`docs/RUNBOOK.md`](docs/RUNBOOK.md) Path E). Start it with the poller sidecar:
 
 ```bash
-cp .env.example .env          # .env is gitignored
+docker compose --profile drive up -d --build   # adds the folder poller
 ```
 
-Set these (the file has inline comments for each):
-
-| Variable | Value |
-| --- | --- |
-| `INBOX_PROVIDER` | `drive` |
-| `DRIVE_FOLDER_ID` | the id from step 2 |
-| `GOOGLE_APPLICATION_CREDENTIALS` | the whole service-account JSON key, **on one line** starting with `{` (or an absolute path to a mounted key file) |
-| `ANTHROPIC_API_KEY` | your Anthropic key — required in practice (real Drive PDFs have no structured block, so without it extraction is blank and everything holds) |
-| `INBOX_POLL_INTERVAL` | seconds between folder checks (default `60`) |
-
-Selecting `drive` without a folder id or key **fails fast at startup** — it never
-silently falls back to the demo set.
-
-### 4. Start with monitoring enabled
-
-```bash
-docker compose --profile drive up -d --build
-```
-
-The `--profile drive` flag adds a **poller** sidecar that re-checks the folder
-every `INBOX_POLL_INTERVAL` seconds (the plain `docker compose up` demo omits it).
-
-### 5. Verify
-
-Drop a PDF into the folder root; within one interval it appears in the hub
-(<http://localhost:5173>) and moves into a `submitted` / `needs-review` / `failed`
-subfolder. Polling is idempotent — each file is keyed by its Drive id and recorded
-*seen* before it is moved, so a restart or network blip never double-submits.
-Follow the poller with `docker compose logs -f poller`.
-
-> **Getting invoices *into* the folder** is up to you (a Gmail filter + Apps
-> Script, a manual drop, any tool that writes to Drive) — IntakeHub treats every
-> new root-level `.pdf` as an invoice. An illustrative Apps Script and the full
-> reference are in [`docs/drive-intake-setup.md`](docs/drive-intake-setup.md).
-> Cloud Run deployment (Cloud Scheduler as the poller) is in
-> [`docs/DEPLOY.md`](docs/DEPLOY.md).
+Selecting `gmail` or `drive` without its credentials **fails fast at startup** — it
+never silently falls back to the demo set.
 
 ## How it works
 
-Email-shaped invoice → a staged pipeline, each stage a focused module behind the
+A receipt → a staged pipeline, each stage a focused module behind the
 orchestrator, which owns state transitions and writes an append-only audit trail:
 
 ```
-intake → parser → extraction → context → catalog → matching → decision → submission
-                     (LLM)      (MCP ref)  (scoped)   (+LLM tie-break)   (submit | hold→exceptions)
+intake → receipt filter → parser → extraction → classify + categorize → decision → Sheet append | hold
+        (drop non-receipts)          (LLM)      (income/expense + Sched. C)   (file → row | hold → review)
 ```
 
-- **Intake** (`backend/inbox`) — invoices arrive from a pluggable inbox behind
-  one client seam: the offline `MockInbox` demo set (default) or a watched
-  **Google Drive folder** (`INBOX_PROVIDER=drive`) that pulls new PDFs and files
-  each into a `submitted`/`needs-review`/`failed` subfolder by its decision. Setup
-  in [`docs/drive-intake-setup.md`](docs/drive-intake-setup.md); dev & test wiring
-  in [`docs/RUNBOOK.md`](docs/RUNBOOK.md) (Path E).
-- **Extraction** (`backend/extraction`) — LLM pulls metadata + line items with
-  per-field confidence (real Anthropic provider or an offline stand-in).
-- **Context** (`backend/context`) — ranks sponsor/study/site candidates from the
-  MCP-wrapped reference service; flags ambiguity and metadata mismatch.
-- **Catalog + matching** (`backend/catalog`, `backend/matching`) — fetches the
-  sponsor+study-scoped catalog and matches line items (exact/containment + price/
-  qty checks, LLM adjudication for ambiguous candidates).
-- **Decision** (`backend/decision`) — weakest-link confidence + severity policy;
-  submits only when confident (≥0.8), else holds with typed exceptions. Low
-  confidence never silently submits.
-- **Reliability** (`backend/orchestrator`) — per-invoice failure isolation,
-  bounded retry on transient catalog/submission errors, and `recover()` to resume
-  a failed invoice from the failed stage.
+- **Intake** (`backend/inbox`) — receipts arrive from a pluggable inbox behind one
+  client seam: `MockInbox` (offline demo), a watched **Google Drive folder**, or a
+  connected **Gmail mailbox** (backfill + incremental `history.list` sync).
+- **Receipt filter** (`backend/receipts`) — a two-stage funnel (cheap heuristic →
+  LLM only on the ambiguous band) drops non-receipts with minimal retention and
+  contains prompt injection (email content is data, never instructions).
+- **Extraction** (`backend/extraction`) — LLM pulls vendor / date / amount / line
+  items with per-field confidence (real Anthropic provider or an offline stand-in).
+- **Classify + categorize** (`backend/categorize`) — determines income vs. expense
+  and assigns a Schedule C category with candidate alternates, so the reviewer can
+  pick among candidates on a hold.
+- **Decision** (`backend/decision`) — weakest-link confidence over extraction +
+  income/expense + category; files only when confident (≥0.8), else holds with a
+  typed reason. Adversarial-looking content is always held.
+- **Ledger output** (`backend/clients/sheets.py`) — appends one row to a user-owned
+  Google Sheet, gated by a Postgres `sheet_appends` dedup ledger so retries never
+  double-post. The Sheet is a projection; Postgres is the source of truth.
+- **Ledger integrity** (`backend/ledger_integrity`) — holds suspected duplicates,
+  surfaces a held-count notification digest, and samples posted rows for spot-checks.
+- **Reliability** (`backend/orchestrator`) — per-item failure isolation, bounded
+  retry on transient Sheet-append errors, and `recover()` to resume a failed item.
 
-The **reviewer hub** (`frontend/`) shows the list (status/decision/confidence/
-exceptions + filters) and a detail view (extracted metadata, line-item matches,
-decision + risk flags, submission status, source overlay, processing timeline)
-with QC actions. Observability: append-only audit events, `/api/metrics`, and
-`GET /api/invoices/:id/trace`.
+The **reviewer hub** (`frontend/`) shows the list (status / decision / confidence /
+exceptions + filters) and a detail view (extracted fields, classification &
+category with candidate alternates, decision + risk flags, source overlay,
+processing timeline) with QC actions: correct a category, resolve a hold, reject a
+non-receipt, rerun, or retry. Observability: append-only audit events,
+`/api/metrics`, `/api/notifications`, and `GET /api/invoices/:id/trace`.
 
 ## Demo walkthrough
 
-`seed_hub` loads invoices spanning the key scenarios:
+`seed_hub` runs the sample documents through the ledger. The pipeline demonstrates
+each terminal outcome:
 
-| Invoice | Scenario | Outcome |
-|---|---|---|
-| INV-1001 | clean, clear metadata | **Submitted** |
-| INV-1002 | unmatched line item | Held (unmatched) |
-| INV-1005 | sponsor vs protocol mismatch | Held (context mismatch) |
-| INV-1006 | low-confidence line | Held (low confidence) |
-| INV-1008 | ambiguous site (sibling tie) | Held (context ambiguity) |
-| INV-1007 | large invoice vs larger catalog | **Submitted**, all matched |
+| Scenario | Outcome |
+|---|---|
+| Clean, categorizable expense (vendor + amount + a recognizable line) | **Posted** — one row appended to the Sheet |
+| Ambiguous category (e.g. office vs. supplies) | Held (low category confidence) — candidate categories shown |
+| Can't tell income vs. expense | Held (ambiguous income/expense) |
+| A second receipt for an already-filed charge | Held (suspected duplicate) — not double-posted |
+| Injection-style content in the document | Held (suspected adversarial) |
+| A newsletter / non-receipt (Gmail) | Dropped before extraction (minimal retention) |
 
-Try the QC flow: open a held invoice → correct a field → **Rerun** to re-decide;
-a failed invoice exposes **Retry failed stage**.
+Try the QC flow: open a held item → correct its category (or supply a missing
+amount) → **Rerun** to re-decide and file; a failed item exposes **Retry failed
+stage**; reject a non-receipt to drop it from the queue.
 
 ## Testing
 
@@ -183,16 +146,16 @@ pytest -q             # 248 passed, 1 skipped (Postgres round-trip; runs with a 
 ```
 
 Coverage spans every stage (unit), the orchestrator's state transitions +
-retry/recovery, the eight PRD §18 scenarios (`tests/scenarios/`), and
-stability-at-scale (`tests/integration/test_performance.py`).
+retry/recovery, end-to-end ledger flows (auto-file, hold, sheet-write recovery,
+duplicate holds, rerun idempotency), the receipt filter, the Gmail client/inbox,
+and the Sheets client + dedup ledger.
 
 ## Documentation
 
-- [`docs/PRD.md`](docs/PRD.md) — product requirements
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — structure & decisions
-- [`docs/RUNBOOK.md`](docs/RUNBOOK.md) — setup & run (all paths)
-- [`docs/BUILD_PLAN.md`](docs/BUILD_PLAN.md) — phases, tickets, status
-- [`docs/DEPLOY.md`](docs/DEPLOY.md) — Google Cloud Run deployment
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — structure & decisions (ledger pipeline)
+- [`docs/RUNBOOK.md`](docs/RUNBOOK.md) — setup & run (all paths, incl. Gmail F / Sheets G)
+- [`docs/gmail-sheets-setup.md`](docs/gmail-sheets-setup.md) — Gmail intake + Sheets ledger setup
 - [`docs/drive-intake-setup.md`](docs/drive-intake-setup.md) — Google Drive folder intake setup
-- [`docs/CHALLENGE_ASSESSMENT.md`](docs/CHALLENGE_ASSESSMENT.md) — requirement status
+- [`docs/DEPLOY.md`](docs/DEPLOY.md) — Google Cloud Run deployment
 - [`docs/implementation-notes.md`](docs/implementation-notes.md) — running decisions log
+- [`docs/PRD.md`](docs/PRD.md) · [`docs/STRATEGY.md`](docs/STRATEGY.md) · [`docs/USERS.md`](docs/USERS.md) — _being refreshed from the prior clinical-trial framing_
