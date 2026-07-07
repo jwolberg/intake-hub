@@ -144,7 +144,14 @@ def test_http_append_row_reuses_existing_spreadsheet_id_no_create():
         ),
     )
     client.append_row(["a"])
+    client.append_row(["b"])
     assert all(c[1] != "/spreadsheets" for c in calls)
+    # A configured (pre-existing) spreadsheet already has its header, so appending
+    # must NEVER re-write the header row — two appends → exactly two append calls,
+    # not a header row on the first (a fresh client is built per fetch request, so a
+    # per-append header write would duplicate the header every poll cycle).
+    append_calls = [c for c in calls if c[1].endswith(f"/values/{TAB_NAME}!A1:append")]
+    assert len(append_calls) == 2
 
 
 def test_http_errors_are_wrapped_as_typed_error():

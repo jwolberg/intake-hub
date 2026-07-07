@@ -361,9 +361,14 @@ def test_rerun_after_metadata_correction_resolves_hold(client):
     rerun_event = [e for e in detail["audit"] if e["action"] == "rerun"][-1]
     assert rerun_event["actor"] == "human"
     assert rerun_event["details"]["corrected_fields"] == ["total_amount"]
-    # AI original preserved; correction stays an overlay
-    assert detail["invoice"]["metadata"]["total_amount"] is None
+    # after rerun the invoice's effective metadata reflects the correction, so the
+    # filed Sheet row shows the corrected amount (not the stale AI value)
+    assert detail["invoice"]["metadata"]["total_amount"] == "52.99"
+    # the correction is still recorded as a human overlay on the audit trail
     assert detail["corrections"]["metadata"]["total_amount"] == "52.99"
+    correction = [e for e in detail["audit"]
+                  if e["action"] == "corrected" and e["details"].get("target") == "metadata"][-1]
+    assert correction["details"]["before"]["total_amount"] is None  # AI original preserved
 
 
 def test_rerun_unknown_invoice_404(client):

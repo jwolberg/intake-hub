@@ -171,6 +171,7 @@ def process(
     source = sample.get("source", {})
     record(repo, invoice.id, AuditAction.RECEIVED, actor=Actor.SYSTEM, details={
         "channel": source.get("channel"),
+        "message_id": source.get("message_id"),
         "subject": source.get("subject"),
         "sender": source.get("sender"),
         "attachment": source.get("attachment"),
@@ -243,15 +244,9 @@ def _categorize_and_file(
     force the post (the minimal duplicate-resolution path; v1 only holds dups).
     """
     categorization = categorize(invoice.id, extraction, llm, source=source)
-    # A human category correction (R10/AE2) is pinned as a fixed, confident input,
-    # exactly like a metadata correction — the AI's original stays on the audit event.
-    corrected_category = corrections.category_overlay(repo.get_audit(invoice.id))
-    if corrected_category:
-        categorization = categorization.model_copy(update={
-            "category": corrected_category,
-            "category_confidence": 1.0,
-            "category_evidence": "corrected by reviewer",
-        })
+    # Record the AI's ORIGINAL classification/categorization on the audit trail
+    # first — the detail view reads these events as "what the AI produced", and a
+    # human category correction must stay an overlay on top, not overwrite them.
     _advance(repo, invoice, InvoiceStatus.CLASSIFIED)
     record(repo, invoice.id, AuditAction.CLASSIFIED, details={
         "document_type": categorization.document_type.value,
@@ -267,6 +262,17 @@ def _categorize_and_file(
         "alternates": categorization.alternates,
         "rationale": categorization.rationale,
     })
+
+    # A human category correction (R10/AE2) is then pinned as a fixed, confident
+    # input for the decision + Sheet row — an overlay, so the AI original recorded
+    # above is preserved.
+    corrected_category = corrections.category_overlay(repo.get_audit(invoice.id))
+    if corrected_category:
+        categorization = categorization.model_copy(update={
+            "category": corrected_category,
+            "category_confidence": 1.0,
+            "category_evidence": "corrected by reviewer",
+        })
 
     decision = decide(extraction, categorization)
     invoice.decision = decision.decision
@@ -390,8 +396,13 @@ def rerun(
 
     audit = repo.get_audit(invoice_id)
     extraction = _reconstruct_extraction(repo, invoice, audit)
+    # Reflect the corrected metadata on the invoice so the filed Sheet row (built
+    # from invoice.metadata) shows the reviewer's corrected vendor/date/amount, not
+    # the stale AI values that the correction unblocked.
+    invoice.metadata = extraction.metadata
     received = latest_details(audit, AuditAction.RECEIVED)
-    source = {k: received.get(k) for k in ("channel", "subject", "sender", "attachment")}
+    source = {k: received.get(k)
+              for k in ("channel", "message_id", "subject", "sender", "attachment")}
 
     record(repo, invoice_id, AuditAction.RERUN, actor=Actor.HUMAN,
            reason="rerun with corrected data",
@@ -434,7 +445,8 @@ def recover(
 
     audit = repo.get_audit(invoice_id)
     received = latest_details(audit, AuditAction.RECEIVED)
-    source = {k: received.get(k) for k in ("channel", "subject", "sender", "attachment")}
+    source = {k: received.get(k)
+              for k in ("channel", "message_id", "subject", "sender", "attachment")}
 
     record(repo, invoice_id, AuditAction.RECOVERED, actor=Actor.SYSTEM,
            reason="retry failed stage", details={"from_status": invoice.status.value})
@@ -445,12 +457,17 @@ def recover(
             extraction = _reconstruct_extraction(repo, invoice, audit)
         else:
             extraction = _reextract(repo, invoice_id, audit, llm)
-            invoice.metadata = extraction.metadata
             repo.replace_line_items(invoice_id, extraction.line_items)
-        # Recovery re-drives a failed post; the dup guard already ran on the first
-        # pass, so skip it (a Sheet-write failure is not a duplicate signal).
+        # Keep invoice.metadata in step with the (possibly corrected) extraction so
+        # the filed Sheet row reflects it (build_ledger_row reads invoice.metadata).
+        invoice.metadata = extraction.metadata
+        # Recovery re-drives a failed item, but a FAILED item may have failed
+        # *before* the duplicate guard ran (e.g. a stage_failure inside categorize),
+        # so the guard must run here too — otherwise recovering such an item could
+        # post a true duplicate (R19). (Rerun, by contrast, skips it: a reviewer
+        # rerunning a held item has judged it distinct.)
         _categorize_and_file(repo, invoice, extraction, source,
-                             llm=llm, sheets=sheets, check_duplicates=False)
+                             llm=llm, sheets=sheets, check_duplicates=True)
     except Exception as exc:  # same isolation contract as process
         _fail(repo, invoice, "stage_failure", str(exc))
 
@@ -465,7 +482,19 @@ def _reextract(
     captured at PARSED time is the input."""
     detail = repo.get_detail(invoice_id) or {}
     source = {k: latest_details(audit, AuditAction.RECEIVED).get(k)
-              for k in ("channel", "subject", "sender", "attachment", "attachment_path")}
+              for k in ("channel", "message_id", "subject", "sender", "attachment",
+                        "attachment_path")}
+    # A real PDF invoice stored its bytes at intake. Without re-surfacing them, the
+    # extraction-client picker (`_is_real_pdf`) would fall back to the JSON stand-in
+    # and re-extract the PDF as empty (a Gmail/Cloud PDF has no local
+    # ``attachment_path``). Re-attach the stored bytes so recovery re-parses the PDF
+    # layout text with the right client.
+    if not _is_real_pdf(source):
+        pdf = repo.get_source_pdf(invoice_id)
+        if pdf:
+            source["attachment_b64"] = base64.b64encode(pdf).decode()
+            if not str(source.get("attachment") or "").lower().endswith(".pdf"):
+                source["attachment"] = "source.pdf"
     parsed = ParsedDocument(
         invoice_id=invoice_id,
         source=source,

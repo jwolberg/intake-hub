@@ -2093,3 +2093,56 @@ already covers dead-code cleanup. Same end state, no red window.
 - **Out of scope (deferred product-docs PR, per plan Scope Boundaries):** README.md +
   PRD/STRATEGY/USERS still describe the clinical product — a coherent product-overview
   rewrite (with new demo assets) is the separate docs effort, not this plan.
+
+### Post-implementation code review — fixes applied
+An 8-angle multi-agent review of the whole pivot surfaced these real issues, now fixed
+(each with a regression test):
+- **Corrected metadata now reaches the Sheet row (A1):** `rerun`/`recover` reassign
+  `invoice.metadata = extraction.metadata`, so a reviewer's corrected vendor/date/amount
+  is what `build_ledger_row` files — previously the row used the stale AI value.
+- **CATEGORIZED audit records the AI original (A3):** the human category overlay is now
+  applied *after* recording the CLASSIFIED/CATEGORIZED events, so the detail view's
+  "AI category" isn't overwritten by the correction.
+- **Sheet header written only on creation (A5):** `HttpSheetsClient` no longer re-writes
+  the header on every append — a fresh client is built per fetch request, so the old
+  per-instance `_header_written` gate duplicated the header row every poll cycle against a
+  configured spreadsheet.
+- **`recover` runs the duplicate check (B1):** a FAILED item may have failed *before* the
+  dup guard ran, so recover now passes `check_duplicates=True` (rerun still skips it — the
+  reviewer judged it distinct). Prevents double-posting a duplicate via /retry.
+- **Recovery re-extracts real PDFs correctly (C1):** `_reextract` re-attaches the stored
+  PDF bytes as `attachment_b64` so `_is_real_pdf` picks the layout client — a Gmail/Cloud
+  PDF that failed extraction no longer re-extracts to empty on recover. `message_id` is now
+  persisted on the RECEIVED event so rerun/recover keep the Sheet Source ref.
+- **Gmail per-message isolation (D2):** `get_message`/`get_attachment` wrap base64/JSON
+  parsing so a malformed message raises `GmailClientError` (isolated + skipped) instead of
+  an uncaught error that aborts the whole poll.
+- **Token-decrypt is fail-safe (D3):** `_load_refresh_token` catches a rotated/invalid
+  `GMAIL_TOKEN_ENC_KEY` (InvalidToken/ValueError) and degrades to the env token instead of
+  crashing inbox construction.
+- **Revoke sends the token in the POST body, not the URL query (D1)** — avoids leaking it
+  into access/proxy logs.
+- **Low-confidence filter surfaces ledger holds (B4):** `_LOW_CONFIDENCE_FLAGS` now includes
+  `ambiguous_income_expense`/`low_category_confidence`; dropped the dead clinical filter tags
+  (`mismatched_metadata`/`unmatched_line_items`) and the sponsor/study/site fields + dead
+  `get_context`/`get_matches` calls from `_summary`/`_filter_tags`.
+
+**Known residuals (documented, not fixed — proportionate for single-tenant v1):**
+- *Sheets append is not atomic across the two systems* (A2/B2/C3): if `client.append_row`
+  succeeds but `record_append` (Postgres) fails, or the append succeeds server-side but the
+  HTTP response errors, a later retry/recover can post a second physical row. The Postgres
+  gate prevents cross-invocation double-posts; the within-a-single-append window remains.
+  A robust fix needs a pending/posted status on `sheet_appends` (reserve → append →
+  finalize) — a follow-up.
+- *Env refresh-token rotation requires clearing the DB row first* (D4): update
+  `GMAIL_REFRESH_TOKEN` and run `gmail_revoke.py`, else the stored encrypted token wins.
+- *Metadata-only fetch omits attachment parts* (D5): the receipt filter's PDF-attachment
+  heuristic doesn't fire on the cheap metadata fetch, pushing some PDF receipts into the LLM
+  band (still classified correctly, just less cheaply). A follow-up could add a "current
+  historyId"/attachment probe to the GmailClient contract (also addresses U8's backfill note).
+- *No vendor-presence hold* (B6): only `total_amount` is a critical field; a confidently-wrong
+  blank vendor can file. Left as product judgment (avoid over-holding).
+- *Minor duplication* (E1/E2/E5): Google token-mint logic mirrored across the three Http
+  clients; inline-JSON-vs-path dispatch in two factories; held-invoice derivation in three
+  spots. Accepted pattern-mirroring; extractable in a follow-up. Dead `apply_match_overlay`
+  + `MatchResult` in corrections also left for a follow-up cleanup.

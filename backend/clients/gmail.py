@@ -27,6 +27,7 @@ Both are plain functions, independently testable against fixture payloads.
 from __future__ import annotations
 
 import base64
+import binascii
 from collections.abc import Callable
 from typing import Protocol
 
@@ -360,10 +361,16 @@ class HttpGmailClient:
             resp.raise_for_status()
         except httpx.HTTPError as exc:
             raise GmailClientError(f"get_message failed for {message_id}: {exc}") from exc
-        data = resp.json()
-        payload = data.get("payload", {}) or {}
-        headers = {h["name"]: h["value"] for h in payload.get("headers", [])}
-        body_text, body_html, attachments = walk_parts(payload)
+        # Parsing/decoding can fail on a malformed message (bad base64, missing keys);
+        # surface it as GmailClientError so the fetch loop isolates this one message
+        # instead of aborting the whole poll.
+        try:
+            data = resp.json()
+            payload = data.get("payload", {}) or {}
+            headers = {h["name"]: h["value"] for h in payload.get("headers", [])}
+            body_text, body_html, attachments = walk_parts(payload)
+        except (ValueError, KeyError, TypeError, binascii.Error) as exc:
+            raise GmailClientError(f"get_message parse failed for {message_id}: {exc}") from exc
         return GmailMessage(
             id=data.get("id", message_id),
             thread_id=data.get("threadId", ""),

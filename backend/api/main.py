@@ -107,24 +107,25 @@ InboxDep = Annotated[InboxClient, Depends(get_inbox)]
 
 # Held/failed invoices are the ones still awaiting a human (needs review).
 _NEEDS_REVIEW_STATUSES = {InvoiceStatus.HELD, InvoiceStatus.FAILED}
-# Exception codes that signal the AI was unsure (decision/extraction/match/context).
+# Exception codes that signal the AI was unsure (extraction / income-expense /
+# category / overall). Includes the ledger hold reasons so the "low confidence"
+# chip actually surfaces the most common holds (ambiguous type, low category conf).
 _LOW_CONFIDENCE_FLAGS = {
-    "low_extraction_confidence", "moderate_extraction_confidence",
-    "low_match_confidence", "weak_match", "low_confidence", "context_unresolved",
+    "low_extraction_confidence", "moderate_extraction_confidence", "low_confidence",
+    "ambiguous_income_expense", "low_category_confidence",
 }
-# A submit below this confidence is worth a second look even though it cleared the floor.
+# A filed item below this confidence is worth a second look even though it cleared the floor.
 _SUBMIT_CONFIDENCE_WATCH = 0.75
 
-# Filter keys the API accepts (PRD §10). Statuses double as tags so the same
-# membership test serves every chip.
+# Filter keys the API accepts. Statuses double as tags so the same membership test
+# serves every chip.
 FILTER_KEYS = {
-    "posted", "held", "failed", "needs_review",
-    "low_confidence", "mismatched_metadata", "unmatched_line_items",
+    "posted", "held", "failed", "needs_review", "low_confidence",
 }
 
 
-def _filter_tags(invoice, exceptions, matches, ctx) -> list[str]:
-    """Triage tags for an invoice (PRD §10 Suggested filters)."""
+def _filter_tags(invoice, exceptions) -> list[str]:
+    """Triage tags for an invoice (the reviewer hub's filter chips)."""
     tags = {invoice.status.value}
     if invoice.status in _NEEDS_REVIEW_STATUSES:
         tags.add("needs_review")
@@ -137,25 +138,14 @@ def _filter_tags(invoice, exceptions, matches, ctx) -> list[str]:
     ):
         tags.add("low_confidence")
 
-    # Context warnings ending in "_mismatch" are invoice-vs-reference contradictions.
-    if "context_mismatch" in exc_types or (
-        ctx and any(w.endswith("_mismatch") for w in ctx.warnings)
-    ):
-        tags.add("mismatched_metadata")
-
-    if "unmatched_line_item" in exc_types or any(m.catalog_item_id is None for m in matches):
-        tags.add("unmatched_line_items")
-
     return sorted(tags)
 
 
 def _summary(invoice, repo: Repository) -> dict:
-    """List-row view of an invoice (PRD §10 Invoice List View)."""
-    ctx = repo.get_context(invoice.id)
+    """List-row view of an invoice (the reviewer hub's list)."""
     exceptions = repo.get_exceptions(invoice.id)
-    matches = repo.get_matches(invoice.id)
-    # Reflect human metadata corrections in the listed fields (PRD FR10) without
-    # mutating the AI output: apply the overlay from the audit trail.
+    # Reflect human metadata corrections in the listed fields (R10) without mutating
+    # the AI output: apply the overlay from the audit trail.
     meta = corrections.effective_metadata(invoice.metadata, repo.get_audit(invoice.id))
     total = meta.total_amount
     return {
@@ -166,11 +156,8 @@ def _summary(invoice, repo: Repository) -> dict:
         "invoice_number": meta.invoice_number,
         "vendor_name": meta.vendor_name,
         "total_amount": str(total) if total is not None else None,
-        "sponsor_id": ctx.sponsor_id if ctx else None,
-        "study_id": ctx.study_id if ctx else None,
-        "site_id": ctx.site_id if ctx else None,
         "exception_count": len(exceptions),
-        "filter_tags": _filter_tags(invoice, exceptions, matches, ctx),
+        "filter_tags": _filter_tags(invoice, exceptions),
         "updated_at": invoice.updated_at,
     }
 
@@ -250,8 +237,8 @@ def review_queue(repo: RepoDep) -> list[dict]:
             "reason": primary.type if primary else None,
             "reason_title": primary.message if primary else None,
         })
-    # Group by reason, oldest-first within each group (and groups ordered by their
-    # oldest item), so a reviewer clears the longest-waiting reasons first.
+    # Group by reason (so same-reason items are worked together) and oldest-first
+    # within each group (so the longest-waiting item of a reason is handled first).
     rows.sort(key=lambda r: (r["reason"] or "", r["updated_at"]))
     return rows
 

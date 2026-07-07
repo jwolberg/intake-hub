@@ -292,3 +292,14 @@ def _load_refresh_token(repo, settings) -> str:
             "persisted at rest (falling back to GMAIL_REFRESH_TOKEN each run)"
         )
         return settings.gmail_refresh_token
+    except Exception as exc:  # noqa: BLE001 - decrypt is best-effort; never crash inbox build
+        # A rotated/invalid GMAIL_TOKEN_ENC_KEY or corrupt ciphertext must NOT crash
+        # inbox construction — degrade to the env token so a key-rotation response
+        # path still works. Clearing the stale row (gmail_revoke.py) restores at-rest
+        # encryption on the next run.
+        logger.warning(
+            "gmail: could not use the stored encrypted refresh token (%s); falling "
+            "back to GMAIL_REFRESH_TOKEN. If you rotated GMAIL_TOKEN_ENC_KEY, run "
+            "backend/tools/gmail_revoke.py to clear the stale token row.", exc,
+        )
+        return settings.gmail_refresh_token

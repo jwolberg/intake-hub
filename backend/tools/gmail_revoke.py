@@ -52,7 +52,15 @@ def run(refresh_token: str | None = None) -> int:
         return 2
 
     try:
-        resp = httpx.post(REVOKE_URL, params={"token": token}, timeout=30.0)
+        # Send the token in the form-encoded POST body (per Google's revoke docs),
+        # NOT as a URL query param — query strings leak into access/proxy/APM logs,
+        # and this is the one token we are trying to invalidate.
+        resp = httpx.post(
+            REVOKE_URL,
+            data={"token": token},
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            timeout=30.0,
+        )
         resp.raise_for_status()
         print("Revoked the Gmail refresh token with Google.")
     except httpx.HTTPError as exc:

@@ -125,7 +125,6 @@ class HttpSheetsClient:
         self._token_provider = token_provider
         self._sa_credentials = None  # built lazily on first token mint
         self._client = client or httpx.Client(base_url=self.BASE_URL, timeout=30.0)
-        self._header_written = False
 
     # --- auth ---------------------------------------------------------------
 
@@ -180,10 +179,13 @@ class HttpSheetsClient:
         return updates.get("updatedRange") or f"{TAB_NAME}!A:F"
 
     def _ensure_spreadsheet(self) -> None:
+        # The header row is written exactly once, when this client *creates* a new
+        # spreadsheet. A pre-existing spreadsheet (configured ``spreadsheet_id``)
+        # already has its header, so we must NOT re-write it — a fresh client is
+        # built per fetch request, and a per-append header write would append a
+        # duplicate header row on every poll cycle.
         if self._spreadsheet_id is None:
             self._create_spreadsheet()
-        if not self._header_written:
-            self._write_header()
 
     def _create_spreadsheet(self) -> None:
         try:
@@ -199,6 +201,7 @@ class HttpSheetsClient:
         except httpx.HTTPError as exc:
             raise SheetsClientError(f"create spreadsheet failed: {exc}") from exc
         self._spreadsheet_id = resp.json()["spreadsheetId"]
+        self._write_header()
 
     def _write_header(self) -> None:
         try:
@@ -211,7 +214,6 @@ class HttpSheetsClient:
             resp.raise_for_status()
         except httpx.HTTPError as exc:
             raise SheetsClientError(f"write header failed: {exc}") from exc
-        self._header_written = True
 
 
 @dataclass

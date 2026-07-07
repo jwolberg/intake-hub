@@ -13,7 +13,7 @@ from backend.clients import PassthroughLLMClient, StubSheetsClient
 from backend.db.repository import InMemoryRepository
 from backend.domain import Invoice, InvoiceMetadata, InvoiceStatus
 from backend.ledger_integrity import find_duplicate, sample_posted
-from backend.orchestrator import process
+from backend.orchestrator import process, recover
 from fastapi.testclient import TestClient
 
 
@@ -86,6 +86,31 @@ def test_second_receipt_for_same_charge_is_held_not_double_posted():
     assert len(sheets.rows) == 1  # not double-posted
     exc = {e.type for e in repo.get_exceptions(second.id)}
     assert "suspected_duplicate" in exc
+
+
+def test_recover_runs_the_duplicate_check_when_first_pass_failed_before_it():
+    # B1 regression: an item can FAIL before the dup guard runs (e.g. its Sheet
+    # write failed). If a duplicate gets posted in the meantime, recovering the
+    # failed item must still hold it rather than double-post.
+    repo = InMemoryRepository()
+    good = StubSheetsClient()
+    failing = StubSheetsClient()
+    failing.fail_always = True
+
+    # B fails its Sheet write before any duplicate exists → FAILED (dup guard passed).
+    b = process(_dup_sample("m1"), repo, llm=PassthroughLLMClient(), sheets=failing)
+    assert b.status is InvoiceStatus.FAILED
+
+    # A duplicate of B is then posted.
+    a = process(_dup_sample("m2"), repo, llm=PassthroughLLMClient(), sheets=good)
+    assert a.status is InvoiceStatus.POSTED
+
+    # Recovering B (Sheet now healthy) must detect the duplicate and hold it.
+    recover(b.id, repo, llm=PassthroughLLMClient(), sheets=good)
+    recovered = repo.get_invoice(b.id)
+    assert recovered.status is InvoiceStatus.HELD
+    assert len(good.rows) == 1  # B was not double-posted
+    assert "suspected_duplicate" in {e.type for e in repo.get_exceptions(b.id)}
 
 
 def test_distinct_charge_same_vendor_different_amount_still_posts():
