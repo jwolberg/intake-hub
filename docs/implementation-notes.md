@@ -2076,3 +2076,20 @@ already covers dead-code cleanup. Same end state, no red window.
 - Final state: `.venv/bin/python -m pytest -q` → 244 passed, 2 skipped (was 225/1 before
   this ticket — +19 new tests, +1 new skip from the cryptography-gated round-trip test);
   `ruff check backend tests` clean. `backend/api/main.py` was not touched.
+
+### U11 — Docs, config, and deploy
+- ARCHITECTURE.md rewritten for the ledger pipeline (stages, categorize/receipts/
+  ledger_integrity modules, ledger hold reasons, Sheets projection + sheet_appends
+  dedup, three inbox providers); the clinical references that remain are in the
+  explicit "removed modules" section.
+- RUNBOOK.md gains Path F (Gmail intake) + Path G (Sheets ledger), mirroring Path E's
+  offline-stub-then-real-credential structure and naming the actual test files.
+- New docs/gmail-sheets-setup.md (mirrors drive-intake-setup.md): Gmail installed-app
+  OAuth (single-user "production" consent, gmail.readonly, setup script), Fernet
+  token encryption, Sheets service account, revoke script.
+- .env.example + docker-compose.yml pass the new vars (INBOX_PROVIDER gmail, SHEETS_*,
+  GMAIL_*); `docker compose config` validates. DEPLOY.md documents Gmail/Sheets secrets
+  and reiterates the fallback-safe Cloud-Run→Anthropic egress limitation.
+- **Out of scope (deferred product-docs PR, per plan Scope Boundaries):** README.md +
+  PRD/STRATEGY/USERS still describe the clinical product — a coherent product-overview
+  rewrite (with new demo assets) is the separate docs effort, not this plan.
