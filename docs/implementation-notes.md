@@ -2146,3 +2146,17 @@ An 8-angle multi-agent review of the whole pivot surfaced these real issues, now
   clients; inline-JSON-vs-path dispatch in two factories; held-invoice derivation in three
   spots. Accepted pattern-mirroring; extractable in a follow-up. Dead `apply_match_overlay`
   + `MatchResult` in corrections also left for a follow-up cleanup.
+
+### Post-review — cryptography installed, encrypted-token path exercised
+- Installed `cryptography` (already listed in `backend/requirements.txt`; the venv had
+  omitted it), so the Fernet at-rest refresh-token round-trip test now runs instead of
+  skipping. Suite is now **248 passed, 1 skipped** (the lone skip is the Postgres
+  round-trip, which needs a live `DATABASE_URL`).
+- Exercising the path caught a **test-fixture bug the skip had masked**:
+  `tests/unit/test_gmail_inbox.py::_fake_settings` used `gmail_token_enc_key="fake-key"`,
+  not a valid Fernet key. With cryptography absent it fell into the crypto-unavailable
+  fallback; with cryptography present, `encrypt_token` (correctly) rejected the bogus key
+  and the D3 fail-safe fell back to the unencrypted config path, so nothing persisted and
+  `test_build_gmail_inbox_constructs_client_with_injected_repo` failed. Fixed the fixture
+  to a real `Fernet.generate_key()` value — the encrypted persistence path now genuinely
+  runs. (Confirms the production encrypt/decrypt + at-rest persistence work end to end.)

@@ -179,7 +179,7 @@ a failed invoice exposes **Retry failed stage**.
 ```bash
 pip install -r backend/requirements-dev.txt
 ruff check .          # lint
-pytest -q             # 200 passed, 1 skipped (Postgres round-trip; runs with a live DB)
+pytest -q             # 248 passed, 1 skipped (Postgres round-trip; runs with a live DB)
 ```
 
 Coverage spans every stage (unit), the orchestrator's state transitions +

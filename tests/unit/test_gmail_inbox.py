@@ -253,7 +253,10 @@ def _fake_settings(**overrides) -> types.SimpleNamespace:
         gmail_client_id="cid",
         gmail_client_secret="secret",
         gmail_refresh_token="refresh-token",
-        gmail_token_enc_key="fake-key",
+        # A valid Fernet key (32 url-safe base64 bytes) so the at-rest encryption
+        # path actually runs when cryptography is installed — a bogus key would
+        # (correctly) fail-safe to the unencrypted config fallback and never persist.
+        gmail_token_enc_key="wnssi1WDj8KwWPS7l9ayJ-P0x20YaAcntmk70bIgXR0=",
         gmail_label="processed",
         gmail_tax_year=2026,
     )
