@@ -11,11 +11,23 @@ from enum import Enum
 
 
 class InvoiceStatus(str, Enum):
-    """Workflow state of an invoice (ARCHITECTURE.md §6)."""
+    """Workflow state of an invoice (ARCHITECTURE.md §6).
+
+    The ledger pivot replaces the clinical-trial middle/terminal states with
+    ``CLASSIFIED`` (income vs expense), ``CATEGORIZED`` (Schedule C category), and
+    ``POSTED`` (appended to the Sheet). The clinical-trial states below remain
+    only until the pipeline tail is repointed (U4) and the old stages removed
+    (U5); new code should use the ledger states.
+    """
 
     RECEIVED = "received"
     PARSED = "parsed"
     EXTRACTED = "extracted"
+    # --- ledger states ---
+    CLASSIFIED = "classified"      # income vs expense determined (R5)
+    CATEGORIZED = "categorized"    # Schedule C category assigned (R6)
+    POSTED = "posted"              # appended to the user's Google Sheet (R8)
+    # --- clinical-trial states (removed in U5) ---
     CONTEXT_RESOLVED = "context_resolved"
     CATALOG_MATCHED = "catalog_matched"
     SUBMITTED = "submitted"
@@ -24,6 +36,7 @@ class InvoiceStatus(str, Enum):
     RERUN_REQUESTED = "rerun_requested"
     CORRECTED = "corrected"
     ESCALATED = "escalated"
+    REJECTED = "rejected"       # reviewer discarded a non-receipt (R10/AE4)
 
 
 class Decision(str, Enum):
@@ -31,6 +44,19 @@ class Decision(str, Enum):
 
     SUBMIT = "submit"
     HOLD = "hold"
+
+
+class DocumentType(str, Enum):
+    """Whether a document records money coming in or going out (R5).
+
+    ``UNKNOWN`` is the offline/low-confidence fallback — the categorize stage
+    returns it (with low confidence) rather than guessing, so the decision engine
+    holds instead of mis-labelling (AE3).
+    """
+
+    INCOME = "income"
+    EXPENSE = "expense"
+    UNKNOWN = "unknown"
 
 
 class Severity(str, Enum):
@@ -73,6 +99,11 @@ class AuditAction(str, Enum):
     RECEIVED = "received"
     PARSED = "parsed"
     EXTRACTED = "extracted"
+    # --- ledger actions ---
+    CLASSIFIED = "classified"      # income vs expense determined (R5)
+    CATEGORIZED = "categorized"    # Schedule C category assigned (R6)
+    POSTED = "posted"              # appended to the user's Google Sheet (R8)
+    # --- clinical-trial actions (removed in U5) ---
     CONTEXT_RESOLVED = "context_resolved"
     CATALOG_MATCHED = "catalog_matched"
     MATCHED = "matched"
@@ -85,4 +116,5 @@ class AuditAction(str, Enum):
     RERUN = "rerun"
     RECOVERED = "recovered"
     ESCALATED = "escalated"
+    REJECTED = "rejected"
     NOTE = "note"

@@ -43,6 +43,21 @@ export function getMetrics() {
   return getJSON("/api/metrics");
 }
 
+// Held items for review, default oldest-first grouped by hold reason (R10).
+export function getReviewQueue() {
+  return getJSON("/api/review-queue");
+}
+
+// Held-item notification digest: total count + breakdown by reason (R18).
+export function getNotifications() {
+  return getJSON("/api/notifications");
+}
+
+// A bounded random sample of already-posted items to spot-check (R15).
+export function spotCheck(k = 5) {
+  return postJSON("/api/spot-check", { k });
+}
+
 export function getHealth() {
   return getJSON("/health");
 }
@@ -55,6 +70,16 @@ export function correctMetadata(id, updates, reason) {
 
 export function correctLineItem(id, body) {
   return postJSON(`/api/invoices/${id}/corrections/line-item`, body);
+}
+
+// Overlay a Schedule C category correction on a held item; rerun files it (AE2).
+export function correctCategory(id, category, reason) {
+  return postJSON(`/api/invoices/${id}/corrections/category`, { category, reason });
+}
+
+// Reject a non-receipt: remove it from the queue, never file it (AE4).
+export function rejectInvoice(id, note) {
+  return postJSON(`/api/invoices/${id}/reject`, { note });
 }
 
 export function markReviewed(id, note) {

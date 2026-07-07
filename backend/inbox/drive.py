@@ -27,8 +27,8 @@ from . import InboxMessage
 logger = logging.getLogger(__name__)
 
 # Status subfolder names the processed file is moved into (KTD4). Kept as module
-# constants so the runbook (U6) and tests reference the same literals.
-SUBMITTED_DIR = "submitted"
+# constants so the runbook and tests reference the same literals.
+POSTED_DIR = "posted"
 NEEDS_REVIEW_DIR = "needs-review"
 FAILED_DIR = "failed"
 
@@ -101,14 +101,14 @@ class DriveInbox:
 
 
 def _dest_for(invoice: Invoice) -> str:
-    """Map a processed invoice to its status subfolder (KTD4).
+    """Map a processed item to its status subfolder (KTD4).
 
-    FAILED is checked first: a submit that fails at the ClinRun call ends FAILED
-    with ``decision == SUBMIT``, and such a file was not actually submitted, so it
-    belongs in ``failed`` rather than ``submitted``.
+    FAILED is checked first: a file that fails at the Sheet-append call ends FAILED
+    with ``decision == SUBMIT``, and such a file was not actually posted, so it
+    belongs in ``failed`` rather than ``posted``.
     """
     if invoice.status is InvoiceStatus.FAILED:
         return FAILED_DIR
     if invoice.decision is Decision.SUBMIT:
-        return SUBMITTED_DIR
+        return POSTED_DIR
     return NEEDS_REVIEW_DIR

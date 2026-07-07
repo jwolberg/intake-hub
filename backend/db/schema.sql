@@ -36,31 +36,6 @@ CREATE TABLE IF NOT EXISTS line_items (
 );
 CREATE INDEX IF NOT EXISTS idx_line_items_invoice ON line_items(invoice_id);
 
-CREATE TABLE IF NOT EXISTS resolved_context (
-    invoice_id  TEXT PRIMARY KEY REFERENCES invoices(id) ON DELETE CASCADE,
-    sponsor_id  TEXT,
-    study_id    TEXT,
-    site_id     TEXT,
-    confidence  DOUBLE PRECISION NOT NULL DEFAULT 0,
-    candidates  JSONB NOT NULL DEFAULT '[]'::jsonb,
-    warnings    JSONB NOT NULL DEFAULT '[]'::jsonb
-);
-
-CREATE TABLE IF NOT EXISTS match_results (
-    line_item_id              TEXT PRIMARY KEY REFERENCES line_items(id) ON DELETE CASCADE,
-    invoice_id                TEXT NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
-    catalog_item_id           TEXT,
-    catalog_description       TEXT,
-    confidence                DOUBLE PRECISION NOT NULL DEFAULT 0,
-    amount_match              BOOLEAN,
-    quantity_match            BOOLEAN,
-    rationale                 TEXT,
-    requires_exception_review BOOLEAN NOT NULL DEFAULT FALSE,
-    alternates                JSONB NOT NULL DEFAULT '[]'::jsonb,
-    exceptions                JSONB NOT NULL DEFAULT '[]'::jsonb
-);
-CREATE INDEX IF NOT EXISTS idx_match_results_invoice ON match_results(invoice_id);
-
 CREATE TABLE IF NOT EXISTS exceptions (
     id          TEXT PRIMARY KEY,
     invoice_id  TEXT NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
@@ -81,17 +56,44 @@ CREATE TABLE IF NOT EXISTS audit_events (
 );
 CREATE INDEX IF NOT EXISTS idx_audit_events_invoice ON audit_events(invoice_id, timestamp);
 
-CREATE TABLE IF NOT EXISTS catalog_cache (
-    sponsor_id  TEXT NOT NULL,
-    study_id    TEXT NOT NULL,
-    items       JSONB NOT NULL DEFAULT '[]'::jsonb,
-    fetched_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (sponsor_id, study_id)
-);
-
 -- Inbox idempotency (P6-T3): message ids already ingested, so re-fetching a mock
 -- inbox never double-processes the same email (PRD §14, §7 Step 1 "Mock inbox").
 CREATE TABLE IF NOT EXISTS seen_messages (
     message_id  TEXT PRIMARY KEY,
     seen_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Sheet-append idempotency (feat: solopreneur-ledger pivot, U3): source-of-truth
+-- dedup gate for appends to the user's Google Sheet ledger. The Sheet is a
+-- projection of this table, not the other way around — a retry after a
+-- crashed/partial append checks this table first, so the same filed item is
+-- never posted to the Sheet twice.
+CREATE TABLE IF NOT EXISTS sheet_appends (
+    idempotency_key TEXT PRIMARY KEY,
+    sheet_row_ref   TEXT,
+    status          TEXT NOT NULL DEFAULT 'posted',
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- OAuth refresh tokens (feat: solopreneur-ledger pivot, U8), encrypted at rest.
+-- ``provider`` is a fixed key (e.g. 'gmail'); ``encrypted_token`` is Fernet
+-- ciphertext (backend/inbox/_crypto.py) keyed by GMAIL_TOKEN_ENC_KEY — the
+-- refresh token is the key to the mailbox (R20), so it is never written here in
+-- cleartext. Cleared by backend/tools/gmail_revoke.py on revoke.
+CREATE TABLE IF NOT EXISTS oauth_tokens (
+    provider        TEXT PRIMARY KEY,
+    encrypted_token TEXT NOT NULL,
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Gmail incremental sync position (feat: solopreneur-ledger pivot, U8). A
+-- single row (id='gmail'): the last historyId GmailInbox successfully synced
+-- through, so the next fetch can request only the delta (history.list) instead
+-- of re-scanning the whole mailbox. NULL means "no cursor yet" -> the next
+-- fetch does a full backfill (first connect, or after a historyId expired and
+-- the sentinel-bootstrap also failed).
+CREATE TABLE IF NOT EXISTS gmail_sync_state (
+    id          TEXT PRIMARY KEY DEFAULT 'gmail',
+    history_id  TEXT,
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );

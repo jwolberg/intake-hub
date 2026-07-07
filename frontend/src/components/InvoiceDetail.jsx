@@ -1,22 +1,24 @@
 // Invoice detail view (PRD §10 Invoice Detail View, FR9/FR10 §6). The
 // post-decision QC surface: every section the reviewer needs to understand a
 // decision fast — source, extracted metadata (value/confidence/evidence +
-// editable correction), context (resolved + candidates + mismatch warnings),
-// line-item matching (raw vs normalized + rationale + flags + match correction),
-// and the decision (submit/hold + confidence + rationale + risk flags +
-// submission status) — plus the human QC actions (correct/review/escalate/note).
+// editable correction), classification & category (income/expense +
+// Schedule C category + candidate alternates + editable correction on held
+// items), line items (raw vs normalized + confidence, read-only), and the
+// decision (submit/hold + confidence + rationale + risk flags + posting
+// status) — plus the human QC actions (correct/review/escalate/reject/note).
 
 import { useRef, useState } from "react";
 
 import {
   addNote,
   confirmCitation,
-  correctLineItem,
+  correctCategory,
   correctMetadata,
   escalateInvoice,
   retryInvoice,
   markReviewed,
   pageImageUrl,
+  rejectInvoice,
   rerunInvoice,
   sourcePdfUrl,
 } from "../api.js";
@@ -72,19 +74,20 @@ function confidenceClass(v) {
 }
 
 function terminalEvent(audit) {
-  const terminal = ["submitted", "held", "failed"];
+  const terminal = ["posted", "held", "failed", "rejected"];
   return [...audit].reverse().find((e) => terminal.includes(e.action));
 }
 
 function submissionStatus(invoice, event) {
   const d = event?.details ?? {};
-  if (invoice.status === "submitted") {
+  if (invoice.status === "posted") {
     return d.reference_id
-      ? `Submitted to ClinRun (ref ${d.reference_id})`
-      : "Submitted to ClinRun";
+      ? `Posted to ledger (ref ${d.reference_id})`
+      : "Posted to ledger";
   }
   if (invoice.status === "failed") return `Failed: ${d.reason ?? "unknown error"}`;
-  if (invoice.status === "held") return "Held — not submitted";
+  if (invoice.status === "held") return "Held — not posted";
+  if (invoice.status === "rejected") return "Rejected — not a receipt";
   return "Pending";
 }
 
@@ -203,23 +206,24 @@ function SourceDrawer({ open, onClose, invoiceId, source, pages, citations, reso
 }
 
 export default function InvoiceDetail({ detail, onAction, setError }) {
-  const { invoice, source, extraction, line_items, context, matches, exceptions, audit } =
-    detail;
+  const { invoice, source, extraction, line_items, exceptions, audit } = detail;
   const meta = invoice.metadata ?? {};
   const overlay = detail.corrections?.metadata ?? {};
-  const matchOverlay = detail.corrections?.line_items ?? {};
+  const categorization = detail.categorization ?? {};
+  const categoryOverlay = detail.corrections?.category ?? null;
   const conf = extraction?.field_confidence ?? {};
   const evidence = extraction?.field_evidence ?? {};
   const missing = new Set(extraction?.missing_fields ?? []);
-  const matchByLine = Object.fromEntries(matches.map((m) => [m.line_item_id, m]));
   const decisionEvent = terminalEvent(audit);
   const d = decisionEvent?.details ?? {};
   const rationale = d.reason ?? d.rationale ?? d.error;
   const riskFlags = d.risk_flags ?? [];
+  const isHeld = invoice.status === "held";
 
   const [metaEdits, setMetaEdits] = useState({});
   const [metaReason, setMetaReason] = useState("");
-  const [lineEdits, setLineEdits] = useState({});
+  const [categoryEdit, setCategoryEdit] = useState("");
+  const [categoryReason, setCategoryReason] = useState("");
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   // Source-overlay ↔ field two-way linking (P4-T5): the target_id currently
@@ -236,10 +240,7 @@ export default function InvoiceDetail({ detail, onAction, setError }) {
   const confirmedTargets = new Set(
     audit.filter((e) => e.action === "confirmed").map((e) => e.details?.target_id),
   );
-  const correctedTargets = new Set([
-    ...Object.keys(overlay).map((k) => `metadata.${k}`),
-    ...Object.keys(matchOverlay).map((id) => `line_item.${id}.raw_description`),
-  ]);
+  const correctedTargets = new Set(Object.keys(overlay).map((k) => `metadata.${k}`));
   const resolvedTargets = new Set([...confirmedTargets, ...correctedTargets]);
   const uncertain = citations.filter((c) => c.status === "uncertain");
   const pendingUncertain = uncertain.filter((c) => !resolvedTargets.has(c.target_id));
@@ -293,16 +294,15 @@ export default function InvoiceDetail({ detail, onAction, setError }) {
     run(confirmCitation(invoice.id, targetId, note || null));
   }
 
-  function saveLine(lineId) {
-    const edit = lineEdits[lineId] ?? {};
-    run(
-      correctLineItem(invoice.id, {
-        line_item_id: lineId,
-        catalog_item_id: edit.catalog_item_id || null,
-        catalog_description: edit.catalog_description || null,
-      }),
-    );
-    setLineEdits((prev) => ({ ...prev, [lineId]: {} }));
+  // The category a held item currently carries: the human override if one
+  // exists, else the AI's Schedule C call (mirrors `effective()` for metadata).
+  const effectiveCategory = categoryOverlay ?? categorization.category ?? "";
+
+  function saveCategory() {
+    if (!categoryEdit || categoryEdit === effectiveCategory) return;
+    run(correctCategory(invoice.id, categoryEdit, categoryReason || null));
+    setCategoryEdit("");
+    setCategoryReason("");
   }
 
   return (
@@ -355,6 +355,15 @@ export default function InvoiceDetail({ detail, onAction, setError }) {
           >
             Escalate
           </button>
+          {isHeld && (
+            <button
+              disabled={busy}
+              className="danger"
+              onClick={() => run(rejectInvoice(invoice.id, note || null))}
+            >
+              Reject (not a receipt)
+            </button>
+          )}
           <button
             disabled={busy || !note.trim()}
             onClick={() => {
@@ -576,130 +585,111 @@ export default function InvoiceDetail({ detail, onAction, setError }) {
         </div>
       </div>
 
-      {/* Context Resolution (PRD §10) — resolved + candidates + mismatch warnings. */}
+      {/* Classification & Category (R5/R6/R10) — income/expense call + Schedule C
+          category + candidate alternates, with a category correction editor for
+          held items (mirrors the metadata correction pattern above). */}
       <div className="panel">
-        <h2>Context resolution</h2>
+        <h2>Classification &amp; category</h2>
         <dl className="kv">
-          <dt>Sponsor</dt><dd>{context?.sponsor_id ?? "—"}</dd>
-          <dt>Study</dt><dd>{context?.study_id ?? "—"}</dd>
-          <dt>Site</dt><dd>{context?.site_id ?? "—"}</dd>
-          <dt>Confidence</dt>
-          <dd className={confidenceClass(context?.confidence)}>{pct(context?.confidence)}</dd>
-          <dt>Mismatch warnings</dt>
+          <dt>Document type</dt>
           <dd>
-            {context?.warnings?.length
-              ? context.warnings.map((w) => (
-                  <span key={w} className="flag sev-medium" title={w}>{humanize(w)}</span>
-                ))
-              : "none"}
+            {categorization.document_type ? humanize(categorization.document_type) : "—"}{" "}
+            <span className={confidenceClass(categorization.document_type_confidence)}>
+              ({pct(categorization.document_type_confidence)})
+            </span>
+          </dd>
+          <dt>Category</dt>
+          <dd>
+            {categoryOverlay ? (
+              <span>
+                <strong>{categoryOverlay}</strong>{" "}
+                <span className="muted small">
+                  (AI: {categorization.category ?? "missing"})
+                </span>
+              </span>
+            ) : categorization.category ? (
+              <span>
+                {categorization.category}{" "}
+                <span className={confidenceClass(categorization.category_confidence)}>
+                  ({pct(categorization.category_confidence)})
+                </span>
+              </span>
+            ) : (
+              <span className="flag sev-high">missing</span>
+            )}
           </dd>
         </dl>
-        {context?.candidates?.length > 1 && (
+        {categorization.alternates?.length > 0 && (
           <>
-            <h3 className="subhead">Candidate alternatives</h3>
-            <table>
-              <thead>
-                <tr>
-                  <th>Sponsor</th><th>Study</th><th>Site</th><th className="right">Score</th>
-                </tr>
-              </thead>
-              <tbody>
-                {context.candidates.map((c, i) => (
-                  <tr key={`${c.site_id}-${i}`}>
-                    <td>{c.sponsor_name ?? c.sponsor_id ?? "—"}</td>
-                    <td>{c.study_name ?? c.study_id ?? "—"}</td>
-                    <td>{c.site_name ?? c.site_id ?? "—"}</td>
-                    <td className="right">{pct(c.score)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <h3 className="subhead">Candidate categories</h3>
+            <p>
+              {categorization.alternates.map((alt) => (
+                <span key={alt} className="flag sev-low">{alt}</span>
+              ))}
+            </p>
           </>
+        )}
+        {isHeld && (
+          <div className="qc-actions">
+            <select
+              className="cell-input"
+              value={categoryEdit}
+              onChange={(e) => setCategoryEdit(e.target.value)}
+            >
+              <option value="">choose category…</option>
+              {[categorization.category, ...(categorization.alternates ?? [])]
+                .filter((c, i, arr) => c && arr.indexOf(c) === i)
+                .map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+            </select>
+            <input
+              className="reason-input"
+              placeholder="reason for correction (optional)"
+              value={categoryReason}
+              onChange={(e) => setCategoryReason(e.target.value)}
+            />
+            <button
+              disabled={busy || !categoryEdit || categoryEdit === effectiveCategory}
+              onClick={saveCategory}
+            >
+              Save category correction
+            </button>
+          </div>
         )}
       </div>
 
-      {/* Line-Item Matching (PRD §10) — raw vs normalized + rationale + flags + correction. */}
+      {/* Line Items (PRD §10) — raw vs normalized + extraction confidence, read-only
+          (the catalog-matching overlay was removed with the ledger pivot). */}
       <div className="panel">
-        <h2>Line items &amp; matches</h2>
+        <h2>Line items</h2>
         <table>
           <thead>
             <tr>
               <th>Raw / normalized</th>
               <th className="right">Qty</th>
+              <th className="right">Unit price</th>
               <th className="right">Total</th>
-              <th>Matched catalog item</th>
-              <th className="right">Match</th>
-              <th>Rationale / flags</th>
-              <th>Correct match</th>
+              <th className="right">Confidence</th>
             </tr>
           </thead>
           <tbody>
-            {line_items.map((li) => {
-              const m = matchByLine[li.id];
-              const corrected = li.id in matchOverlay;
-              const flags = [...(m?.exceptions ?? [])];
-              if (!corrected && (!m || !m.catalog_item_id)) flags.push("unmatched");
-              const edit = lineEdits[li.id] ?? {};
-              const display = corrected
-                ? matchOverlay[li.id].catalog_description ?? matchOverlay[li.id].catalog_item_id
-                : m?.catalog_description;
-              return (
-                <tr key={li.id} {...rowLink(`line_item.${li.id}.raw_description`)}>
-                  <td>
-                    {li.raw_description}
-                    {li.normalized_description && (
-                      <div className="muted small">→ {li.normalized_description}</div>
-                    )}
-                  </td>
-                  <td className="right">{li.quantity ?? "—"}</td>
-                  <td className="right">{li.total ?? "—"}</td>
-                  <td className="muted">
-                    {display ?? "—"}
-                    {corrected && <span className="flag sev-low">corrected</span>}
-                  </td>
-                  <td className={`right ${confidenceClass(corrected ? 1 : m?.confidence)}`}>
-                    {corrected ? "100%" : pct(m?.confidence)}
-                  </td>
-                  <td>
-                    {m?.rationale && <div className="small">{m.rationale}</div>}
-                    {flags.length > 0 && (
-                      <span className="flag sev-high">{flags.map(humanize).join(", ")}</span>
-                    )}
-                  </td>
-                  <td>
-                    <input
-                      className="cell-input"
-                      placeholder="catalog id"
-                      value={edit.catalog_item_id ?? ""}
-                      onChange={(e) =>
-                        setLineEdits((prev) => ({
-                          ...prev,
-                          [li.id]: { ...edit, catalog_item_id: e.target.value },
-                        }))
-                      }
-                    />
-                    <input
-                      className="cell-input"
-                      placeholder="description"
-                      value={edit.catalog_description ?? ""}
-                      onChange={(e) =>
-                        setLineEdits((prev) => ({
-                          ...prev,
-                          [li.id]: { ...edit, catalog_description: e.target.value },
-                        }))
-                      }
-                    />
-                    <button
-                      className="small-btn"
-                      disabled={busy || !(edit.catalog_item_id || edit.catalog_description)}
-                      onClick={() => saveLine(li.id)}
-                    >
-                      Save
-                    </button>
-                  </td>
-                </tr>
-              );
-            })}
+            {line_items.map((li) => (
+              <tr key={li.id} {...rowLink(`line_item.${li.id}.raw_description`)}>
+                <td>
+                  {li.raw_description}
+                  {li.normalized_description && (
+                    <div className="muted small">→ {li.normalized_description}</div>
+                  )}
+                </td>
+                <td className="right">{li.quantity ?? "—"}</td>
+                <td className="right">{li.unit_price ?? "—"}</td>
+                <td className="right">{li.total ?? "—"}</td>
+                <td className={`right ${confidenceClass(li.extraction_confidence)}`}>
+                  {pct(li.extraction_confidence)}
+                </td>
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>

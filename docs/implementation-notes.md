@@ -1835,3 +1835,314 @@ with `--profile drive` → verify). Inlines the Google-side steps a first-timer
 needs rather than only linking `drive-intake-setup.md` (still linked for the Apps
 Script + full reference). Docs-only; facts kept consistent with the setup doc
 (Editor role, one-line inline JSON, fail-fast).
+
+---
+
+## feat: Solopreneur income/expense ledger pivot (plan 2026-07-06-001)
+
+### U1 — Domain reshape (enums, taxonomy, category/type models)
+**Deviation from plan (additive, not rename):** the plan frames U1 as *renaming*
+`context_resolved`/`catalog_matched`→`classified`/`categorized` and
+`submitted`→`posted`, and *removing* the sponsor/catalog hold codes. Removing the
+old `InvoiceStatus`/`AuditAction` members in U1 would break 22 live references
+(orchestrator, audit/metrics, 3 test files) and turn the suite red for the U1–U4
+window. To keep **every commit green**, U1 is purely additive: it *adds*
+`CLASSIFIED`/`CATEGORIZED`/`POSTED`, the five ledger hold codes
+(`ambiguous_income_expense`, `low_category_confidence`, `suspected_duplicate`,
+`suspected_adversarial`, `sheet_write_failed`), a `DocumentType` enum, and a
+`CategorizationResult` model — and **leaves the clinical-trial enum members + hold
+codes in place**. Their removal moves to **U5**, where the full-suite-green gate
+already covers dead-code cleanup. Same end state, no red window.
+- `CategorizationResult` is the matching-analog stage contract (U2 produces it,
+  U4's decision consumes its two confidences via weakest-link `min()`): annotated
+  cells for `document_type` and `category` (value+confidence+evidence), `alternates`
+  for the reviewer (R10), and an `adversarial` flag (R16). Confidences default to
+  0.0 / `UNKNOWN` so the offline/Fallback path holds rather than mis-files.
+- U1's "removed code absent" edge-case test is deferred to U5 (codes still present here).
+
+### U2 — Classification + categorization stage
+- **Decisions (deferred-to-impl resolved):** document-level categorization (one
+  category per document, matching `CategorizationResult`); line-item-level deferred.
+  Fixed Schedule C constant `SCHEDULE_C_CATEGORIES` (common Part II expense lines +
+  one income bucket); custom categories deferred per Scope Boundaries.
+- Modeled on `matching`: keyword-scored candidates → ambiguity gap → advisory LLM
+  adjudication. **Clear cases never call the LLM**, so the offline folder-watcher
+  validation path files them deterministically; only ambiguous/unclear items
+  adjudicate, and offline that degrades to a *hold* (Passthrough echo / Fallback on
+  connection error both keep the low-confidence heuristic, never crash).
+- **Confidence bar:** an unresolved category race is capped at `_AMBIGUOUS_CAP=0.7`,
+  below the decision floor (0.8), so ambiguity holds unless the LLM lifts it (AE2).
+- **R16 adversarial flag:** heuristic scan for injection-style directives in the
+  document text sets `adversarial=True`; the LLM step has no tool access and treats
+  content as data. U4 turns the flag into a `suspected_adversarial` hold.
+- Did not strictly red-first here (inline build); tests pin the confidence/adjudication
+  boundary that gates hold-vs-file, per the execution note's intent.
+
+### U3 — Google Sheets output client + Postgres idempotency ledger (subagent)
+- Triad mirrors `HttpDriveClient` exactly (Protocol + Stub + Http, injectable
+  `token_provider`/`httpx.Client`, lazy google-auth, `drive.file` scope). Single op
+  `append_row(values) -> row_ref`; `HttpSheetsClient` lazily creates the spreadsheet
+  + header on first append.
+- `sheet_appends(idempotency_key, sheet_row_ref, status)` is the **source-of-truth
+  dedup gate**; the Sheet is a projection. Repo gains `is_appended`/`record_append`/
+  `get_append_ref` (both InMemory + Postgres, mirroring is_seen/mark_seen).
+- `append_filed_row(repo, client, *, idempotency_key, row)` does check→append→record;
+  it does **not** retry internally by design — the caller's `_retry()`/hold owns retry
+  semantics (U4). Known narrow window: append succeeds then record fails → a retry
+  re-appends; acceptable for single-tenant v1 (Postgres is the gate, per Key Decisions).
+- POSTED audit event is U4's job (orchestrator tail), not U3.
+
+### U4 — Orchestrator surgery: repoint the pipeline tail
+- New tail `_categorize_and_file` (replaces `_resolve_match_decide`): categorize →
+  decide → `_file_to_sheet`-or-hold. `decide(extraction, categorization)` rewritten
+  to weakest-link `min(extraction, document_type, category)` confidence with ledger
+  hold reasons. `process/rerun/recover` lose `ref/clinrun/catalog_cache`, gain `sheets`.
+- **Decisions:**
+  - **Idempotency key = `invoice.id`** (not message_id+line_index): document-level v1
+    means one row per item, and invoice.id is stable across process/rerun/recover, so
+    a rerun/recover never double-posts. (`_source_ref` still uses message_id/attachment
+    for the Sheet's display-only Source column.)
+  - **Persistent `sheet_write_failed` → FAILED (not HELD)**, mirroring the old
+    `submission_failed` path, so it plugs into the existing `/retry`→`recover()`
+    machinery. Plan text said "hold"; FAILED-retryable is the mechanically-consistent
+    reading ("mirrors SubmissionFailed") and preserves the item. In-process `_retry`
+    handles transient failures before the item ever fails.
+  - **Critical field = `total_amount` only** (dropped `missing_invoice_number`):
+    solopreneur receipts frequently have no invoice number.
+  - **Receipt filter (U6) is NOT wired into `process()`** — it's email-facing, and the
+    folder-watcher/mock validation path treats all inputs as receipts (per the plan).
+    `classify_receipt` is consumed by U8's Gmail provider instead.
+  - Categorization is persisted on the CLASSIFIED/CATEGORIZED audit events (no new
+    table), mirroring how extraction confidence rides the EXTRACTED event. Rerun
+    re-runs categorize from the corrected extraction; pinned category-correction
+    overlays are deferred to U10.
+- Backend follow-through for the pivot: `audit/metrics.py` counts POSTED (field names
+  unchanged; vocab rename deferred to U10); `inbox/drive.py` folder `submitted`→`posted`
+  (`POSTED_DIR`); `api/main.py` `get_pipeline_clients` → {llm, sheets}; added
+  `get_sheets_client()` + `SHEETS_SPREADSHEET_ID`/`sheets_spreadsheet_id` config
+  (offline StubSheetsClient default; HttpSheetsClient when creds+sheet id set).
+- Clinical pipeline tests superseded: test_pipeline.py + test_orchestrator.py deleted
+  (covered by test_orchestrator_ledger.py); pdf_pipeline/performance/scenarios/metrics/
+  exceptions/inbox_fetch realigned to ledger semantics.
+
+## 2026-07-06 — U5 (pure subtraction: delete clinical-trial machinery)
+
+- Deleted `backend/submission/`, `backend/context/`, `backend/catalog/`,
+  `backend/matching/`, `backend/clients/clinrun.py`, `backend/clients/mcp_reference.py`,
+  and their tests (`test_matching.py`, `test_context.py`, `test_catalog.py`).
+- **Also deleted `backend/clients/stub_servers/` in full** (not just the two named
+  app files): once `clinrun_app.py`/`mcp_app.py` were gone, the package held only an
+  `__init__.py` docstring describing removed services — an empty, purposeless
+  package. Confirmed nothing else imports the package path before removing it, and
+  removed the corresponding `mcp-reference`/`mock-clinrun` service blocks (+
+  `depends_on`, `MCP_REFERENCE_URL`/`CLINRUN_URL` env vars) from `docker-compose.yml`;
+  validated with `docker compose config`.
+- `backend/db/repository.py`: dropped the `resolved_context`/`match_results` Table
+  reflections and the `save_context`/`replace_matches` methods (Protocol + both
+  impls). Kept `get_context`/`get_matches` per the ticket's contract, but
+  `PostgresRepository` versions now just `return None`/`return []` — no table access
+  — since those tables no longer exist in schema.sql.
+- **Fallout beyond the named file list** (found via `git grep` after the module
+  deletions broke collection): `tests/integration/test_postgres_repository.py` and
+  `backend/tools/process_pdf.py` were still calling the *pre-U4* `process(..., ref=,
+  clinrun=)` signature (they hadn't been touched by U4's orchestrator rewrite).
+  Updated both to `process(..., llm=, sheets=)`; rewrote the Postgres round-trip
+  test's assertions to expect `detail["context"] is None` / `detail["matches"] == []`
+  (tables removed) and a `POSTED`/`HELD` terminal status instead of the old
+  `"submitted"` string. `tests/unit/test_clients.py` had its MCP/ClinRun-specific
+  tests removed but kept the LLM-client tests (still relevant).
+- Final state: `.venv/bin/python -m pytest -q` → 198 passed, 1 skipped (was 224/1
+  before deletion — delta matches the ~26 deleted tests); `ruff check backend tests`
+  clean; `git grep` for clinrun/mcp_reference/CatalogNotFound/etc. across
+  backend+tests returns zero hits.
+- **Left untouched (out of scope per ticket):** `backend/domain` still defines
+  `ResolvedContext`, `MatchResult`, `CatalogItem`, `ContextCandidate` (and
+  `test_domain.py` still tests them) — dead types, but explicitly deferred; docs
+  (`docs/DEPLOY.md`, `docs/RUNBOOK.md`, `docs/implementation.md`) still mention the
+  deleted stub-server module paths — stale but non-blocking for pytest/ruff, and
+  docs weren't in the ticket's file list.
+
+### U9 — Review-integrity: duplicate holds, notifications, spot-check
+- New `backend/ledger_integrity` (pure helpers over `Invoice` lists): `find_duplicate`
+  (same vendor + exact amount within a ±3-day window → the prior posted item),
+  `posted_items`, `sample_posted` (bounded, injectable RNG).
+- Orchestrator: a duplicate of an already-posted item is **held** `suspected_duplicate`
+  instead of double-posting (R19). The check runs only on the first pass —
+  `rerun`/`recover` pass `check_duplicates=False`, so a reviewer who judges a held dup
+  to be distinct can **rerun to force the post** (the minimal v1 resolution path;
+  full dedup/merge is out of scope).
+- API: `GET /api/notifications` (held count + by-reason digest, R18);
+  `POST /api/spot-check` (bounded random sample of posted items + a system NOTE audit
+  event on each, R15). **Decision:** reused `AuditAction.NOTE` with
+  `details.spot_check=True` for the sampling event rather than adding a new enum member
+  (keeps U1 closed; the trace still shows the event).
+
+### U7 — Gmail client + user-OAuth token seam (subagent)
+- `backend/clients/gmail.py` triad mirrors `HttpDriveClient` but with **user-OAuth**
+  (refresh token → access token via `google.oauth2.credentials`) since personal Gmail
+  can't use a service account. `walk_parts` (recursive MIME) + `decode_b64url`
+  (re-adds stripped padding) are standalone + characterization-tested.
+- Resync signal: `GmailHistoryExpired(GmailClientError, resync=True)` on `history.list`
+  404 — U8 catches it to fall back to a full backfill.
+- One-time interactive `backend/tools/gmail_oauth_setup.py` (InstalledAppFlow) mints the
+  refresh token; `google-auth-oauthlib` added as a setup-script-only dep.
+
+### U10 — Reviewer hub + API updates
+- **Category correction (R6/R10/AE2):** `POST /api/invoices/{id}/corrections/category`
+  records a CORRECTED overlay (target=category, before/after); `corrections.category_overlay`
+  replays it; the orchestrator tail pins the latest correction (confidence 1.0) so a
+  corrected held item files on rerun. AI original stays on the CATEGORIZED audit event.
+- **Reject (R10/AE4):** `POST /api/invoices/{id}/reject` → new terminal `REJECTED`
+  status (additive enum, like U1) so a non-receipt leaves the queue and never files.
+- **Review queue (R10):** `GET /api/review-queue` returns held items with their primary
+  hold reason, ordered by reason then oldest-first.
+- Detail payload gains a `categorization` block (document_type/category/confidences/
+  alternates) + `corrections.category`, so the hub shows candidate categories on a hold.
+- Frontend repointed to ledger vocab (posted not submitted): deleted the Context
+  Resolution + catalog-matching sections; added a Classification & Category section with
+  candidate alternates + a held-item category-correction control + a Reject button;
+  filter chips posted/held/failed/needs_review/low_confidence; held-count badge from
+  /api/notifications. `npm run build` green.
+- Left in scope-note: `InvoiceMetadata` still carries sponsor/study/etc. fields (render as
+  missing for receipts); review-queue oldest-first reordering of the main list left as a
+  minor follow-up (endpoint available, unused in the list view).
+
+### U8 — Gmail inbox provider + encrypted token storage + backfill orchestration (2026-07-06)
+- `backend/inbox/gmail.py`: `GmailInbox(client, *, llm=None, tax_year, label=None,
+  sync_state, history_id=None)`. `sync_state` is a narrow `GmailSyncState` Protocol
+  (`is_seen`/`mark_seen`/`get_sync_history_id`/`set_sync_history_id`) — deliberately
+  shaped so the app's real `Repository` satisfies it with **no adapter** (it already had
+  `is_seen`/`mark_seen`; the two sync-position methods were added to `Repository` in this
+  same ticket), and so is `InMemoryRepository` in tests. `on_processed` is a documented
+  no-op (logs only) — labeling needs Gmail *modify* scope, which this integration
+  deliberately does not request (`gmail.readonly` only, least privilege).
+- **Deviation (flagged, not silently decided):** the U7 `GmailClient` contract has no
+  "what's the mailbox's current historyId" operation — only `history_list(start_id)`.
+  After a backfill, `GmailInbox._bootstrap_history_id` probes `history_list("0")` purely
+  to read back its returned cursor (discarding the changed-ids, already covered by the
+  backfill). Against `StubGmailClient` this reliably yields the real cursor (verified by
+  tests). Against a **real** Gmail mailbox, an arbitrarily old `startHistoryId` will very
+  likely 404 (history retention is ~1 week) — production would then keep re-running full
+  backfills instead of true incremental deltas until some other path seeds a real
+  historyId. This is a known limitation of the current `GmailClient` (U7) contract, not
+  something this ticket could fix without touching `backend/clients/gmail.py` (out of
+  scope — U7's file, owned separately). A cleaner long-term fix: have U7 expose the
+  mailbox's current historyId directly (e.g. from `get_message`, or a dedicated
+  profile-style call).
+- Non-receipt drop: `_classify_and_fetch` calls `get_message(id, fmt="metadata")` only,
+  runs `classify_receipt`, and for a `False` verdict at confidence ≥ 0.7 calls
+  `sync_state.mark_seen` and returns `None` **without ever calling `get_message(fmt="full")`
+  or `get_attachment`** — R17 minimal retention is structural (the body is architecturally
+  unreachable for a drop), not just a "don't persist it" convention.
+- PDF-attachment receipts: added `InboxMessage.attachment_b64: str | None = None` (also
+  threaded through `message_to_sample`'s `source` dict, only when non-empty, so the
+  existing exact-dict-equality test in `test_inbox.py` still passes unchanged) — this is
+  the same field `backend.orchestrator`/`backend.parser` already read for the
+  `seed_cloud.py` cloud-PDF path, so a Gmail PDF attachment takes the identical real-PDF
+  extraction branch with no orchestrator/parser changes.
+- **`_build_gmail_inbox(settings, repo=None)`** — `repo` is injectable (tests pass
+  `InMemoryRepository()` directly, no DB) but defaults to `backend.db.repository.
+  get_repository()` for the running app, which is then passed as **both** the
+  `GmailClient`'s backing repo *and* `GmailInbox`'s `sync_state` (same object — no
+  adapter). `get_inbox_client()`'s own signature is unchanged (still zero args); the
+  `repo=` parameter lives only on the new factory.
+- Fail-fast order matters for testability: `GMAIL_CLIENT_ID`/`_SECRET`/`_REFRESH_TOKEN`
+  are checked *before* `get_repository()` is ever called, so a missing-config test never
+  touches Postgres (mirrors `_build_drive_inbox`'s fail-fast-first shape).
+- Token encryption (`backend/inbox/_crypto.py`, `encrypt_token`/`decrypt_token` over
+  `cryptography.fernet.Fernet`) uses a **lazy import**, matching the KTD1 convention used
+  throughout `backend/clients/`. **Environment check result: `cryptography` is NOT
+  installed in this repo's `.venv`** (nor is `google-auth`, despite both being listed in
+  `backend/requirements.txt` — everything that touches them is already lazily imported, so
+  the gap was invisible until this ticket tried to use one). Per the ticket's own
+  contingency instructions, this is not a hard failure: `_load_refresh_token` catches
+  `TokenCryptoUnavailable` and falls back to reading `GMAIL_REFRESH_TOKEN` from config on
+  every use, **never persisting anything to `oauth_tokens`** (so "never cleartext at rest"
+  still holds — it's "not persisted at all" rather than "persisted encrypted"), logging a
+  warning either way. Added `cryptography>=42,<46` to `backend/requirements.txt` (a real,
+  installable dependency — once it's actually installed in an environment, the encrypted
+  path takes over automatically, no code change needed). The round-trip test
+  (`test_token_encryption_roundtrips_and_is_not_plaintext`) is guarded by
+  `pytest.importorskip("cryptography")`, so the full suite stays green (it SKIPs here, and
+  will start asserting for real the moment the dependency is installed) — this is why the
+  final count is 244 passed / **2** skipped rather than 1.
+- `backend/tools/gmail_revoke.py`: standalone script (not an API route — `backend/api/
+  main.py` is a concurrent unit's file, explicitly out of scope for this ticket) that
+  POSTs to Google's revoke endpoint then clears the `oauth_tokens` row + `gmail_sync_state`
+  cursor, so a subsequent connect needs `gmail_oauth_setup.py` re-run.
+- Schema: `oauth_tokens(provider PK, encrypted_token, updated_at)` and
+  `gmail_sync_state(id PK default 'gmail', history_id, updated_at)`, both idempotent
+  `CREATE TABLE IF NOT EXISTS` like the rest of `schema.sql`.
+- Final state: `.venv/bin/python -m pytest -q` → 244 passed, 2 skipped (was 225/1 before
+  this ticket — +19 new tests, +1 new skip from the cryptography-gated round-trip test);
+  `ruff check backend tests` clean. `backend/api/main.py` was not touched.
+
+### U11 — Docs, config, and deploy
+- ARCHITECTURE.md rewritten for the ledger pipeline (stages, categorize/receipts/
+  ledger_integrity modules, ledger hold reasons, Sheets projection + sheet_appends
+  dedup, three inbox providers); the clinical references that remain are in the
+  explicit "removed modules" section.
+- RUNBOOK.md gains Path F (Gmail intake) + Path G (Sheets ledger), mirroring Path E's
+  offline-stub-then-real-credential structure and naming the actual test files.
+- New docs/gmail-sheets-setup.md (mirrors drive-intake-setup.md): Gmail installed-app
+  OAuth (single-user "production" consent, gmail.readonly, setup script), Fernet
+  token encryption, Sheets service account, revoke script.
+- .env.example + docker-compose.yml pass the new vars (INBOX_PROVIDER gmail, SHEETS_*,
+  GMAIL_*); `docker compose config` validates. DEPLOY.md documents Gmail/Sheets secrets
+  and reiterates the fallback-safe Cloud-Run→Anthropic egress limitation.
+- **Out of scope (deferred product-docs PR, per plan Scope Boundaries):** README.md +
+  PRD/STRATEGY/USERS still describe the clinical product — a coherent product-overview
+  rewrite (with new demo assets) is the separate docs effort, not this plan.
+
+### Post-implementation code review — fixes applied
+An 8-angle multi-agent review of the whole pivot surfaced these real issues, now fixed
+(each with a regression test):
+- **Corrected metadata now reaches the Sheet row (A1):** `rerun`/`recover` reassign
+  `invoice.metadata = extraction.metadata`, so a reviewer's corrected vendor/date/amount
+  is what `build_ledger_row` files — previously the row used the stale AI value.
+- **CATEGORIZED audit records the AI original (A3):** the human category overlay is now
+  applied *after* recording the CLASSIFIED/CATEGORIZED events, so the detail view's
+  "AI category" isn't overwritten by the correction.
+- **Sheet header written only on creation (A5):** `HttpSheetsClient` no longer re-writes
+  the header on every append — a fresh client is built per fetch request, so the old
+  per-instance `_header_written` gate duplicated the header row every poll cycle against a
+  configured spreadsheet.
+- **`recover` runs the duplicate check (B1):** a FAILED item may have failed *before* the
+  dup guard ran, so recover now passes `check_duplicates=True` (rerun still skips it — the
+  reviewer judged it distinct). Prevents double-posting a duplicate via /retry.
+- **Recovery re-extracts real PDFs correctly (C1):** `_reextract` re-attaches the stored
+  PDF bytes as `attachment_b64` so `_is_real_pdf` picks the layout client — a Gmail/Cloud
+  PDF that failed extraction no longer re-extracts to empty on recover. `message_id` is now
+  persisted on the RECEIVED event so rerun/recover keep the Sheet Source ref.
+- **Gmail per-message isolation (D2):** `get_message`/`get_attachment` wrap base64/JSON
+  parsing so a malformed message raises `GmailClientError` (isolated + skipped) instead of
+  an uncaught error that aborts the whole poll.
+- **Token-decrypt is fail-safe (D3):** `_load_refresh_token` catches a rotated/invalid
+  `GMAIL_TOKEN_ENC_KEY` (InvalidToken/ValueError) and degrades to the env token instead of
+  crashing inbox construction.
+- **Revoke sends the token in the POST body, not the URL query (D1)** — avoids leaking it
+  into access/proxy logs.
+- **Low-confidence filter surfaces ledger holds (B4):** `_LOW_CONFIDENCE_FLAGS` now includes
+  `ambiguous_income_expense`/`low_category_confidence`; dropped the dead clinical filter tags
+  (`mismatched_metadata`/`unmatched_line_items`) and the sponsor/study/site fields + dead
+  `get_context`/`get_matches` calls from `_summary`/`_filter_tags`.
+
+**Known residuals (documented, not fixed — proportionate for single-tenant v1):**
+- *Sheets append is not atomic across the two systems* (A2/B2/C3): if `client.append_row`
+  succeeds but `record_append` (Postgres) fails, or the append succeeds server-side but the
+  HTTP response errors, a later retry/recover can post a second physical row. The Postgres
+  gate prevents cross-invocation double-posts; the within-a-single-append window remains.
+  A robust fix needs a pending/posted status on `sheet_appends` (reserve → append →
+  finalize) — a follow-up.
+- *Env refresh-token rotation requires clearing the DB row first* (D4): update
+  `GMAIL_REFRESH_TOKEN` and run `gmail_revoke.py`, else the stored encrypted token wins.
+- *Metadata-only fetch omits attachment parts* (D5): the receipt filter's PDF-attachment
+  heuristic doesn't fire on the cheap metadata fetch, pushing some PDF receipts into the LLM
+  band (still classified correctly, just less cheaply). A follow-up could add a "current
+  historyId"/attachment probe to the GmailClient contract (also addresses U8's backfill note).
+- *No vendor-presence hold* (B6): only `total_amount` is a critical field; a confidently-wrong
+  blank vendor can file. Left as product judgment (avoid over-holding).
+- *Minor duplication* (E1/E2/E5): Google token-mint logic mirrored across the three Http
+  clients; inline-JSON-vs-path dispatch in two factories; held-invoice derivation in three
+  spots. Accepted pattern-mirroring; extractable in a follow-up. Dead `apply_match_overlay`
+  + `MatchResult` in corrections also left for a follow-up cleanup.

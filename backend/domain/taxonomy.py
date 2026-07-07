@@ -51,6 +51,19 @@ _REASONS: list[HoldReason] = [
     HoldReason("total_mismatch", "Invoice total mismatch", Severity.HIGH, fr8=False),
     # Catalog (FR8: catalog unavailable).
     HoldReason("catalog_unavailable", "Catalog unavailable", Severity.HIGH),
+    # --- Ledger pivot: classification / categorization / duplicate / adversarial /
+    # Sheet-write holds. These replace the sponsor/catalog codes above (removed in
+    # U5). fr8=False: they are not in the original clinical-trial FR8 list. ---
+    HoldReason("ambiguous_income_expense", "Ambiguous income vs expense", Severity.HIGH,
+               fr8=False),
+    HoldReason("low_category_confidence", "Low category confidence", Severity.HIGH,
+               fr8=False),
+    HoldReason("suspected_duplicate", "Suspected duplicate transaction", Severity.HIGH,
+               fr8=False),
+    HoldReason("suspected_adversarial", "Suspected adversarial/spoofed content",
+               Severity.HIGH, fr8=False),
+    HoldReason("sheet_write_failed", "Sheet append failed (retryable)", Severity.HIGH,
+               fr8=False, retryable=True),
     # Overall + operational failures (FR8: backend submission failure).
     HoldReason("low_confidence", "Low overall decision confidence", Severity.HIGH, fr8=False),
     HoldReason("submission_failed", "Backend submission failure", Severity.HIGH, retryable=True),

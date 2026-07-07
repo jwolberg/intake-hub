@@ -1,7 +1,7 @@
 """External I/O clients, isolated from pipeline logic (ARCHITECTURE.md §7-§8).
 
-Holds the provider-agnostic LLM client, the MCP reference client, and the
-ClinRun submission client, each with an in-process stub (tests) and an HTTP
+Holds the provider-agnostic LLM client and the other external seams (Drive,
+Sheets, OCR, Vision), each with an in-process stub (tests) and an HTTP
 implementation (the Compose topology). Stages call the ``get_*`` factories;
 tests inject stubs directly.
 """
@@ -14,12 +14,6 @@ from backend.config import settings
 # resolve every external seam through the same clients factory layer.
 from backend.ocr import OCRClient, StubOCRClient, TesseractOCRClient
 
-from .clinrun import (
-    ClinRunClient,
-    HttpClinRunClient,
-    StubClinRunClient,
-    SubmissionResult,
-)
 from .drive import (
     DriveClient,
     DriveFile,
@@ -27,12 +21,18 @@ from .drive import (
     StubDriveClient,
 )
 from .errors import (
-    CatalogNotFound,
-    ClinRunClientError,
     DriveClientError,
-    ReferenceClientError,
-    ReferenceUnavailable,
-    SubmissionFailed,
+    GmailClientError,
+    SheetsClientError,
+)
+from .gmail import (
+    GmailAttachment,
+    GmailClient,
+    GmailMessage,
+    HttpGmailClient,
+    StubGmailClient,
+    decode_b64url,
+    walk_parts,
 )
 from .llm import (
     AnthropicLLMClient,
@@ -42,10 +42,12 @@ from .llm import (
     StubLLMClient,
     parse_json_or_raise,
 )
-from .mcp_reference import (
-    HttpMCPReferenceClient,
-    MCPReferenceClient,
-    StubMCPReferenceClient,
+from .sheets import (
+    LEDGER_HEADERS,
+    HttpSheetsClient,
+    SheetsClient,
+    StubSheetsClient,
+    build_ledger_row,
 )
 from .vision import (
     OfflineVisionLLMClient,
@@ -56,51 +58,42 @@ from .vision import (
 
 __all__ = [
     "AnthropicLLMClient",
-    "CatalogNotFound",
-    "ClinRunClient",
-    "ClinRunClientError",
     "DriveClient",
     "DriveClientError",
     "DriveFile",
     "FallbackLLMClient",
-    "HttpClinRunClient",
+    "GmailAttachment",
+    "GmailClient",
+    "GmailClientError",
+    "GmailMessage",
     "HttpDriveClient",
-    "HttpMCPReferenceClient",
+    "HttpGmailClient",
+    "HttpSheetsClient",
+    "LEDGER_HEADERS",
     "LLMClient",
-    "MCPReferenceClient",
     "OCRClient",
     "OfflineVisionLLMClient",
     "PassthroughLLMClient",
-    "ReferenceClientError",
-    "ReferenceUnavailable",
-    "StubClinRunClient",
+    "SheetsClient",
+    "SheetsClientError",
     "StubDriveClient",
+    "StubGmailClient",
     "StubLLMClient",
-    "StubMCPReferenceClient",
     "StubOCRClient",
+    "StubSheetsClient",
     "StubVisionLLMClient",
-    "SubmissionFailed",
-    "SubmissionResult",
     "TesseractOCRClient",
     "VisionLLMClient",
-    "get_clinrun_client",
+    "build_ledger_row",
+    "decode_b64url",
     "get_llm_client",
     "get_ocr_client",
-    "get_reference_client",
+    "get_sheets_client",
     "get_vision_llm_client",
     "locate_value",
     "parse_json_or_raise",
+    "walk_parts",
 ]
-
-
-def get_reference_client() -> MCPReferenceClient:
-    """Default MCP reference client for the running app (HTTP -> mcp-reference)."""
-    return HttpMCPReferenceClient(settings.mcp_reference_url)
-
-
-def get_clinrun_client() -> ClinRunClient:
-    """Default ClinRun client for the running app (HTTP -> mock-clinrun)."""
-    return HttpClinRunClient(settings.clinrun_url)
 
 
 def get_llm_client() -> LLMClient:
@@ -123,6 +116,30 @@ def get_llm_client() -> LLMClient:
         )
         return FallbackLLMClient(primary, PassthroughLLMClient())
     return PassthroughLLMClient()
+
+
+def get_sheets_client() -> SheetsClient:
+    """Default Sheets ledger client.
+
+    When a service-account credential *and* a target spreadsheet id are both
+    configured, returns the live ``HttpSheetsClient`` (service-account auth,
+    ``drive.file`` scope), mirroring the Drive service-account pattern. Otherwise
+    returns the offline ``StubSheetsClient`` so dev/tests append network-free — the
+    folder-watcher validation path proves the flow without any Google credentials.
+    The real-credential deploy wiring is documented in U11 (docs/DEPLOY.md).
+    """
+    creds = settings.google_application_credentials
+    sheet_id = settings.sheets_spreadsheet_id
+    if creds and sheet_id:
+        creds = creds.strip()
+        if creds.startswith("{"):
+            import json
+
+            return HttpSheetsClient(
+                spreadsheet_id=sheet_id, credentials_info=json.loads(creds)
+            )
+        return HttpSheetsClient(spreadsheet_id=sheet_id, credentials_file=creds)
+    return StubSheetsClient()
 
 
 def get_ocr_client() -> OCRClient:

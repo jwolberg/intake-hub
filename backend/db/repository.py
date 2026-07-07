@@ -15,7 +15,7 @@ from collections.abc import Mapping
 from functools import lru_cache
 from typing import Protocol
 
-from sqlalchemy import Engine, MetaData, Table, delete, insert, select
+from sqlalchemy import Engine, MetaData, Table, delete, func, insert, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from backend.db.session import get_engine
@@ -23,7 +23,6 @@ from backend.domain import (
     Actor,
     AuditAction,
     AuditEvent,
-    ContextCandidate,
     Decision,
     ExceptionRecord,
     Invoice,
@@ -45,9 +44,7 @@ class Repository(Protocol):
     def get_source_pdf(self, invoice_id: str) -> bytes | None: ...
     def replace_line_items(self, invoice_id: str, items: list[LineItem]) -> None: ...
     def get_line_items(self, invoice_id: str) -> list[LineItem]: ...
-    def save_context(self, ctx: ResolvedContext) -> None: ...
     def get_context(self, invoice_id: str) -> ResolvedContext | None: ...
-    def replace_matches(self, invoice_id: str, matches: list[MatchResult]) -> None: ...
     def get_matches(self, invoice_id: str) -> list[MatchResult]: ...
     def add_exceptions(self, exceptions: list[ExceptionRecord]) -> None: ...
     def get_exceptions(self, invoice_id: str) -> list[ExceptionRecord]: ...
@@ -56,6 +53,13 @@ class Repository(Protocol):
     def get_detail(self, invoice_id: str) -> dict | None: ...
     def is_seen(self, message_id: str) -> bool: ...
     def mark_seen(self, message_id: str) -> None: ...
+    def is_appended(self, idempotency_key: str) -> bool: ...
+    def record_append(self, idempotency_key: str, sheet_row_ref: str) -> None: ...
+    def get_append_ref(self, idempotency_key: str) -> str | None: ...
+    def get_oauth_token(self, provider: str) -> str | None: ...
+    def set_oauth_token(self, provider: str, encrypted: str) -> None: ...
+    def get_sync_history_id(self) -> str | None: ...
+    def set_sync_history_id(self, history_id: str) -> None: ...
 
 
 class InMemoryRepository:
@@ -71,6 +75,9 @@ class InMemoryRepository:
         self._exceptions: dict[str, list[ExceptionRecord]] = {}
         self._audit: dict[str, list[AuditEvent]] = {}
         self._seen_messages: set[str] = set()
+        self._sheet_appends: dict[str, str] = {}
+        self._oauth_tokens: dict[str, str] = {}
+        self._gmail_history_id: str | None = None
 
     def save_invoice(self, invoice: Invoice) -> None:
         self._invoices[invoice.id] = invoice.model_copy(deep=True)
@@ -97,15 +104,9 @@ class InMemoryRepository:
     def get_line_items(self, invoice_id: str) -> list[LineItem]:
         return [i.model_copy(deep=True) for i in self._line_items.get(invoice_id, [])]
 
-    def save_context(self, ctx: ResolvedContext) -> None:
-        self._context[ctx.invoice_id] = ctx.model_copy(deep=True)
-
     def get_context(self, invoice_id: str) -> ResolvedContext | None:
         stored = self._context.get(invoice_id)
         return stored.model_copy(deep=True) if stored else None
-
-    def replace_matches(self, invoice_id: str, matches: list[MatchResult]) -> None:
-        self._matches[invoice_id] = [m.model_copy(deep=True) for m in matches]
 
     def get_matches(self, invoice_id: str) -> list[MatchResult]:
         return [m.model_copy(deep=True) for m in self._matches.get(invoice_id, [])]
@@ -143,6 +144,27 @@ class InMemoryRepository:
     def mark_seen(self, message_id: str) -> None:
         self._seen_messages.add(message_id)
 
+    def is_appended(self, idempotency_key: str) -> bool:
+        return idempotency_key in self._sheet_appends
+
+    def record_append(self, idempotency_key: str, sheet_row_ref: str) -> None:
+        self._sheet_appends[idempotency_key] = sheet_row_ref
+
+    def get_append_ref(self, idempotency_key: str) -> str | None:
+        return self._sheet_appends.get(idempotency_key)
+
+    def get_oauth_token(self, provider: str) -> str | None:
+        return self._oauth_tokens.get(provider)
+
+    def set_oauth_token(self, provider: str, encrypted: str) -> None:
+        self._oauth_tokens[provider] = encrypted
+
+    def get_sync_history_id(self) -> str | None:
+        return self._gmail_history_id
+
+    def set_sync_history_id(self, history_id: str) -> None:
+        self._gmail_history_id = history_id
+
 
 # --- Postgres implementation ------------------------------------------------
 # Reflects the schema created by db.session.init_schema (the canonical DDL), so
@@ -174,11 +196,12 @@ class PostgresRepository:
         md = MetaData()
         self.invoices = Table("invoices", md, autoload_with=engine)
         self.line_items = Table("line_items", md, autoload_with=engine)
-        self.resolved_context = Table("resolved_context", md, autoload_with=engine)
-        self.match_results = Table("match_results", md, autoload_with=engine)
         self.exceptions = Table("exceptions", md, autoload_with=engine)
         self.audit_events = Table("audit_events", md, autoload_with=engine)
         self.seen_messages = Table("seen_messages", md, autoload_with=engine)
+        self.sheet_appends = Table("sheet_appends", md, autoload_with=engine)
+        self.oauth_tokens = Table("oauth_tokens", md, autoload_with=engine)
+        self.gmail_sync_state = Table("gmail_sync_state", md, autoload_with=engine)
 
     def save_invoice(self, invoice: Invoice) -> None:
         values = {
@@ -257,63 +280,15 @@ class PostgresRepository:
             ).mappings().all()
         return [LineItem(**dict(r)) for r in rows]
 
-    def save_context(self, ctx: ResolvedContext) -> None:
-        values = {
-            "invoice_id": ctx.invoice_id, "sponsor_id": ctx.sponsor_id,
-            "study_id": ctx.study_id, "site_id": ctx.site_id, "confidence": ctx.confidence,
-            "candidates": [c.model_dump(mode="json") for c in ctx.candidates],
-            "warnings": list(ctx.warnings),
-        }
-        update = {k: v for k, v in values.items() if k != "invoice_id"}
-        stmt = pg_insert(self.resolved_context).values(**values).on_conflict_do_update(
-            index_elements=[self.resolved_context.c.invoice_id], set_=update,
-        )
-        with self._engine.begin() as conn:
-            conn.execute(stmt)
-
     def get_context(self, invoice_id: str) -> ResolvedContext | None:
-        with self._engine.connect() as conn:
-            row = conn.execute(
-                select(self.resolved_context).where(
-                    self.resolved_context.c.invoice_id == invoice_id)
-            ).mappings().first()
-        if not row:
-            return None
-        return ResolvedContext(
-            invoice_id=row["invoice_id"], sponsor_id=row["sponsor_id"],
-            study_id=row["study_id"], site_id=row["site_id"], confidence=row["confidence"],
-            candidates=[ContextCandidate(**c) for c in row["candidates"]],
-            warnings=list(row["warnings"]),
-        )
-
-    def replace_matches(self, invoice_id: str, matches: list[MatchResult]) -> None:
-        rows = [{
-            "line_item_id": m.line_item_id, "invoice_id": invoice_id,
-            "catalog_item_id": m.catalog_item_id, "catalog_description": m.catalog_description,
-            "confidence": m.confidence, "amount_match": m.amount_match,
-            "quantity_match": m.quantity_match, "rationale": m.rationale,
-            "requires_exception_review": m.requires_exception_review,
-            "alternates": list(m.alternates), "exceptions": list(m.exceptions),
-        } for m in matches]
-        with self._engine.begin() as conn:
-            conn.execute(
-                delete(self.match_results).where(self.match_results.c.invoice_id == invoice_id)
-            )
-            if rows:
-                conn.execute(insert(self.match_results), rows)
+        # Context resolution was part of the clinical-trial pipeline (removed);
+        # no `resolved_context` table exists anymore, so there is nothing to read.
+        return None
 
     def get_matches(self, invoice_id: str) -> list[MatchResult]:
-        with self._engine.connect() as conn:
-            rows = conn.execute(
-                select(self.match_results).where(self.match_results.c.invoice_id == invoice_id)
-            ).mappings().all()
-        return [MatchResult(
-            line_item_id=r["line_item_id"], catalog_item_id=r["catalog_item_id"],
-            catalog_description=r["catalog_description"], confidence=r["confidence"],
-            amount_match=r["amount_match"], quantity_match=r["quantity_match"],
-            rationale=r["rationale"], requires_exception_review=r["requires_exception_review"],
-            alternates=list(r["alternates"]), exceptions=list(r["exceptions"]),
-        ) for r in rows]
+        # Catalog matching was part of the clinical-trial pipeline (removed); no
+        # `match_results` table exists anymore, so there is nothing to read.
+        return []
 
     def add_exceptions(self, exceptions: list[ExceptionRecord]) -> None:
         if not exceptions:
@@ -384,6 +359,67 @@ class PostgresRepository:
     def mark_seen(self, message_id: str) -> None:
         stmt = pg_insert(self.seen_messages).values(message_id=message_id).on_conflict_do_nothing(
             index_elements=[self.seen_messages.c.message_id],
+        )
+        with self._engine.begin() as conn:
+            conn.execute(stmt)
+
+    def is_appended(self, idempotency_key: str) -> bool:
+        with self._engine.connect() as conn:
+            row = conn.execute(
+                select(self.sheet_appends.c.idempotency_key)
+                .where(self.sheet_appends.c.idempotency_key == idempotency_key)
+            ).first()
+        return row is not None
+
+    def record_append(self, idempotency_key: str, sheet_row_ref: str) -> None:
+        stmt = pg_insert(self.sheet_appends).values(
+            idempotency_key=idempotency_key, sheet_row_ref=sheet_row_ref,
+        ).on_conflict_do_nothing(
+            index_elements=[self.sheet_appends.c.idempotency_key],
+        )
+        with self._engine.begin() as conn:
+            conn.execute(stmt)
+
+    def get_append_ref(self, idempotency_key: str) -> str | None:
+        with self._engine.connect() as conn:
+            value = conn.execute(
+                select(self.sheet_appends.c.sheet_row_ref)
+                .where(self.sheet_appends.c.idempotency_key == idempotency_key)
+            ).scalar()
+        return value
+
+    def get_oauth_token(self, provider: str) -> str | None:
+        with self._engine.connect() as conn:
+            value = conn.execute(
+                select(self.oauth_tokens.c.encrypted_token)
+                .where(self.oauth_tokens.c.provider == provider)
+            ).scalar()
+        return value
+
+    def set_oauth_token(self, provider: str, encrypted: str) -> None:
+        stmt = pg_insert(self.oauth_tokens).values(
+            provider=provider, encrypted_token=encrypted,
+        ).on_conflict_do_update(
+            index_elements=[self.oauth_tokens.c.provider],
+            set_={"encrypted_token": encrypted, "updated_at": func.now()},
+        )
+        with self._engine.begin() as conn:
+            conn.execute(stmt)
+
+    def get_sync_history_id(self) -> str | None:
+        with self._engine.connect() as conn:
+            value = conn.execute(
+                select(self.gmail_sync_state.c.history_id)
+                .where(self.gmail_sync_state.c.id == "gmail")
+            ).scalar()
+        return value
+
+    def set_sync_history_id(self, history_id: str) -> None:
+        stmt = pg_insert(self.gmail_sync_state).values(
+            id="gmail", history_id=history_id,
+        ).on_conflict_do_update(
+            index_elements=[self.gmail_sync_state.c.id],
+            set_={"history_id": history_id, "updated_at": func.now()},
         )
         with self._engine.begin() as conn:
             conn.execute(stmt)

@@ -1,8 +1,10 @@
 # Runbook — Dev Setup & Run
 
-Practical setup and run instructions for IntakeHub (the AI-first clinical
-trial invoice intake/matching/decisioning workflow). For *what* it does see
-[`PRD.md`](./PRD.md); for *how* it's structured see [`ARCHITECTURE.md`](./ARCHITECTURE.md);
+Practical setup and run instructions for IntakeHub (the AI-first solopreneur
+tax-ledger intake/classification/filing workflow). For *what* it does see
+[`PRD.md`](./PRD.md) and the pivot's origin document
+[`docs/brainstorms/solopreneur-ledger-requirements.md`](./brainstorms/solopreneur-ledger-requirements.md);
+for *how* it's structured see [`ARCHITECTURE.md`](./ARCHITECTURE.md);
 for status see [`BUILD_PLAN.md`](./BUILD_PLAN.md).
 
 ## TL;DR
@@ -50,12 +52,12 @@ backend/    FastAPI app + pipeline stages + clients + persistence (package: back
   api/        HTTP routes (PRD §13)
   domain/     Pydantic domain types
   db/         schema.sql, engine/bootstrap, Repository (in-memory + Postgres)
-  clients/    LLM / MCP-reference / ClinRun clients + stub servers
-  intake parser extraction context catalog matching decision submission exceptions audit orchestrator
+  clients/    LLM / Drive / Gmail / Sheets clients
+  inbox receipts intake parser extraction categorize decision ledger_integrity exceptions audit corrections orchestrator
 frontend/   React/Vite reviewer hub
 samples/    sample invoices (inv_clean_001.json, inv_hold_unmatched_002.json)
 tests/      unit / integration / scenarios
-docker-compose.yml   db + api + hub + mcp-reference + mock-clinrun
+docker-compose.yml   db + api + hub + poller (drive/gmail profiles)
 pyproject.toml       ruff + pytest config
 ```
 
@@ -66,8 +68,7 @@ pyproject.toml       ruff + pytest config
 | `api` | 8000 | FastAPI app (`/health`, `/api/invoices...`, `/docs`) |
 | `hub` | 5173 | Vite dev server (reviewer hub) |
 | `db` | 5432 | PostgreSQL 16 |
-| `mcp-reference` | 8100 | stub reference API (sponsor/study/site + catalog) |
-| `mock-clinrun` | 8200 | stub ClinRun submission backend |
+| `poller` | — | inbox-fetch loop sidecar (`--profile drive` or `--profile gmail`; no port, calls `api` over the Compose network) |
 
 The async worker is intentionally not a service yet (Open Decision OD-3 — the MVP
 runs synchronously).
@@ -80,19 +81,26 @@ runs.
 | Variable | Default (Compose) | Local override example |
 | --- | --- | --- |
 | `DATABASE_URL` | `postgresql+psycopg://intakehub:intakehub@db:5432/intakehub` | `...@localhost:5432/...` |
-| `MCP_REFERENCE_URL` | `http://mcp-reference:8100` | `http://localhost:8100` |
-| `CLINRUN_URL` | `http://mock-clinrun:8200` | `http://localhost:8200` |
 | `VITE_API_URL` (frontend) | `http://localhost:8000` | — |
 | `ANTHROPIC_API_KEY` | _(unset → offline stand-in)_ | `sk-ant-...` (enables the real LLM provider, OD-2) |
 | `LLM_MODEL` | `claude-opus-4-7` | e.g. `claude-haiku-4-5` |
-| `INBOX_PROVIDER` | `mock` | `drive` (read invoices from a watched Google Drive folder) |
+| `INBOX_PROVIDER` | `mock` | `drive` (watched Google Drive folder) or `gmail` (connected Gmail mailbox) |
 | `DRIVE_FOLDER_ID` | _(unset)_ | the watched folder's id (required when `INBOX_PROVIDER=drive`) |
-| `GOOGLE_APPLICATION_CREDENTIALS` | _(unset)_ | service-account key path or inline JSON (required when `INBOX_PROVIDER=drive`) |
+| `GOOGLE_APPLICATION_CREDENTIALS` | _(unset)_ | service-account key path or inline JSON (required when `INBOX_PROVIDER=drive`, or for the Sheets service account) |
+| `SHEETS_SPREADSHEET_ID` | _(unset → offline `StubSheetsClient`)_ | id of the ledger spreadsheet to append to |
+| `GMAIL_CLIENT_ID` / `GMAIL_CLIENT_SECRET` | _(unset)_ | the OAuth client (installed app) id/secret (required when `INBOX_PROVIDER=gmail`) |
+| `GMAIL_REFRESH_TOKEN` | _(unset)_ | minted once by `backend/tools/gmail_oauth_setup.py` (required when `INBOX_PROVIDER=gmail`) |
+| `GMAIL_TOKEN_ENC_KEY` | _(unset → env-only fallback)_ | a Fernet key encrypting the refresh token at rest |
+| `GMAIL_LABEL` | _(unset)_ | the label `GmailInbox.on_processed` would apply if the integration ever gains Gmail *modify* scope — not yet actionable (read-only today, see Path F) |
+| `GMAIL_TAX_YEAR` | current year | anchors the first-connect backfill (`after:<year>/01/01`) |
 
 For the Google Drive folder intake source (`INBOX_PROVIDER=drive`), see
 [`drive-intake-setup.md`](./drive-intake-setup.md) — service-account creation,
 folder sharing, and the org-side Gmail→Drive glue — and **Path E** below for
-running it in dev (setting the credentials) and exercising it in tests.
+running it in dev (setting the credentials) and exercising it in tests. For
+the Gmail mailbox source and the Sheets ledger output, see
+[`gmail-sheets-setup.md`](./gmail-sheets-setup.md) and **Path F** / **Path G**
+below.
 
 When `ANTHROPIC_API_KEY` is set, `get_llm_client()` returns `AnthropicLLMClient`
 (official `anthropic` SDK, imported lazily) and extraction confidence comes from
@@ -154,40 +162,33 @@ curl http://localhost:8000/api/invoices/<invoice_id>
 ```
 
 Open the hub at <http://localhost:5173> — the list shows the processed invoices;
-click one for the full extraction / context / matches / decision / audit detail.
+click one for the full extraction / classification / category / decision / audit
+detail.
 
 ---
 
 ## Path B — Local backend dev (hot reload)
 
-Run the app from a venv while using Docker only for the dependencies (DB + stub
-services). Good for fast iteration on backend code.
+Run the app from a venv while using Docker only for the DB. Good for fast
+iteration on backend code — there is no internal reference/submission service
+to stand up (unlike the tool's clinical-trial predecessor); the Sheets/Gmail
+clients talk directly to Google's APIs (or their offline stubs).
 
 ```bash
-# 1. dependencies via Docker
-docker compose up -d db mcp-reference mock-clinrun
+# 1. dependency via Docker
+docker compose up -d db
 
 # 2. Python env (from repo root)
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r backend/requirements-dev.txt
 
-# 3. run the API against the local-mapped services
+# 3. run the API against the local-mapped DB
 export DATABASE_URL=postgresql+psycopg://intakehub:intakehub@localhost:5432/intakehub
-export MCP_REFERENCE_URL=http://localhost:8100
-export CLINRUN_URL=http://localhost:8200
 uvicorn backend.api.main:app --reload --port 8000
 ```
 
 Run `uvicorn` from the repo root so the `backend` package is importable.
-
-If you don't have Docker at all, you can run the two stub servers directly in
-separate shells (each needs the venv) and point at your own Postgres:
-
-```bash
-uvicorn backend.clients.stub_servers.mcp_app:app --port 8100
-uvicorn backend.clients.stub_servers.clinrun_app:app --port 8200
-```
 
 ### Frontend dev
 
@@ -215,9 +216,13 @@ pytest -q                           # full suite
 pytest tests/unit -q                # just unit tests
 ```
 
-Expected: lint clean; suite passes with **one skipped** test — the Postgres
+Expected: lint clean; suite passes with **two skipped** tests — the Postgres
 round-trip (`tests/integration/test_postgres_repository.py`), which is
-skip-guarded and only runs when a real Postgres is reachable.
+skip-guarded and only runs when a real Postgres is reachable, and one Gmail
+token-encryption test (`tests/unit/test_gmail_inbox.py`) that is skip-guarded
+on the `cryptography` package (already listed in `backend/requirements.txt`;
+it only skips if your venv predates that addition — reinstall
+`backend/requirements-dev.txt` to pick it up. See Path F).
 
 ### Validating the Postgres path
 
@@ -350,6 +355,162 @@ changing any of these vars.
 
 ---
 
+## Path F — Gmail intake (dev & test)
+
+Run the pipeline against a **connected Gmail mailbox** instead of the offline
+mock inbox or a Drive folder (`INBOX_PROVIDER=gmail`). Personal Gmail cannot
+use a service account (no domain-wide delegation), so this path needs a
+one-time interactive OAuth consent — that setup (create the OAuth client,
+consent screen, mint the refresh token) lives in
+[`gmail-sheets-setup.md`](./gmail-sheets-setup.md) and is not repeated here.
+Below is how to wire it up **locally**, plus how to exercise the Gmail code
+**without any credentials** in tests.
+
+### Test — offline, no credentials
+
+The Gmail client, inbox provider, and fetch-route wiring are fully covered by
+an in-memory `StubGmailClient` (seeded with messages/attachments) — no Google
+account, network, or key is needed. Run just those suites:
+
+```bash
+source .venv/bin/activate                       # (create per Path B/C if needed)
+pytest tests/unit/test_gmail_client.py \
+       tests/unit/test_gmail_inbox.py \
+       tests/integration/test_inbox_fetch.py \
+       tests/integration/test_ledger_integrity.py -q
+```
+
+These verify MIME part-walking + base64url decoding, backfill pagination and
+`history.list` incremental sync (including a stale-`historyId` → full-resync
+fallback), the receipt filter dropping non-receipts before a full fetch (with
+only id/sender/subject retained for a drop — R17), and the duplicate-hold /
+spot-check guards over posted items. `HttpGmailClient` never imports
+`google-auth` unless it actually mints a token, so the suite stays
+network-free. The Gmail token-encryption path
+(`tests/unit/test_gmail_inbox.py`) additionally needs the `cryptography`
+package (see Path C) to run un-skipped.
+
+### Dev — against a real Gmail mailbox
+
+You need three things from [`gmail-sheets-setup.md`](./gmail-sheets-setup.md):
+the OAuth client's **id** and **secret**, and the **refresh token** minted by
+`backend/tools/gmail_oauth_setup.py`. Then set:
+
+| Variable | Value |
+| --- | --- |
+| `INBOX_PROVIDER` | `gmail` |
+| `GMAIL_CLIENT_ID` | the OAuth client id |
+| `GMAIL_CLIENT_SECRET` | the OAuth client secret |
+| `GMAIL_REFRESH_TOKEN` | the refresh token from `gmail_oauth_setup.py` |
+| `GMAIL_TOKEN_ENC_KEY` | (recommended) a Fernet key so the refresh token is encrypted at rest instead of only living in the environment |
+| `GMAIL_TAX_YEAR` | the tax year to backfill from (defaults to the current year) |
+| `ANTHROPIC_API_KEY` | needed in practice — real Gmail receipts have no structured block, so without it extraction is blank and everything holds |
+
+Selecting `gmail` without `GMAIL_CLIENT_ID`/`GMAIL_CLIENT_SECRET`/
+`GMAIL_REFRESH_TOKEN` fails fast at startup (no silent fall-back to the mock).
+
+```bash
+# One-time, interactive (opens a browser for consent) — prints a
+# GMAIL_REFRESH_TOKEN=... line to copy from:
+python -m backend.tools.gmail_oauth_setup /path/to/client_secret.json
+
+export INBOX_PROVIDER=gmail
+export GMAIL_CLIENT_ID="<from the Cloud Console OAuth client>"
+export GMAIL_CLIENT_SECRET="<from the Cloud Console OAuth client>"
+export GMAIL_REFRESH_TOKEN="<the token the setup script printed>"
+export ANTHROPIC_API_KEY="$(security find-generic-password -s ledgerrun-ANTHROPIC_API_KEY -w)"
+uvicorn backend.api.main:app --reload --port 8000     # + Path B's DB vars
+
+# In another shell: poll the mailbox once (idempotent — safe to re-run)
+python -m backend.tools.inbox_poller http://127.0.0.1:8000
+
+# …or monitor continuously — poll every 60s until Ctrl-C
+python -m backend.tools.inbox_poller --interval 60 http://127.0.0.1:8000
+```
+
+The first fetch backfills to `after:<GMAIL_TAX_YEAR>/01/01`; every fetch after
+that uses `history.list` deltas, so re-running is cheap and idempotent (each
+message is recorded *seen* before the receipt filter or the pipeline ever
+touches it). Config is read once at startup, so restart `uvicorn` after
+changing any of these vars.
+
+> **Turnkey monitoring (Compose).** As with Drive, set the Gmail vars in
+> `.env` (`cp .env.example .env`) and start the stack with the polling
+> sidecar: `docker compose --profile gmail up -d --build`.
+
+> **No modify scope, by design.** `GmailInbox.on_processed` is a documented
+> no-op — this integration requests only `gmail.readonly` (least privilege,
+> R20), so a processed message is never labeled or archived in the mailbox.
+> The hub, not the mailbox, is the source of truth for review state — the same
+> posture as the Drive path's status subfolders being a decision-time
+> snapshot, not a live queue.
+
+To revoke access (rotate/retire the connection):
+
+```bash
+python -m backend.tools.gmail_revoke
+```
+
+This revokes the refresh token at Google and clears the app's own encrypted
+copy + sync cursor, so a subsequent connect starts clean and requires re-running
+`gmail_oauth_setup.py`.
+
+---
+
+## Path G — Sheets ledger (dev & test)
+
+Filed (`submit`-decided) items are appended as rows to a **user-owned Google
+Sheet** instead of a submission backend. Auth is a **service account**
+(`drive.file` scope — the service account owns the sheet it creates), the same
+pattern as the Drive folder-intake source.
+
+### Test — offline, no credentials
+
+`StubSheetsClient` is an in-memory fake — no network, no credentials — and is
+the default when `SHEETS_SPREADSHEET_ID`/`GOOGLE_APPLICATION_CREDENTIALS` are
+unset. Run just those suites:
+
+```bash
+source .venv/bin/activate                       # (create per Path B/C if needed)
+pytest tests/unit/test_sheets_client.py \
+       tests/unit/test_sheets_ledger.py \
+       tests/integration/test_ledger_integrity.py -q
+```
+
+These verify `append_row`/header-bootstrap behavior, and — the important
+part — that `append_filed_row` is idempotent against the Postgres
+`sheet_appends` dedup ledger: the same idempotency key (the invoice id) never
+produces a second row, and a transient client failure propagates so the
+caller's retry/hold logic (`sheet_write_failed`) can act on it.
+`HttpSheetsClient` never imports `google-auth` unless it actually mints a
+token, so the suite stays network-free.
+
+### Dev — against a real Sheet
+
+You need the **service-account JSON key** from
+[`gmail-sheets-setup.md`](./gmail-sheets-setup.md) (a *different* service
+account from the Drive one is fine, or the same one with both scopes granted).
+Then set:
+
+| Variable | Value |
+| --- | --- |
+| `SHEETS_SPREADSHEET_ID` | id of an existing spreadsheet to append to, or leave unset to have the first append **create** one titled "Solopreneur Ledger" |
+| `GOOGLE_APPLICATION_CREDENTIALS` | the service-account key path or inline JSON |
+
+```bash
+export SHEETS_SPREADSHEET_ID="<spreadsheet-id-from-the-sheets-url>"   # or leave unset
+export GOOGLE_APPLICATION_CREDENTIALS="$HOME/.config/intakehub/sheets-sa.json"
+uvicorn backend.api.main:app --reload --port 8000     # + Path B's DB vars + an inbox provider
+```
+
+Process or fetch an invoice that decides `submit`; its ledger row
+(`Type, Category, Vendor, Date, Amount, Source`) appears in the sheet's
+`Ledger` tab. Re-processing the same item (rerun/recover) never double-posts —
+the Postgres `sheet_appends` table, not the Sheet, is the dedup source of
+truth.
+
+---
+
 ## Common tasks
 
 - **Reset the database:** `docker compose down -v && docker compose up -d db`
@@ -361,6 +522,8 @@ changing any of these vars.
 - **Process a real PDF:** see Path D.
 - **Read invoices from a Google Drive folder:** see Path E (dev credentials + the
   credential-free test suite).
+- **Read invoices from a connected Gmail mailbox:** see Path F.
+- **File to a Google Sheet ledger:** see Path G.
 - **Browse the API:** interactive docs at <http://localhost:8000/docs>.
 
 ## Troubleshooting

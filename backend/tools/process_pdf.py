@@ -2,7 +2,7 @@
 
     python -m backend.tools.process_pdf samples/pdf/inv_clean_001.pdf
 
-Uses the in-memory repository + stub reference/ClinRun clients and the offline
+Uses the in-memory repository + a stub Sheets client and the offline
 ``LayoutLLMClient`` extraction stand-in, so it needs no database, network, or
 API key. A real deployment would point at Postgres + a real LLM provider.
 """
@@ -12,7 +12,7 @@ from __future__ import annotations
 import pathlib
 import sys
 
-from backend.clients import StubClinRunClient, StubMCPReferenceClient
+from backend.clients import StubSheetsClient
 from backend.db.repository import InMemoryRepository
 from backend.orchestrator import process
 from backend.parser.pdf import LayoutLLMClient
@@ -25,16 +25,15 @@ def run(pdf_path: str) -> int:
         return 2
 
     repo = InMemoryRepository()
+    sheets = StubSheetsClient()
     sample = {"source": {"channel": "upload", "attachment": path.name,
                          "attachment_path": str(path)}}
     invoice = process(
         sample, repo,
-        llm=LayoutLLMClient(), ref=StubMCPReferenceClient(), clinrun=StubClinRunClient(),
+        llm=LayoutLLMClient(), sheets=sheets,
     )
 
-    ctx = repo.get_context(invoice.id)
-    matches = repo.get_matches(invoice.id)
-    line_items = {li.id: li for li in repo.get_line_items(invoice.id)}
+    line_items = repo.get_line_items(invoice.id)
     exceptions = repo.get_exceptions(invoice.id)
 
     print(f"\n=== {path.name} ===")
@@ -42,20 +41,16 @@ def run(pdf_path: str) -> int:
     print(f"decision : {invoice.decision.value if invoice.decision else '-'}"
           f"  (confidence {invoice.decision_confidence})")
     print(f"vendor   : {invoice.metadata.vendor_name}")
-    print(f"sponsor  : {invoice.metadata.sponsor_name} / {invoice.metadata.study_name}")
-    if ctx:
-        print(f"resolved : sponsor={ctx.sponsor_id} study={ctx.study_id} site={ctx.site_id}"
-              f"  (confidence {round(ctx.confidence, 2)})")
-        if ctx.warnings:
-            print(f"warnings : {', '.join(ctx.warnings)}")
+    print(f"total    : {invoice.metadata.total_amount} {invoice.metadata.currency or ''}".rstrip())
 
     print("line items:")
-    for m in matches:
-        li = line_items.get(m.line_item_id)
-        desc = li.raw_description if li else m.line_item_id
-        target = m.catalog_description or "UNMATCHED"
-        flags = f"  [{', '.join(m.exceptions)}]" if m.exceptions else ""
-        print(f"  - {desc:32} -> {target:24} ({m.confidence}){flags}")
+    for li in line_items:
+        print(f"  - {li.raw_description:32} qty={li.quantity} total={li.total}")
+
+    if sheets.rows:
+        print("ledger row(s):")
+        for row in sheets.rows:
+            print(f"  - {row}")
 
     if exceptions:
         print("exceptions:")

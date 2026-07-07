@@ -38,6 +38,23 @@ def metadata_overlay(audit: list[AuditEvent]) -> dict[str, object]:
     return overlay
 
 
+def category_overlay(audit: list[AuditEvent]) -> str | None:
+    """Latest human Schedule C category override (or ``None``).
+
+    A ledger category correction is recorded as
+    ``{"target": "category", "after": {"category": <name>}}``; the pipeline tail
+    pins the latest one as a fixed input on rerun (R10/AE2), and the AI's original
+    category is preserved on the CATEGORIZED audit event.
+    """
+    latest: str | None = None
+    for event in audit:  # chronological → latest wins
+        if _is_correction(event, "category"):
+            value = event.details.get("after", {}).get("category")
+            if value:
+                latest = value
+    return latest
+
+
 def match_overlay(audit: list[AuditEvent]) -> dict[str, dict]:
     """Latest human match override per line item (line_item_id → {id, description})."""
     overlay: dict[str, dict] = {}

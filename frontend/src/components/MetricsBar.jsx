@@ -9,7 +9,7 @@ export default function MetricsBar({ metrics }) {
   if (!metrics) return null;
   const stats = [
     { label: "Processed", value: metrics.total },
-    { label: "Submitted", value: metrics.submitted },
+    { label: "Posted", value: metrics.submitted },
     { label: "Held", value: metrics.held },
     { label: "Failed", value: metrics.failed },
     { label: "Auto-submit rate", value: rate(metrics.auto_submit_rate) },

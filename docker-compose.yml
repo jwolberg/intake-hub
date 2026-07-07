@@ -1,6 +1,7 @@
-# Local-first topology (ARCHITECTURE.md §17). Brings up db + api + hub plus the
-# mcp-reference and mock-clinrun stub services. The async worker is deferred
-# (Open Decision OD-3: MVP may run synchronously).
+# Local-first topology (ARCHITECTURE.md §18). Brings up db + api + hub. The
+# async worker is deferred (Open Decision OD-3: MVP may run synchronously).
+# No internal reference/submission microservice is needed post-pivot — the
+# Sheets/Gmail/Drive clients talk directly to Google's APIs (or offline stubs).
 
 services:
   db:
@@ -25,47 +26,39 @@ services:
       dockerfile: backend/Dockerfile
     environment:
       DATABASE_URL: postgresql+psycopg://intakehub:intakehub@db:5432/intakehub
-      MCP_REFERENCE_URL: http://mcp-reference:8100
-      CLINRUN_URL: http://mock-clinrun:8200
       # OD-2 real LLM provider. Read from the host env at `up` time; empty →
       # offline stand-in (network-free default). Export it from the Keychain:
       #   ANTHROPIC_API_KEY="$(security find-generic-password \
       #     -s ledgerrun-ANTHROPIC_API_KEY -w)" docker compose up -d --build api
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      # Drive folder intake. `mock` (default) serves the offline demo set; `drive`
+      # Inbox source. `mock` (default) serves the offline demo set; `drive`
       # monitors a Google Drive folder — then DRIVE_FOLDER_ID and the SA key are
-      # required (the app fails fast at startup if either is missing). The key is
-      # a path to a mounted file OR inline JSON (a value starting with `{`).
+      # required; `gmail` reads a connected mailbox — then the GMAIL_* vars below
+      # are required (the app fails fast at startup if any required value is
+      # missing). GOOGLE_APPLICATION_CREDENTIALS is a path to a mounted file OR
+      # inline JSON (a value starting with `{`); it is also read for the Sheets
+      # service account (below).
       INBOX_PROVIDER: ${INBOX_PROVIDER:-mock}
       DRIVE_FOLDER_ID: ${DRIVE_FOLDER_ID:-}
       GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-}
+      # Google Sheets ledger output (feat: solopreneur-ledger pivot). Empty →
+      # the offline StubSheetsClient (no network); set both this and the
+      # service-account credential above to file to a real Sheet.
+      SHEETS_SPREADSHEET_ID: ${SHEETS_SPREADSHEET_ID:-}
+      # Gmail mailbox monitoring (feat: solopreneur-ledger pivot). Personal Gmail
+      # can't use a service account, so this is a per-user OAuth connection — see
+      # docs/gmail-sheets-setup.md for minting GMAIL_REFRESH_TOKEN.
+      GMAIL_CLIENT_ID: ${GMAIL_CLIENT_ID:-}
+      GMAIL_CLIENT_SECRET: ${GMAIL_CLIENT_SECRET:-}
+      GMAIL_REFRESH_TOKEN: ${GMAIL_REFRESH_TOKEN:-}
+      GMAIL_TOKEN_ENC_KEY: ${GMAIL_TOKEN_ENC_KEY:-}
+      GMAIL_LABEL: ${GMAIL_LABEL:-}
+      GMAIL_TAX_YEAR: ${GMAIL_TAX_YEAR:-}
     ports:
       - "8000:8000"
     depends_on:
       db:
         condition: service_healthy
-      mcp-reference:
-        condition: service_started
-      mock-clinrun:
-        condition: service_started
-
-  mcp-reference:
-    build:
-      context: .
-      dockerfile: backend/Dockerfile
-    command:
-      ["uvicorn", "backend.clients.stub_servers.mcp_app:app", "--host", "0.0.0.0", "--port", "8100"]
-    ports:
-      - "8100:8100"
-
-  mock-clinrun:
-    build:
-      context: .
-      dockerfile: backend/Dockerfile
-    command:
-      ["uvicorn", "backend.clients.stub_servers.clinrun_app:app", "--host", "0.0.0.0", "--port", "8200"]
-    ports:
-      - "8200:8200"
 
   hub:
     build:
@@ -77,11 +70,14 @@ services:
     depends_on:
       - api
 
-  # Drive monitor. Loops `POST /api/inbox/fetch` every INBOX_POLL_INTERVAL seconds
-  # so a watched Drive folder is *continuously* pulled (the app has no internal
-  # scheduler by design — polling only). Gated behind the `drive` profile, so the
-  # plain demo (`docker compose up`) does not start it; enable with
-  # `docker compose --profile drive up -d` once .env sets INBOX_PROVIDER=drive.
+  # Inbox monitor. Loops `POST /api/inbox/fetch` every INBOX_POLL_INTERVAL seconds
+  # so a watched Drive folder or connected Gmail mailbox is *continuously*
+  # pulled (the app has no internal scheduler by design — polling only; the
+  # poller itself is provider-agnostic, it just calls the fetch route). Gated
+  # behind the `drive`/`gmail` profiles, so the plain demo (`docker compose up`)
+  # does not start it; enable with `docker compose --profile drive up -d` (once
+  # .env sets INBOX_PROVIDER=drive) or `docker compose --profile gmail up -d`
+  # (once .env sets INBOX_PROVIDER=gmail).
   poller:
     build:
       context: .
@@ -90,7 +86,7 @@ services:
     restart: unless-stopped
     depends_on:
       - api
-    profiles: ["drive"]
+    profiles: ["drive", "gmail"]
 
 volumes:
   db_data:

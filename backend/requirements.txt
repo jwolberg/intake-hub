@@ -8,3 +8,5 @@ pypdf>=4.0,<6.0
 PyMuPDF>=1.24,<2.0  # rasterize PDF/image pages for the reviewer overlay (P4-T1, OD-8)
 anthropic>=0.40,<1.0  # real LLM provider (OD-2); imported lazily, only used when ANTHROPIC_API_KEY is set
 google-auth>=2.28,<3.0  # mint service-account bearer tokens for the Drive intake source (KTD1); imported lazily, only the drive InboxClient path uses it
+google-auth-oauthlib>=1.2,<2.0  # one-time Gmail OAuth setup script only (backend/tools/gmail_oauth_setup.py); NOT a runtime dep — runtime uses google.oauth2.credentials via google-auth above
+cryptography>=42,<46  # encrypts the stored Gmail refresh token at rest (backend/inbox/_crypto.py, U8); imported lazily, only touched by the gmail InboxClient path

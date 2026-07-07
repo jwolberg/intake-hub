@@ -25,13 +25,14 @@ from sqlalchemy.exc import SQLAlchemyError
 from backend import corrections
 from backend.audit import latest_details, record
 from backend.audit.metrics import WorkflowMetrics, compute_metrics
-from backend.clients import get_clinrun_client, get_llm_client, get_reference_client
+from backend.clients import get_llm_client, get_sheets_client
 from backend.config import settings
 from backend.db import get_engine, init_schema
 from backend.db.repository import Repository, get_repository
 from backend.domain import Actor, AuditAction, Decision, InvoiceMetadata, InvoiceStatus
 from backend.domain.taxonomy import is_retryable
 from backend.inbox import InboxClient, get_inbox_client, message_to_sample
+from backend.ledger_integrity import posted_items, sample_posted
 from backend.orchestrator import process, recover, rerun
 from backend.parser.raster import (
     RenderedPage,
@@ -86,8 +87,7 @@ def get_repo() -> Repository:
 def get_pipeline_clients() -> dict:
     return {
         "llm": get_llm_client(),
-        "ref": get_reference_client(),
-        "clinrun": get_clinrun_client(),
+        "sheets": get_sheets_client(),
     }
 
 
@@ -107,24 +107,25 @@ InboxDep = Annotated[InboxClient, Depends(get_inbox)]
 
 # Held/failed invoices are the ones still awaiting a human (needs review).
 _NEEDS_REVIEW_STATUSES = {InvoiceStatus.HELD, InvoiceStatus.FAILED}
-# Exception codes that signal the AI was unsure (decision/extraction/match/context).
+# Exception codes that signal the AI was unsure (extraction / income-expense /
+# category / overall). Includes the ledger hold reasons so the "low confidence"
+# chip actually surfaces the most common holds (ambiguous type, low category conf).
 _LOW_CONFIDENCE_FLAGS = {
-    "low_extraction_confidence", "moderate_extraction_confidence",
-    "low_match_confidence", "weak_match", "low_confidence", "context_unresolved",
+    "low_extraction_confidence", "moderate_extraction_confidence", "low_confidence",
+    "ambiguous_income_expense", "low_category_confidence",
 }
-# A submit below this confidence is worth a second look even though it cleared the floor.
+# A filed item below this confidence is worth a second look even though it cleared the floor.
 _SUBMIT_CONFIDENCE_WATCH = 0.75
 
-# Filter keys the API accepts (PRD §10). Statuses double as tags so the same
-# membership test serves every chip.
+# Filter keys the API accepts. Statuses double as tags so the same membership test
+# serves every chip.
 FILTER_KEYS = {
-    "submitted", "held", "failed", "needs_review",
-    "low_confidence", "mismatched_metadata", "unmatched_line_items",
+    "posted", "held", "failed", "needs_review", "low_confidence",
 }
 
 
-def _filter_tags(invoice, exceptions, matches, ctx) -> list[str]:
-    """Triage tags for an invoice (PRD §10 Suggested filters)."""
+def _filter_tags(invoice, exceptions) -> list[str]:
+    """Triage tags for an invoice (the reviewer hub's filter chips)."""
     tags = {invoice.status.value}
     if invoice.status in _NEEDS_REVIEW_STATUSES:
         tags.add("needs_review")
@@ -137,25 +138,14 @@ def _filter_tags(invoice, exceptions, matches, ctx) -> list[str]:
     ):
         tags.add("low_confidence")
 
-    # Context warnings ending in "_mismatch" are invoice-vs-reference contradictions.
-    if "context_mismatch" in exc_types or (
-        ctx and any(w.endswith("_mismatch") for w in ctx.warnings)
-    ):
-        tags.add("mismatched_metadata")
-
-    if "unmatched_line_item" in exc_types or any(m.catalog_item_id is None for m in matches):
-        tags.add("unmatched_line_items")
-
     return sorted(tags)
 
 
 def _summary(invoice, repo: Repository) -> dict:
-    """List-row view of an invoice (PRD §10 Invoice List View)."""
-    ctx = repo.get_context(invoice.id)
+    """List-row view of an invoice (the reviewer hub's list)."""
     exceptions = repo.get_exceptions(invoice.id)
-    matches = repo.get_matches(invoice.id)
-    # Reflect human metadata corrections in the listed fields (PRD FR10) without
-    # mutating the AI output: apply the overlay from the audit trail.
+    # Reflect human metadata corrections in the listed fields (R10) without mutating
+    # the AI output: apply the overlay from the audit trail.
     meta = corrections.effective_metadata(invoice.metadata, repo.get_audit(invoice.id))
     total = meta.total_amount
     return {
@@ -166,11 +156,8 @@ def _summary(invoice, repo: Repository) -> dict:
         "invoice_number": meta.invoice_number,
         "vendor_name": meta.vendor_name,
         "total_amount": str(total) if total is not None else None,
-        "sponsor_id": ctx.sponsor_id if ctx else None,
-        "study_id": ctx.study_id if ctx else None,
-        "site_id": ctx.site_id if ctx else None,
         "exception_count": len(exceptions),
-        "filter_tags": _filter_tags(invoice, exceptions, matches, ctx),
+        "filter_tags": _filter_tags(invoice, exceptions),
         "updated_at": invoice.updated_at,
     }
 
@@ -232,10 +219,69 @@ def list_invoices(
     return [row for row in rows if filter in row["filter_tags"]]
 
 
+@app.get("/api/review-queue")
+def review_queue(repo: RepoDep) -> list[dict]:
+    """Held items for the reviewer, default **oldest-first, grouped by reason** (R10).
+
+    Each row is the list summary plus the primary hold reason (its first
+    exception's type/title), so the hub can group the queue by why the item was
+    held and work the oldest first.
+    """
+    held = [inv for inv in repo.list_invoices() if inv.status is InvoiceStatus.HELD]
+    rows = []
+    for inv in held:
+        exceptions = repo.get_exceptions(inv.id)
+        primary = exceptions[0] if exceptions else None
+        rows.append({
+            **_summary(inv, repo),
+            "reason": primary.type if primary else None,
+            "reason_title": primary.message if primary else None,
+        })
+    # Group by reason (so same-reason items are worked together) and oldest-first
+    # within each group (so the longest-waiting item of a reason is handled first).
+    rows.sort(key=lambda r: (r["reason"] or "", r["updated_at"]))
+    return rows
+
+
 @app.get("/api/metrics")
 def metrics(repo: RepoDep) -> WorkflowMetrics:
     """Aggregate strategy metrics for the Operations Lead (STRATEGY § Key metrics)."""
     return compute_metrics(repo)
+
+
+@app.get("/api/notifications")
+def notifications(repo: RepoDep) -> dict:
+    """Held-item notification surface (R18).
+
+    A queryable digest so the reviewer knows when items need attention: the total
+    held count plus a breakdown by hold reason (so a flood of one kind — e.g. a
+    backfill of low-category-confidence items — is visible at a glance). Kept
+    minimal; a push/badge mechanism is deferred.
+    """
+    held = [i for i in repo.list_invoices() if i.status is InvoiceStatus.HELD]
+    by_reason: dict[str, int] = {}
+    for inv in held:
+        for exc in repo.get_exceptions(inv.id):
+            by_reason[exc.type] = by_reason.get(exc.type, 0) + 1
+    return {"held_count": len(held), "by_reason": by_reason}
+
+
+class SpotCheckRequest(BaseModel):
+    k: int = 5
+
+
+@app.post("/api/spot-check")
+def spot_check(body: SpotCheckRequest, repo: RepoDep) -> dict:
+    """Return a bounded random sample of posted items for reviewer confirmation (R15).
+
+    Records a system-attributed audit event on each sampled item so the spot-check
+    itself is on the audit trail (why an already-posted row resurfaced for review).
+    """
+    sample = sample_posted(posted_items(repo.list_invoices()), body.k)
+    for inv in sample:
+        record(repo, inv.id, AuditAction.NOTE, actor=Actor.SYSTEM,
+               reason="spot-check sample", details={"spot_check": True})
+    return {"count": len(sample), "sampled": [_summary(inv, repo) for inv in sample]}
 
 
 @app.get("/api/invoices/{invoice_id}/trace")
@@ -290,9 +336,22 @@ def _build_detail(invoice_id: str, repo: Repository) -> dict | None:
         "field_evidence": extracted.get("field_evidence", {}),
         "missing_fields": extracted.get("missing_fields", []),
     }
+    # Classification + categorization (R6/R10): the AI's income/expense call and
+    # Schedule C category with the candidate alternates, so the reviewer can pick
+    # among candidates when correcting a held item (AE2).
+    classified = latest_details(audit, AuditAction.CLASSIFIED)
+    categorized = latest_details(audit, AuditAction.CATEGORIZED)
+    detail["categorization"] = {
+        "document_type": classified.get("document_type"),
+        "document_type_confidence": classified.get("confidence"),
+        "category": categorized.get("category"),
+        "category_confidence": categorized.get("confidence"),
+        "alternates": categorized.get("alternates", []),
+    }
     detail["corrections"] = {
         "metadata": corrections.metadata_overlay(audit),
         "line_items": corrections.match_overlay(audit),
+        "category": corrections.category_overlay(audit),
     }
     # Visual Document Review (P4-T4): the page rasters + the source-anchored
     # citations (each carries its page_number + a normalized bbox) so the hub can
@@ -439,6 +498,11 @@ class LineItemCorrection(BaseModel):
     reason: str | None = None
 
 
+class CategoryCorrection(BaseModel):
+    category: str
+    reason: str | None = None
+
+
 class ReviewNote(BaseModel):
     note: str | None = None
 
@@ -512,6 +576,44 @@ def correct_line_item(invoice_id: str, body: LineItemCorrection, repo: RepoDep) 
         before=before, after=after, reason=body.reason,
     )
     _set_status(repo, invoice, InvoiceStatus.CORRECTED)
+    return _require_detail(invoice_id, repo)
+
+
+@app.post("/api/invoices/{invoice_id}/corrections/category")
+def correct_category(invoice_id: str, body: CategoryCorrection, repo: RepoDep) -> dict:
+    """Overlay a human Schedule C category correction (R6/R10; AE2).
+
+    Reuses the same overlay/audit shape as line-item corrections — the AI's
+    original category (on the CATEGORIZED audit event) is preserved and the change
+    is recorded with before/after. On rerun the corrected category is pinned as a
+    confident input, so correcting a held ambiguous item lets it file.
+    """
+    invoice = _get_invoice_or_404(invoice_id, repo)
+    audit = repo.get_audit(invoice_id)
+    prior = corrections.category_overlay(audit)
+    if prior is None:
+        prior = latest_details(audit, AuditAction.CATEGORIZED).get("category")
+    record(
+        repo, invoice_id, AuditAction.CORRECTED, actor=Actor.HUMAN,
+        details={"target": "category"},
+        before={"category": prior}, after={"category": body.category},
+        reason=body.reason,
+    )
+    _set_status(repo, invoice, InvoiceStatus.CORRECTED)
+    return _require_detail(invoice_id, repo)
+
+
+@app.post("/api/invoices/{invoice_id}/reject")
+def reject_invoice(invoice_id: str, body: ReviewNote, repo: RepoDep) -> dict:
+    """Reject a non-receipt (R10; AE4): remove it from the queue, never file it.
+
+    Records a human-attributed REJECTED event and moves the item to a terminal
+    ``rejected`` state, so it drops out of the needs-review queue and no Sheet row
+    is ever written for it.
+    """
+    invoice = _get_invoice_or_404(invoice_id, repo)
+    record(repo, invoice_id, AuditAction.REJECTED, actor=Actor.HUMAN, reason=body.note)
+    _set_status(repo, invoice, InvoiceStatus.REJECTED)
     return _require_detail(invoice_id, repo)
 
 
