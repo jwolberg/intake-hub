@@ -26,6 +26,9 @@ services:
       dockerfile: backend/Dockerfile
     environment:
       DATABASE_URL: postgresql+psycopg://intakehub:intakehub@db:5432/intakehub
+      # Local dev only: production requires IAP (AUTH_MODE defaults to `iap` and
+      # the API refuses to start without IAP_AUDIENCE). See docs/DEPLOY.md.
+      AUTH_MODE: disabled
       # OD-2 real LLM provider. Read from the host env at `up` time; empty →
       # offline stand-in (network-free default). Export it from the Keychain:
       #   ANTHROPIC_API_KEY="$(security find-generic-password \

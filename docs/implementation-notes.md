@@ -2217,3 +2217,25 @@ plain pip (#0008; consistent with the "keep pip + requirements files" prior).
   job was mounting host sample paths into the api container) is removed.
 - Note: `seed_hub`/`seed_cloud` regenerate `samples/pdf/*.pdf` on every run — that's why
   those files showed as modified in the working tree before this branch. Left untouched.
+
+### #0001 — authentication via IAP + HTTPS load balancer
+- Chosen (asked): IAP in front of both services on one load balancer — `/api/*` → API,
+  `/*` → hub, same origin so the IAP cookie covers both and the hub calls `/api` relatively.
+- **Defense in depth:** the API verifies IAP's signed `X-Goog-IAP-JWT-Assertion` itself
+  (`backend/api/auth.py`: ES256 signature against IAP's published keys, audience, issuer,
+  expiry, email). Implemented as middleware on every `/api/*` path, not per-route
+  `Depends`, so a new route can't ship unauthenticated by omission. `/health` stays public.
+- **Fail closed:** `AUTH_MODE` defaults to `iap`; startup raises if `IAP_AUDIENCE` is unset
+  or the mode is unknown. Compose and the test suite set `AUTH_MODE=disabled` explicitly.
+- IAP public keys are cached for 1 h; if fetching them fails the API returns 503, not 401.
+- Hub: a 401 triggers a full reload, which goes back through IAP sign-in. `seed_*` and
+  `inbox_poller` send `Authorization: Bearer $IAP_TOKEN` when it's set.
+- Tests sign real ES256 JWTs with a throwaway key (valid / wrong audience / wrong issuer /
+  expired / no email / forged signature / garbage), plus middleware 401/200/503 and
+  `/health` staying public.
+- **Not verified:** the actual LB/IAP/NEG commands in DEPLOY.md §6 haven't been run —
+  billing is off and they create billable, outward-facing infra (that's #0017, needs your
+  go-ahead). `validate_config` is unit-tested; the lifespan hook that calls it isn't, since
+  TestClient without `with` doesn't run lifespan.
+- **Tradeoff:** no per-user audit attribution yet — the verified email is set on
+  `request.state.user` but audit events still record `actor=human`. Possible follow-up.

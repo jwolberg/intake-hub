@@ -13,3 +13,7 @@ steps:
       - .
 images:
   - us-central1-docker.pkg.dev/ledgerrun-1/intakehub/hub:latest
+# Empty by default: behind the IAP load balancer the hub calls /api on its own
+# origin. Pass --substitutions=_API_URL=<url> only for a split-origin setup.
+substitutions:
+  _API_URL: ""

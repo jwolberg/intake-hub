@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import pathlib
 import sys
 import urllib.error
@@ -44,11 +45,18 @@ STEMS = [
 ]
 
 
+def _auth_headers() -> dict:
+    """``Authorization`` for an IAP-protected API: set ``IAP_TOKEN`` to an OIDC
+    token for the IAP OAuth client (see docs/DEPLOY.md). Unset for local dev."""
+    token = os.environ.get("IAP_TOKEN")
+    return {"Authorization": f"Bearer {token}"} if token else {}
+
+
 def _post(api: str, sample: dict) -> dict:
     req = urllib.request.Request(
         f"{api}/api/invoices/process",
         data=json.dumps(sample).encode(),
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "application/json", **_auth_headers()},
         method="POST",
     )
     with urllib.request.urlopen(req) as resp:

@@ -24,6 +24,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from backend import corrections
+from backend.api import auth
 from backend.audit import latest_details, record
 from backend.audit.metrics import WorkflowMetrics, compute_metrics
 from backend.clients import get_llm_client, get_sheets_client
@@ -47,6 +48,8 @@ logger = logging.getLogger("intakehub.api")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Refuse to start with an auth config that would leave the API open (#0001).
+    auth.validate_config(settings)
     try:
         init_schema()
         logger.info("schema initialized")
@@ -72,6 +75,24 @@ app.add_middleware(
 # before it is read (base64 inflates ~4/3, plus JSON overhead).
 MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
 MAX_REQUEST_BYTES = 28 * 1024 * 1024
+
+
+@app.middleware("http")
+async def require_auth(request: Request, call_next):
+    """Every ``/api/*`` route requires a verified IAP identity (#0001).
+
+    A middleware rather than per-route dependencies so a new route can't be added
+    unauthenticated by forgetting a ``Depends``. ``/health`` stays public.
+    """
+    if request.url.path.startswith("/api/"):
+        try:
+            request.state.user = auth.authenticate(request.headers, settings)
+        except auth.AuthError:
+            return JSONResponse(status_code=401, content={"detail": "not authenticated"})
+        except auth.CertsUnavailable:
+            logger.exception("auth: could not fetch IAP public keys")
+            return JSONResponse(status_code=503, content={"detail": "auth unavailable"})
+    return await call_next(request)
 
 
 @app.middleware("http")

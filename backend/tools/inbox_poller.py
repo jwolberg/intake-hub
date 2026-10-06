@@ -38,10 +38,19 @@ import urllib.request
 DEFAULT_API = "http://127.0.0.1:8000"
 
 
+def _auth_headers() -> dict:
+    """``Authorization`` for an IAP-protected API: set ``IAP_TOKEN`` to an OIDC
+    token for the IAP OAuth client (see docs/DEPLOY.md). Unset for local dev."""
+    token = os.environ.get("IAP_TOKEN")
+    return {"Authorization": f"Bearer {token}"} if token else {}
+
+
 def run(api: str) -> int:
     """Fetch once, printing a per-message summary. Returns a shell exit code."""
     api = api.rstrip("/")
-    req = urllib.request.Request(f"{api}/api/inbox/fetch", data=b"", method="POST")
+    req = urllib.request.Request(
+        f"{api}/api/inbox/fetch", data=b"", method="POST", headers=_auth_headers()
+    )
     try:
         with urllib.request.urlopen(req) as resp:
             out = json.load(resp)

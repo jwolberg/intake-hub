@@ -1,6 +1,6 @@
 # Deploy — Google Cloud (Cloud Run)
 
-**Status: DRAFT.** First-pass deployment guide for getting IntakeHub onto
+**Status: DRAFT — not yet exercised end to end in the IAP topology.** Deployment guide for getting IntakeHub onto
 Google Cloud. It targets **Cloud Run** for the containers and **Cloud SQL for
 PostgreSQL** for persistence. For local setup see [`RUNBOOK.md`](./RUNBOOK.md);
 for structure see [`ARCHITECTURE.md`](./ARCHITECTURE.md).
@@ -15,9 +15,7 @@ for structure see [`ARCHITECTURE.md`](./ARCHITECTURE.md).
 
 ## Why Cloud Run
 
-The backend is a stateless HTTP container that applies its own DB schema on
-startup (`init_schema`) — no separate migration step, no local disk, scales to
-zero. That is exactly Cloud Run's sweet spot. Cloud SQL holds the only durable
+The backend is a stateless HTTP container — no local disk, scales to zero. That is exactly Cloud Run's sweet spot. Cloud SQL holds the only durable
 state. Secrets (the Anthropic key, the Gmail OAuth client, the Sheets/Drive
 service-account key) come from Secret Manager. The alternative (GKE) is more
 machinery than this MVP needs.
@@ -26,8 +24,9 @@ machinery than this MVP needs.
 | --- | --- |
 | `db` (postgres:16) | Cloud SQL for PostgreSQL 16 |
 | `api` (FastAPI) | Cloud Run service `intakehub-api` |
-| `hub` (Vite dev server) | static build served by Cloud Run / Firebase Hosting |
-| `poller` (drive/gmail profile) | Cloud Scheduler job (§7) |
+| `hub` (Vite dev server) | Cloud Run `intakehub-hub` (nginx static build) |
+| — (no auth locally, `AUTH_MODE=disabled`) | HTTPS load balancer + IAP in front of both |
+| `poller` (drive/gmail profile) | Cloud Scheduler job (§8) |
 | `ANTHROPIC_API_KEY` / `GMAIL_*` / `GOOGLE_APPLICATION_CREDENTIALS` (Keychain / `.env`) | Secret Manager → env vars / secrets |
 
 ## Prerequisites
@@ -47,25 +46,29 @@ gcloud services enable \
   artifactregistry.googleapis.com cloudbuild.googleapis.com
 ```
 
-## 0. Two prerequisite code changes
+## 0. Topology & auth (read first)
 
-These are the only spots where the current container assumes the local topology.
-Make them before the first deploy (tracked as follow-ups, see end of doc):
+The app holds financial records and a Gmail refresh token, so it is **never
+deployed publicly** (#0001). One **external HTTPS load balancer** fronts both
+services on a single origin, with **Identity-Aware Proxy** (Google sign-in,
+IAM-allowlisted) on both backends:
 
-1. **Honor Cloud Run's `$PORT`.** Cloud Run sends traffic to `$PORT` (default
-   `8080`); `backend/Dockerfile` hardcodes `--port 8000`. Either set the Cloud
-   Run container port to `8000`, or switch the `CMD` to shell form so it honors
-   the injected port:
+```
+https://<domain>/api/*  ──LB+IAP──▶ serverless NEG ▶ Cloud Run intakehub-api
+https://<domain>/*      ──LB+IAP──▶ serverless NEG ▶ Cloud Run intakehub-hub
+```
 
-   ```dockerfile
-   # backend/Dockerfile
-   CMD exec uvicorn backend.api.main:app --host 0.0.0.0 --port ${PORT:-8000}
-   ```
-
-2. **`VITE_API_URL` is baked at build time.** The hub is a static Vite bundle;
-   the API URL is compiled in, not read at runtime. The frontend `Dockerfile` is
-   a **dev server** (`npm run dev`) and is not suitable for production. Build the
-   hub against the deployed API URL (see §6).
+- Same origin → the hub calls `/api` relatively (built with `VITE_API_URL=""`),
+  the IAP session cookie covers both, and CORS is moot in production.
+- Both Cloud Run services use `--ingress internal-and-cloud-load-balancing` and
+  `--no-allow-unauthenticated`, so the raw `*.run.app` URLs are unreachable.
+- Defense in depth: the API verifies IAP's signed `X-Goog-IAP-JWT-Assertion` on
+  every `/api/*` request (`backend/api/auth.py`). `AUTH_MODE` defaults to `iap`
+  and the API **refuses to start** without `IAP_AUDIENCE`
+  (`/projects/<PROJECT_NUMBER>/global/backendServices/<API_BACKEND_SERVICE_ID>`).
+  `AUTH_MODE=disabled` is for local Compose only.
+- Cost: the HTTPS load balancer is an always-on forwarding rule (~$18/mo) — the
+  one non-scale-to-zero piece besides Cloud SQL.
 
 ## 1. Artifact Registry (image host)
 
@@ -177,103 +180,126 @@ and goes in `--set-env-vars`.
 ## 5. Build & deploy the API
 
 ```bash
-gcloud builds submit --tag "$IMG/backend:latest" .
+gcloud builds submit --config cloudbuild.backend.yaml .   # -> $IMG/backend:latest
 
 gcloud run deploy intakehub-api \
   --image "$IMG/backend:latest" --region "$REGION" \
-  --allow-unauthenticated \
+  --no-allow-unauthenticated --ingress internal-and-cloud-load-balancing \
   --add-cloudsql-instances "$INSTANCE_CONN" \
-  --set-secrets "ANTHROPIC_API_KEY=ledgerrun-anthropic-api-key:latest" \
-  --set-env-vars "^@^DATABASE_URL=postgresql+psycopg://intakehub:CHANGE_ME_STRONG@/intakehub?host=/cloudsql/$INSTANCE_CONN@LLM_MODEL=claude-opus-4-7"
-
-export API_URL="$(gcloud run services describe intakehub-api \
-  --region "$REGION" --format='value(status.url)')"
-curl "$API_URL/health"   # expect {"status":"ok",...,"db":"up"}
+  --set-secrets "ANTHROPIC_API_KEY=ledgerrun-anthropic-api-key:latest,DATABASE_URL=ledgerrun-database-url:latest" \
+  --set-env-vars "LLM_MODEL=claude-opus-4-7,AUTH_MODE=iap,IAP_AUDIENCE=$IAP_AUDIENCE"
 ```
+
+`IAP_AUDIENCE` only exists once the API backend service exists (§6). On the very
+first deploy, create the backend service first (§6 steps 1–3), read its
+audience, then deploy with it — the API will not start without it.
 
 Notes:
-- `--set-env-vars` uses the `^@^` delimiter trick because `DATABASE_URL` itself
-  contains commas; `@` then separates the vars.
-- `CORS_ORIGINS` must include the hub's deployed origin once §6 is done
-  (add it to `--set-env-vars`), or the browser hub will be blocked by CORS.
-- The schema is created on first startup by `init_schema` — no migration job.
-- **Google Drive folder intake (optional).** To read invoices from a watched
-  Drive folder instead of the mock set, add `INBOX_PROVIDER=drive` and
-  `DRIVE_FOLDER_ID=<id>` to `--set-env-vars`, and provide the service-account
-  key per §4 (`GOOGLE_APPLICATION_CREDENTIALS`). The local ephemeral download
-  path needs no volume (KTD5). Full setup:
+- Run schema migrations before the new revision takes traffic (see
+  [`RUNBOOK.md`](./RUNBOOK.md) "Migrations").
+- **Google Drive folder intake (optional).** Add `INBOX_PROVIDER=drive` and
+  `DRIVE_FOLDER_ID=<id>`, and provide the service-account key per §4
+  (`GOOGLE_APPLICATION_CREDENTIALS`). Full setup:
   [`drive-intake-setup.md`](./drive-intake-setup.md).
 - **Gmail mailbox intake (optional).** Add `INBOX_PROVIDER=gmail`,
-  `GMAIL_CLIENT_ID=<id>` (env var, not secret), and mount the two Gmail
-  secrets from §4 (`GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN` via
-  `--set-secrets`). Optionally `GMAIL_TOKEN_ENC_KEY` (secret) and
-  `GMAIL_TAX_YEAR` (env var).
+  `GMAIL_CLIENT_ID=<id>`, and mount `GMAIL_CLIENT_SECRET` / `GMAIL_REFRESH_TOKEN`
+  (and optionally `GMAIL_TOKEN_ENC_KEY`) via `--set-secrets`.
 - **Sheets ledger output (optional; offline stub otherwise).** Add
-  `SHEETS_SPREADSHEET_ID=<id>` and the service-account credential per §4. With
-  neither set, filed items still record in Postgres via the offline
-  `StubSheetsClient` — no Sheet is written.
+  `SHEETS_SPREADSHEET_ID=<id>` and the service-account credential per §4.
 
-## 6. The reviewer hub (frontend)
-
-The hub needs `VITE_API_URL=$API_URL` **baked in at build time**, then served as
-static files. Two options:
-
-**A. Firebase Hosting / GCS static bucket (simplest for a static SPA):**
+## 6. Hub, load balancer, and IAP
 
 ```bash
-cd frontend
-VITE_API_URL="$API_URL" npm ci && npm run build   # -> frontend/dist
-# deploy frontend/dist via `firebase deploy` or `gsutil rsync` to a bucket+CDN
+# Hub: static bundle served by nginx; empty VITE_API_URL = same-origin /api.
+gcloud builds submit --config cloudbuild.hub.yaml frontend   # -> $IMG/hub:latest
+gcloud run deploy intakehub-hub --image "$IMG/hub:latest" --region "$REGION" \
+  --no-allow-unauthenticated --ingress internal-and-cloud-load-balancing
+
+# 1. Serverless NEGs + backend services
+for svc in api hub; do
+  gcloud compute network-endpoint-groups create "intakehub-$svc-neg" \
+    --region "$REGION" --network-endpoint-type serverless \
+    --cloud-run-service "intakehub-$svc"
+  gcloud compute backend-services create "intakehub-$svc-be" --global \
+    --load-balancing-scheme EXTERNAL_MANAGED
+  gcloud compute backend-services add-backend "intakehub-$svc-be" --global \
+    --network-endpoint-group "intakehub-$svc-neg" --network-endpoint-group-region "$REGION"
+done
+
+# 2. URL map: /api/* -> api, everything else -> hub
+gcloud compute url-maps create intakehub-lb --default-service intakehub-hub-be
+gcloud compute url-maps add-path-matcher intakehub-lb --path-matcher-name api \
+  --default-service intakehub-hub-be --path-rules "/api/*=intakehub-api-be" \
+  --new-hosts "$DOMAIN"
+
+# 3. HTTPS frontend (Google-managed cert; point $DOMAIN's A record at the IP)
+gcloud compute addresses create intakehub-ip --global
+gcloud compute ssl-certificates create intakehub-cert --domains "$DOMAIN" --global
+gcloud compute target-https-proxies create intakehub-https \
+  --url-map intakehub-lb --ssl-certificates intakehub-cert
+gcloud compute forwarding-rules create intakehub-https-fr --global \
+  --load-balancing-scheme EXTERNAL_MANAGED --address intakehub-ip \
+  --target-https-proxy intakehub-https --ports 443
+
+# 4. IAP on both backends + who may sign in
+#    (configure the OAuth consent screen once in the console first)
+gcloud services enable iap.googleapis.com
+for svc in api hub; do
+  gcloud iap web enable --resource-type backend-services --service "intakehub-$svc-be"
+  gcloud iap web add-iam-policy-binding --resource-type backend-services \
+    --service "intakehub-$svc-be" \
+    --member "user:$OWNER_EMAIL" --role roles/iap.httpsResourceAccessor
+done
+# IAP's service agent must be able to invoke the private Cloud Run services:
+PROJECT_NUMBER="$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')"
+for svc in api hub; do
+  gcloud run services add-iam-policy-binding "intakehub-$svc" --region "$REGION" \
+    --member "serviceAccount:service-$PROJECT_NUMBER@gcp-sa-iap.iam.gserviceaccount.com" \
+    --role roles/run.invoker
+done
+
+# 5. The API's expected audience
+API_BE_ID="$(gcloud compute backend-services describe intakehub-api-be --global --format='value(id)')"
+export IAP_AUDIENCE="/projects/$PROJECT_NUMBER/global/backendServices/$API_BE_ID"
 ```
 
-**B. Cloud Run (static via nginx):** add a production Dockerfile that builds the
-bundle and serves `dist/` with nginx on `$PORT`, then `gcloud run deploy
-intakehub-hub`. (The existing `frontend/Dockerfile` is dev-only — do not
-ship it.)
-
-After the hub is live, add its origin to the API's `CORS_ORIGINS` and redeploy
-the API.
+Verify: `https://$DOMAIN` prompts for Google sign-in and loads the hub; the
+`*.run.app` URLs return 404/403; an `/api/*` request reaching the container
+without an IAP assertion gets 401.
 
 ## 7. Seed the demo data
 
+Programmatic callers authenticate to IAP with an OIDC token whose audience is
+IAP's OAuth client id (console → Security → IAP → backend → "Edit OAuth client"):
+
 ```bash
-# seed_hub POSTs samples to an API base URL; point it at the deployed API.
-python -m backend.tools.seed_hub "$API_URL"
+export IAP_TOKEN="$(gcloud auth print-identity-token --audiences "$IAP_CLIENT_ID" \
+  --include-email --impersonate-service-account "$SEED_SA")"
+python -m backend.tools.seed_cloud "https://$DOMAIN"
 ```
 
-Because the API has the real `ANTHROPIC_API_KEY`, the PDF-backed samples
-extract real metadata (the failure mode that this key fixes locally; see
-RUNBOOK) — subject to the egress limitation below, which currently keeps the
-deployed API on the offline extraction path regardless.
+`seed_cloud`, `seed_hub`, and `inbox_poller` send `Authorization: Bearer
+$IAP_TOKEN` when it is set. `$SEED_SA` needs `roles/iap.httpsResourceAccessor` on
+the API backend.
 
 ## 8. Drive/Gmail monitoring (Cloud Scheduler)
 
-The local `poller` sidecar (`docker-compose.yml`, `drive`/`gmail` profiles) has
-no Cloud Run equivalent — Cloud Run runs the *web* service, not a background
-loop. Use **Cloud Scheduler** as the poller: a cron job that POSTs the fetch
-route on an interval, provider-agnostic (it drives whichever `InboxClient` the
-API is configured with — Drive or Gmail). First deploy the API with the
-relevant provider's vars/secrets (§5 notes), then:
+Cloud Run runs the web service, not a background loop, so **Cloud Scheduler** is
+the poller: a cron job that POSTs the fetch route through the load balancer with
+an OIDC token IAP accepts.
 
 ```bash
-# Every 5 minutes, ask the API to pull + process any new receipts.
 gcloud scheduler jobs create http intakehub-inbox-poll \
-  --location "$REGION" \
-  --schedule "*/5 * * * *" \
-  --uri "$API_URL/api/inbox/fetch" \
-  --http-method POST
+  --location "$REGION" --schedule "*/5 * * * *" \
+  --uri "https://$DOMAIN/api/inbox/fetch" --http-method POST \
+  --oidc-service-account-email "$POLLER_SA" --oidc-token-audience "$IAP_CLIENT_ID"
+gcloud iap web add-iam-policy-binding --resource-type backend-services \
+  --service intakehub-api-be \
+  --member "serviceAccount:$POLLER_SA" --role roles/iap.httpsResourceAccessor
 ```
 
-- The interval is the cron schedule here (not `INBOX_POLL_INTERVAL`, which only
-  drives the local sidecar). `*/5 * * * *` = every 5 min; tighten or loosen to
-  taste. Each run is idempotent — already-seen messages/files are skipped.
-- The API above is `--allow-unauthenticated`, so no auth is needed. If you lock
-  the API down (`--no-allow-unauthenticated`), add OIDC to the job:
-  `--oidc-service-account-email=<SA> --oidc-token-audience="$API_URL"` and grant
-  that SA `roles/run.invoker`.
-- Cloud Run scales to zero between ticks; the scheduled POST cold-starts it, polls,
-  and it idles back down — so monitoring adds ~one invocation per interval, not a
-  standing instance.
+- Each run is idempotent: messages/files already seen are skipped.
+- Cloud Run scales to zero between ticks; each scheduled POST cold-starts it.
 
 ## Cost & ops notes
 

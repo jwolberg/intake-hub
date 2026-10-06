@@ -2,7 +2,16 @@
 // invoices the AI has decided on; the POST helpers drive the post-decision human
 // QC actions (PRD FR10): correct, review, escalate, note, rerun.
 
+// In production the hub and API share one origin behind the IAP load balancer, so
+// the build sets VITE_API_URL="" and calls are relative (the IAP cookie rides
+// along). Local dev points at the separate uvicorn/compose API.
 export const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+
+// An expired IAP session surfaces as 401 on an API call; a full reload sends the
+// browser back through IAP's Google sign-in.
+function checkAuth(resp) {
+  if (resp.status === 401) window.location.reload();
+}
 
 // URL of a rendered page raster (1-based) for the Source overlay (P4-T5).
 export function pageImageUrl(id, pageNumber) {
@@ -17,6 +26,7 @@ export function sourcePdfUrl(id) {
 
 async function getJSON(path) {
   const resp = await fetch(`${API_URL}${path}`);
+  checkAuth(resp);
   if (!resp.ok) throw new Error(`${path} → ${resp.status}`);
   return resp.json();
 }
@@ -27,6 +37,7 @@ async function postJSON(path, body) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body ?? {}),
   });
+  checkAuth(resp);
   if (!resp.ok) throw new Error(`${path} → ${resp.status}`);
   return resp.json();
 }
