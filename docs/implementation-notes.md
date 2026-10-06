@@ -2284,3 +2284,20 @@ plain pip (#0008; consistent with the "keep pip + requirements files" prior).
   in-memory repo: exactly one 200 and one 409, each message processed once. Passed 3
   repeated runs; there's a small theoretical flake window if a CI runner stalls one thread
   for more than 0.5 s.
+
+### #0006 — status + audit writes are atomic
+- `Repository.transaction()`: on Postgres a `ContextVar` holds the active connection, so
+  every repository call inside the block (reads included, so they see the uncommitted writes)
+  joins one transaction; nested calls join the outer one. The in-memory repo snapshots its
+  state and restores it on error, so tests exercise the same semantics.
+- Wrapped: every orchestrator status change with its audit event (plus the exceptions or
+  line items/source text written at that step), `_fail`, the rerun/recover preamble (which
+  includes superseding exceptions), and the five API routes that record + set status.
+- The Sheet append deliberately stays outside any DB transaction (external side effect;
+  the existing dedup-ledger ordering is unchanged). Only the POSTED status + event that
+  follow it are atomic.
+- `inbox_fetch_lock` keeps its own dedicated connection (not the contextvar), since the
+  advisory lock must outlive individual transactions.
+- Tests inject a crash between writes (a HELD audit append; a status save after a CORRECTED
+  record), against both Postgres and in-memory: no orphaned hold exceptions, no CORRECTED
+  event without its status, and nested blocks roll back with the outer one.

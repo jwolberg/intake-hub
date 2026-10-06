@@ -11,9 +11,11 @@ state by holding a reference — matching how a real datastore behaves.
 
 from __future__ import annotations
 
+import copy
 import threading
 from collections.abc import Iterator, Mapping
 from contextlib import AbstractContextManager, contextmanager
+from contextvars import ContextVar
 from functools import lru_cache
 from typing import Protocol
 
@@ -56,6 +58,11 @@ class Repository(Protocol):
     def get_detail(self, invoice_id: str) -> dict | None: ...
     def is_seen(self, message_id: str) -> bool: ...
     def mark_seen(self, message_id: str) -> None: ...
+    def transaction(self) -> AbstractContextManager[None]:
+        """Group writes so they commit or roll back together (#0006). Nested
+        calls join the outer transaction."""
+        ...
+
     def inbox_fetch_lock(self) -> AbstractContextManager[bool]:
         """Non-blocking exclusive lock around an inbox fetch (#0005); yields
         whether it was acquired. Released when the block exits, even on error."""
@@ -87,6 +94,43 @@ class InMemoryRepository:
         self._oauth_tokens: dict[str, str] = {}
         self._gmail_history_id: str | None = None
         self._inbox_fetch_lock = threading.Lock()
+        self._tx_depth = 0
+
+    # Data attributes snapshotted by ``transaction`` (everything but the locks).
+    _STATE = (
+        "_invoices",
+        "_source_text",
+        "_source_pdf",
+        "_line_items",
+        "_context",
+        "_matches",
+        "_exceptions",
+        "_audit",
+        "_seen_messages",
+        "_sheet_appends",
+        "_oauth_tokens",
+        "_gmail_history_id",
+    )
+
+    @contextmanager
+    def transaction(self) -> Iterator[None]:
+        if self._tx_depth:
+            self._tx_depth += 1
+            try:
+                yield
+            finally:
+                self._tx_depth -= 1
+            return
+        snapshot = {name: copy.deepcopy(getattr(self, name)) for name in self._STATE}
+        self._tx_depth = 1
+        try:
+            yield
+        except BaseException:
+            for name, value in snapshot.items():
+                setattr(self, name, value)
+            raise
+        finally:
+            self._tx_depth = 0
 
     def save_invoice(self, invoice: Invoice) -> None:
         self._invoices[invoice.id] = invoice.model_copy(deep=True)
@@ -227,6 +271,40 @@ class PostgresRepository:
         self.sheet_appends = Table("sheet_appends", md, autoload_with=engine)
         self.oauth_tokens = Table("oauth_tokens", md, autoload_with=engine)
         self.gmail_sync_state = Table("gmail_sync_state", md, autoload_with=engine)
+        # The connection of the transaction active in this context, if any.
+        self._tx: ContextVar = ContextVar(f"pg_tx_{id(self)}", default=None)
+
+    @contextmanager
+    def transaction(self) -> Iterator[None]:
+        if self._tx.get() is not None:
+            yield  # nested: join the outer transaction
+            return
+        with self._engine.begin() as conn:
+            token = self._tx.set(conn)
+            try:
+                yield
+            finally:
+                self._tx.reset(token)
+
+    @contextmanager
+    def _begin(self):
+        """A write connection: the active transaction's, else a fresh one."""
+        active = self._tx.get()
+        if active is not None:
+            yield active
+            return
+        with self._engine.begin() as conn:
+            yield conn
+
+    @contextmanager
+    def _connect(self):
+        """A read connection; inside a transaction it reads its uncommitted writes."""
+        active = self._tx.get()
+        if active is not None:
+            yield active
+            return
+        with self._engine.connect() as conn:
+            yield conn
 
     def save_invoice(self, invoice: Invoice) -> None:
         values = {
@@ -259,11 +337,11 @@ class PostgresRepository:
                 set_=update,
             )
         )
-        with self._engine.begin() as conn:
+        with self._begin() as conn:
             conn.execute(stmt)
 
     def get_invoice(self, invoice_id: str) -> Invoice | None:
-        with self._engine.connect() as conn:
+        with self._connect() as conn:
             row = (
                 conn.execute(select(self.invoices).where(self.invoices.c.id == invoice_id))
                 .mappings()
@@ -272,7 +350,7 @@ class PostgresRepository:
         return _to_invoice(row) if row else None
 
     def list_invoices(self) -> list[Invoice]:
-        with self._engine.connect() as conn:
+        with self._connect() as conn:
             rows = (
                 conn.execute(select(self.invoices).order_by(self.invoices.c.created_at))
                 .mappings()
@@ -281,7 +359,7 @@ class PostgresRepository:
         return [_to_invoice(r) for r in rows]
 
     def set_source_text(self, invoice_id: str, text: str) -> None:
-        with self._engine.begin() as conn:
+        with self._begin() as conn:
             conn.execute(
                 self.invoices.update()
                 .where(self.invoices.c.id == invoice_id)
@@ -289,7 +367,7 @@ class PostgresRepository:
             )
 
     def set_source_pdf(self, invoice_id: str, pdf: bytes) -> None:
-        with self._engine.begin() as conn:
+        with self._begin() as conn:
             conn.execute(
                 self.invoices.update()
                 .where(self.invoices.c.id == invoice_id)
@@ -297,7 +375,7 @@ class PostgresRepository:
             )
 
     def get_source_pdf(self, invoice_id: str) -> bytes | None:
-        with self._engine.connect() as conn:
+        with self._connect() as conn:
             value = conn.execute(
                 select(self.invoices.c.source_pdf).where(self.invoices.c.id == invoice_id)
             ).scalar()
@@ -320,13 +398,13 @@ class PostgresRepository:
             }
             for i in items
         ]
-        with self._engine.begin() as conn:
+        with self._begin() as conn:
             conn.execute(delete(self.line_items).where(self.line_items.c.invoice_id == invoice_id))
             if rows:
                 conn.execute(insert(self.line_items), rows)
 
     def get_line_items(self, invoice_id: str) -> list[LineItem]:
-        with self._engine.connect() as conn:
+        with self._connect() as conn:
             rows = (
                 conn.execute(
                     select(self.line_items).where(self.line_items.c.invoice_id == invoice_id)
@@ -360,15 +438,15 @@ class PostgresRepository:
             }
             for e in exceptions
         ]
-        with self._engine.begin() as conn:
+        with self._begin() as conn:
             conn.execute(insert(self.exceptions), rows)
 
     def clear_exceptions(self, invoice_id: str) -> None:
-        with self._engine.begin() as conn:
+        with self._begin() as conn:
             conn.execute(delete(self.exceptions).where(self.exceptions.c.invoice_id == invoice_id))
 
     def get_exceptions(self, invoice_id: str) -> list[ExceptionRecord]:
-        with self._engine.connect() as conn:
+        with self._connect() as conn:
             rows = (
                 conn.execute(
                     select(self.exceptions).where(self.exceptions.c.invoice_id == invoice_id)
@@ -389,7 +467,7 @@ class PostgresRepository:
         ]
 
     def append_audit(self, event: AuditEvent) -> None:
-        with self._engine.begin() as conn:
+        with self._begin() as conn:
             conn.execute(
                 insert(self.audit_events),
                 {
@@ -403,7 +481,7 @@ class PostgresRepository:
             )
 
     def get_audit(self, invoice_id: str) -> list[AuditEvent]:
-        with self._engine.connect() as conn:
+        with self._connect() as conn:
             rows = (
                 conn.execute(
                     select(self.audit_events)
@@ -429,7 +507,7 @@ class PostgresRepository:
         invoice = self.get_invoice(invoice_id)
         if invoice is None:
             return None
-        with self._engine.connect() as conn:
+        with self._connect() as conn:
             source_text = conn.execute(
                 select(self.invoices.c.source_text).where(self.invoices.c.id == invoice_id)
             ).scalar()
@@ -444,7 +522,7 @@ class PostgresRepository:
         }
 
     def is_seen(self, message_id: str) -> bool:
-        with self._engine.connect() as conn:
+        with self._connect() as conn:
             row = conn.execute(
                 select(self.seen_messages.c.message_id).where(
                     self.seen_messages.c.message_id == message_id
@@ -480,11 +558,11 @@ class PostgresRepository:
                 index_elements=[self.seen_messages.c.message_id],
             )
         )
-        with self._engine.begin() as conn:
+        with self._begin() as conn:
             conn.execute(stmt)
 
     def is_appended(self, idempotency_key: str) -> bool:
-        with self._engine.connect() as conn:
+        with self._connect() as conn:
             row = conn.execute(
                 select(self.sheet_appends.c.idempotency_key).where(
                     self.sheet_appends.c.idempotency_key == idempotency_key
@@ -503,11 +581,11 @@ class PostgresRepository:
                 index_elements=[self.sheet_appends.c.idempotency_key],
             )
         )
-        with self._engine.begin() as conn:
+        with self._begin() as conn:
             conn.execute(stmt)
 
     def get_append_ref(self, idempotency_key: str) -> str | None:
-        with self._engine.connect() as conn:
+        with self._connect() as conn:
             value = conn.execute(
                 select(self.sheet_appends.c.sheet_row_ref).where(
                     self.sheet_appends.c.idempotency_key == idempotency_key
@@ -516,7 +594,7 @@ class PostgresRepository:
         return value
 
     def get_oauth_token(self, provider: str) -> str | None:
-        with self._engine.connect() as conn:
+        with self._connect() as conn:
             value = conn.execute(
                 select(self.oauth_tokens.c.encrypted_token).where(
                     self.oauth_tokens.c.provider == provider
@@ -536,11 +614,11 @@ class PostgresRepository:
                 set_={"encrypted_token": encrypted, "updated_at": func.now()},
             )
         )
-        with self._engine.begin() as conn:
+        with self._begin() as conn:
             conn.execute(stmt)
 
     def get_sync_history_id(self) -> str | None:
-        with self._engine.connect() as conn:
+        with self._connect() as conn:
             value = conn.execute(
                 select(self.gmail_sync_state.c.history_id).where(
                     self.gmail_sync_state.c.id == "gmail"
@@ -560,7 +638,7 @@ class PostgresRepository:
                 set_={"history_id": history_id, "updated_at": func.now()},
             )
         )
-        with self._engine.begin() as conn:
+        with self._begin() as conn:
             conn.execute(stmt)
 
 

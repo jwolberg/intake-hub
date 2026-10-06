@@ -654,17 +654,18 @@ def correct_metadata(invoice_id: str, body: MetadataCorrection, repo: RepoDep) -
 
     current = corrections.effective_metadata(invoice.metadata, repo.get_audit(invoice_id))
     before = {field: _as_str(getattr(current, field)) for field in body.updates}
-    record(
-        repo,
-        invoice_id,
-        AuditAction.CORRECTED,
-        actor=Actor.HUMAN,
-        details={"target": "metadata"},
-        before=before,
-        after=body.updates,
-        reason=body.reason,
-    )
-    _set_status(repo, invoice, InvoiceStatus.CORRECTED)
+    with repo.transaction():
+        record(
+            repo,
+            invoice_id,
+            AuditAction.CORRECTED,
+            actor=Actor.HUMAN,
+            details={"target": "metadata"},
+            before=before,
+            after=body.updates,
+            reason=body.reason,
+        )
+        _set_status(repo, invoice, InvoiceStatus.CORRECTED)
     return _require_detail(invoice_id, repo)
 
 
@@ -687,17 +688,18 @@ def correct_line_item(invoice_id: str, body: LineItemCorrection, repo: RepoDep) 
         "catalog_item_id": body.catalog_item_id,
         "catalog_description": body.catalog_description,
     }
-    record(
-        repo,
-        invoice_id,
-        AuditAction.CORRECTED,
-        actor=Actor.HUMAN,
-        details={"target": "line_item", "line_item_id": body.line_item_id},
-        before=before,
-        after=after,
-        reason=body.reason,
-    )
-    _set_status(repo, invoice, InvoiceStatus.CORRECTED)
+    with repo.transaction():
+        record(
+            repo,
+            invoice_id,
+            AuditAction.CORRECTED,
+            actor=Actor.HUMAN,
+            details={"target": "line_item", "line_item_id": body.line_item_id},
+            before=before,
+            after=after,
+            reason=body.reason,
+        )
+        _set_status(repo, invoice, InvoiceStatus.CORRECTED)
     return _require_detail(invoice_id, repo)
 
 
@@ -716,17 +718,18 @@ def correct_category(invoice_id: str, body: CategoryCorrection, repo: RepoDep) -
     prior = corrections.category_overlay(audit)
     if prior is None:
         prior = latest_details(audit, AuditAction.CATEGORIZED).get("category")
-    record(
-        repo,
-        invoice_id,
-        AuditAction.CORRECTED,
-        actor=Actor.HUMAN,
-        details={"target": "category"},
-        before={"category": prior},
-        after={"category": body.category},
-        reason=body.reason,
-    )
-    _set_status(repo, invoice, InvoiceStatus.CORRECTED)
+    with repo.transaction():
+        record(
+            repo,
+            invoice_id,
+            AuditAction.CORRECTED,
+            actor=Actor.HUMAN,
+            details={"target": "category"},
+            before={"category": prior},
+            after={"category": body.category},
+            reason=body.reason,
+        )
+        _set_status(repo, invoice, InvoiceStatus.CORRECTED)
     return _require_detail(invoice_id, repo)
 
 
@@ -740,8 +743,9 @@ def reject_invoice(invoice_id: str, body: ReviewNote, repo: RepoDep) -> dict:
     """
     invoice = _get_invoice_or_404(invoice_id, repo)
     _require_allowed(invoice, "reject")
-    record(repo, invoice_id, AuditAction.REJECTED, actor=Actor.HUMAN, reason=body.note)
-    _set_status(repo, invoice, InvoiceStatus.REJECTED)
+    with repo.transaction():
+        record(repo, invoice_id, AuditAction.REJECTED, actor=Actor.HUMAN, reason=body.note)
+        _set_status(repo, invoice, InvoiceStatus.REJECTED)
     return _require_detail(invoice_id, repo)
 
 
@@ -779,8 +783,9 @@ def escalate(invoice_id: str, body: EscalateBody, repo: RepoDep) -> dict:
     """Route the invoice to manual exception handling (PRD FR10)."""
     invoice = _get_invoice_or_404(invoice_id, repo)
     _require_allowed(invoice, "escalate")
-    record(repo, invoice_id, AuditAction.ESCALATED, actor=Actor.HUMAN, reason=body.reason)
-    _set_status(repo, invoice, InvoiceStatus.ESCALATED)
+    with repo.transaction():
+        record(repo, invoice_id, AuditAction.ESCALATED, actor=Actor.HUMAN, reason=body.reason)
+        _set_status(repo, invoice, InvoiceStatus.ESCALATED)
     return _require_detail(invoice_id, repo)
 
 
