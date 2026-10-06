@@ -70,15 +70,17 @@ class DriveInbox:
                 continue
             path = self._download_dir / f"{file.id}.pdf"
             path.write_bytes(data)
-            messages.append(InboxMessage(
-                message_id=file.id,
-                subject=file.name,
-                sender=None,
-                attachment=file.name,
-                attachment_path=str(path.resolve()),
-                document=None,
-                body=None,
-            ))
+            messages.append(
+                InboxMessage(
+                    message_id=file.id,
+                    subject=file.name,
+                    sender=None,
+                    attachment=file.name,
+                    attachment_path=str(path.resolve()),
+                    document=None,
+                    body=None,
+                )
+            )
         return messages
 
     def on_processed(self, message: InboxMessage, invoice: Invoice) -> None:
@@ -96,7 +98,8 @@ class DriveInbox:
         except DriveClientError:
             logger.warning(
                 "drive: could not move %s (%s) after processing; file left in root",
-                message.message_id, message.subject,
+                message.message_id,
+                message.subject,
             )
 
 

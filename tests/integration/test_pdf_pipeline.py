@@ -24,8 +24,12 @@ SAMPLES = pathlib.Path(__file__).resolve().parents[2] / "samples"
 # Every sample stem that generate_pdfs can render as a real PDF (the same set
 # samples/generate_pdfs.py rasterizes).
 STEMS = [
-    "inv_clean_001", "inv_hold_unmatched_002", "inv_body_003",
-    "inv_hold_mismatch_005", "inv_uncertain_006", "inv_ambiguous_008",
+    "inv_clean_001",
+    "inv_hold_unmatched_002",
+    "inv_body_003",
+    "inv_hold_mismatch_005",
+    "inv_uncertain_006",
+    "inv_ambiguous_008",
     "inv_large_007",
 ]
 
@@ -39,8 +43,13 @@ def test_pdf_reaches_a_terminal_state(tmp_path, stem):
     sample = json.loads((SAMPLES / f"{stem}.json").read_text())
     pdf_path = render_invoice_pdf(sample, tmp_path / f"{stem}.pdf")
 
-    pdf_sample = {"source": {"channel": "upload", "attachment": f"{stem}.pdf",
-                            "attachment_path": str(pdf_path)}}
+    pdf_sample = {
+        "source": {
+            "channel": "upload",
+            "attachment": f"{stem}.pdf",
+            "attachment_path": str(pdf_path),
+        }
+    }
     invoice = _process(pdf_sample, LayoutLLMClient())
 
     assert invoice.status in (InvoiceStatus.POSTED, InvoiceStatus.HELD)

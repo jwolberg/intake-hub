@@ -147,12 +147,14 @@ def test_refetch_is_idempotent_via_is_seen():
 
 def test_non_receipt_is_dropped_marked_seen_and_body_never_fetched():
     client = _CountingGmailClient()
-    client.add_message(_msg(
-        "newsletter-1",
-        subject="Weekly digest: what's new",
-        sender="newsletter@list.example.com",
-        body_html="<p>SECRET body content that must never surface</p>",
-    ))
+    client.add_message(
+        _msg(
+            "newsletter-1",
+            subject="Weekly digest: what's new",
+            sender="newsletter@list.example.com",
+            body_html="<p>SECRET body content that must never surface</p>",
+        )
+    )
     sync_state = InMemoryRepository()
     inbox = GmailInbox(client, tax_year=2026, sync_state=sync_state)
 
@@ -213,10 +215,14 @@ def test_ambiguous_message_is_not_dropped_without_an_llm():
     low-confidence "needs review" fallback -> flows on to be held downstream,
     never silently discarded."""
     client = _CountingGmailClient()
-    client.add_message(_msg(
-        "ambiguous-1", subject="Following up", sender="pat@example.com",
-        body_html="<p>Here is what we discussed.</p>",
-    ))
+    client.add_message(
+        _msg(
+            "ambiguous-1",
+            subject="Following up",
+            sender="pat@example.com",
+            body_html="<p>Here is what we discussed.</p>",
+        )
+    )
     sync_state = InMemoryRepository()
     inbox = GmailInbox(client, tax_year=2026, sync_state=sync_state)
 

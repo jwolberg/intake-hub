@@ -24,9 +24,9 @@ class InvoiceStatus(str, Enum):
     PARSED = "parsed"
     EXTRACTED = "extracted"
     # --- ledger states ---
-    CLASSIFIED = "classified"      # income vs expense determined (R5)
-    CATEGORIZED = "categorized"    # Schedule C category assigned (R6)
-    POSTED = "posted"              # appended to the user's Google Sheet (R8)
+    CLASSIFIED = "classified"  # income vs expense determined (R5)
+    CATEGORIZED = "categorized"  # Schedule C category assigned (R6)
+    POSTED = "posted"  # appended to the user's Google Sheet (R8)
     # --- clinical-trial states (removed in U5) ---
     CONTEXT_RESOLVED = "context_resolved"
     CATALOG_MATCHED = "catalog_matched"
@@ -36,7 +36,7 @@ class InvoiceStatus(str, Enum):
     RERUN_REQUESTED = "rerun_requested"
     CORRECTED = "corrected"
     ESCALATED = "escalated"
-    REJECTED = "rejected"       # reviewer discarded a non-receipt (R10/AE4)
+    REJECTED = "rejected"  # reviewer discarded a non-receipt (R10/AE4)
 
 
 class Decision(str, Enum):
@@ -100,9 +100,9 @@ class AuditAction(str, Enum):
     PARSED = "parsed"
     EXTRACTED = "extracted"
     # --- ledger actions ---
-    CLASSIFIED = "classified"      # income vs expense determined (R5)
-    CATEGORIZED = "categorized"    # Schedule C category assigned (R6)
-    POSTED = "posted"              # appended to the user's Google Sheet (R8)
+    CLASSIFIED = "classified"  # income vs expense determined (R5)
+    CATEGORIZED = "categorized"  # Schedule C category assigned (R6)
+    POSTED = "posted"  # appended to the user's Google Sheet (R8)
     # --- clinical-trial actions (removed in U5) ---
     CONTEXT_RESOLVED = "context_resolved"
     CATALOG_MATCHED = "catalog_matched"

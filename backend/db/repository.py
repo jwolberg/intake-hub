@@ -215,26 +215,44 @@ class PostgresRepository:
             "updated_at": invoice.updated_at,
         }
         # on_conflict set_ excludes source_text so set_source_text() is preserved.
-        update = {k: values[k] for k in
-                  ("source", "status", "decision", "decision_confidence", "metadata", "updated_at")}
-        stmt = pg_insert(self.invoices).values(**values).on_conflict_do_update(
-            index_elements=[self.invoices.c.id], set_=update,
+        update = {
+            k: values[k]
+            for k in (
+                "source",
+                "status",
+                "decision",
+                "decision_confidence",
+                "metadata",
+                "updated_at",
+            )
+        }
+        stmt = (
+            pg_insert(self.invoices)
+            .values(**values)
+            .on_conflict_do_update(
+                index_elements=[self.invoices.c.id],
+                set_=update,
+            )
         )
         with self._engine.begin() as conn:
             conn.execute(stmt)
 
     def get_invoice(self, invoice_id: str) -> Invoice | None:
         with self._engine.connect() as conn:
-            row = conn.execute(
-                select(self.invoices).where(self.invoices.c.id == invoice_id)
-            ).mappings().first()
+            row = (
+                conn.execute(select(self.invoices).where(self.invoices.c.id == invoice_id))
+                .mappings()
+                .first()
+            )
         return _to_invoice(row) if row else None
 
     def list_invoices(self) -> list[Invoice]:
         with self._engine.connect() as conn:
-            rows = conn.execute(
-                select(self.invoices).order_by(self.invoices.c.created_at)
-            ).mappings().all()
+            rows = (
+                conn.execute(select(self.invoices).order_by(self.invoices.c.created_at))
+                .mappings()
+                .all()
+            )
         return [_to_invoice(r) for r in rows]
 
     def set_source_text(self, invoice_id: str, text: str) -> None:
@@ -262,12 +280,21 @@ class PostgresRepository:
         return bytes(value) if value is not None else None
 
     def replace_line_items(self, invoice_id: str, items: list[LineItem]) -> None:
-        rows = [{
-            "id": i.id, "invoice_id": invoice_id, "raw_description": i.raw_description,
-            "normalized_description": i.normalized_description, "quantity": i.quantity,
-            "unit_price": i.unit_price, "total": i.total, "service_period": i.service_period,
-            "raw_source_text": i.raw_source_text, "extraction_confidence": i.extraction_confidence,
-        } for i in items]
+        rows = [
+            {
+                "id": i.id,
+                "invoice_id": invoice_id,
+                "raw_description": i.raw_description,
+                "normalized_description": i.normalized_description,
+                "quantity": i.quantity,
+                "unit_price": i.unit_price,
+                "total": i.total,
+                "service_period": i.service_period,
+                "raw_source_text": i.raw_source_text,
+                "extraction_confidence": i.extraction_confidence,
+            }
+            for i in items
+        ]
         with self._engine.begin() as conn:
             conn.execute(delete(self.line_items).where(self.line_items.c.invoice_id == invoice_id))
             if rows:
@@ -275,9 +302,13 @@ class PostgresRepository:
 
     def get_line_items(self, invoice_id: str) -> list[LineItem]:
         with self._engine.connect() as conn:
-            rows = conn.execute(
-                select(self.line_items).where(self.line_items.c.invoice_id == invoice_id)
-            ).mappings().all()
+            rows = (
+                conn.execute(
+                    select(self.line_items).where(self.line_items.c.invoice_id == invoice_id)
+                )
+                .mappings()
+                .all()
+            )
         return [LineItem(**dict(r)) for r in rows]
 
     def get_context(self, invoice_id: str) -> ResolvedContext | None:
@@ -293,42 +324,77 @@ class PostgresRepository:
     def add_exceptions(self, exceptions: list[ExceptionRecord]) -> None:
         if not exceptions:
             return
-        rows = [{
-            "id": e.id, "invoice_id": e.invoice_id, "type": e.type,
-            "severity": e.severity.value, "message": e.message, "created_at": e.created_at,
-        } for e in exceptions]
+        rows = [
+            {
+                "id": e.id,
+                "invoice_id": e.invoice_id,
+                "type": e.type,
+                "severity": e.severity.value,
+                "message": e.message,
+                "created_at": e.created_at,
+            }
+            for e in exceptions
+        ]
         with self._engine.begin() as conn:
             conn.execute(insert(self.exceptions), rows)
 
     def get_exceptions(self, invoice_id: str) -> list[ExceptionRecord]:
         with self._engine.connect() as conn:
-            rows = conn.execute(
-                select(self.exceptions).where(self.exceptions.c.invoice_id == invoice_id)
-            ).mappings().all()
-        return [ExceptionRecord(
-            id=r["id"], invoice_id=r["invoice_id"], type=r["type"],
-            severity=Severity(r["severity"]), message=r["message"], created_at=r["created_at"],
-        ) for r in rows]
+            rows = (
+                conn.execute(
+                    select(self.exceptions).where(self.exceptions.c.invoice_id == invoice_id)
+                )
+                .mappings()
+                .all()
+            )
+        return [
+            ExceptionRecord(
+                id=r["id"],
+                invoice_id=r["invoice_id"],
+                type=r["type"],
+                severity=Severity(r["severity"]),
+                message=r["message"],
+                created_at=r["created_at"],
+            )
+            for r in rows
+        ]
 
     def append_audit(self, event: AuditEvent) -> None:
         with self._engine.begin() as conn:
-            conn.execute(insert(self.audit_events), {
-                "id": event.id, "invoice_id": event.invoice_id, "actor": event.actor.value,
-                "action": event.action.value, "details": event.details,
-                "timestamp": event.timestamp,
-            })
+            conn.execute(
+                insert(self.audit_events),
+                {
+                    "id": event.id,
+                    "invoice_id": event.invoice_id,
+                    "actor": event.actor.value,
+                    "action": event.action.value,
+                    "details": event.details,
+                    "timestamp": event.timestamp,
+                },
+            )
 
     def get_audit(self, invoice_id: str) -> list[AuditEvent]:
         with self._engine.connect() as conn:
-            rows = conn.execute(
-                select(self.audit_events)
-                .where(self.audit_events.c.invoice_id == invoice_id)
-                .order_by(self.audit_events.c.timestamp)
-            ).mappings().all()
-        return [AuditEvent(
-            id=r["id"], invoice_id=r["invoice_id"], actor=Actor(r["actor"]),
-            action=AuditAction(r["action"]), details=r["details"], timestamp=r["timestamp"],
-        ) for r in rows]
+            rows = (
+                conn.execute(
+                    select(self.audit_events)
+                    .where(self.audit_events.c.invoice_id == invoice_id)
+                    .order_by(self.audit_events.c.timestamp)
+                )
+                .mappings()
+                .all()
+            )
+        return [
+            AuditEvent(
+                id=r["id"],
+                invoice_id=r["invoice_id"],
+                actor=Actor(r["actor"]),
+                action=AuditAction(r["action"]),
+                details=r["details"],
+                timestamp=r["timestamp"],
+            )
+            for r in rows
+        ]
 
     def get_detail(self, invoice_id: str) -> dict | None:
         invoice = self.get_invoice(invoice_id)
@@ -351,14 +417,19 @@ class PostgresRepository:
     def is_seen(self, message_id: str) -> bool:
         with self._engine.connect() as conn:
             row = conn.execute(
-                select(self.seen_messages.c.message_id)
-                .where(self.seen_messages.c.message_id == message_id)
+                select(self.seen_messages.c.message_id).where(
+                    self.seen_messages.c.message_id == message_id
+                )
             ).first()
         return row is not None
 
     def mark_seen(self, message_id: str) -> None:
-        stmt = pg_insert(self.seen_messages).values(message_id=message_id).on_conflict_do_nothing(
-            index_elements=[self.seen_messages.c.message_id],
+        stmt = (
+            pg_insert(self.seen_messages)
+            .values(message_id=message_id)
+            .on_conflict_do_nothing(
+                index_elements=[self.seen_messages.c.message_id],
+            )
         )
         with self._engine.begin() as conn:
             conn.execute(stmt)
@@ -366,16 +437,22 @@ class PostgresRepository:
     def is_appended(self, idempotency_key: str) -> bool:
         with self._engine.connect() as conn:
             row = conn.execute(
-                select(self.sheet_appends.c.idempotency_key)
-                .where(self.sheet_appends.c.idempotency_key == idempotency_key)
+                select(self.sheet_appends.c.idempotency_key).where(
+                    self.sheet_appends.c.idempotency_key == idempotency_key
+                )
             ).first()
         return row is not None
 
     def record_append(self, idempotency_key: str, sheet_row_ref: str) -> None:
-        stmt = pg_insert(self.sheet_appends).values(
-            idempotency_key=idempotency_key, sheet_row_ref=sheet_row_ref,
-        ).on_conflict_do_nothing(
-            index_elements=[self.sheet_appends.c.idempotency_key],
+        stmt = (
+            pg_insert(self.sheet_appends)
+            .values(
+                idempotency_key=idempotency_key,
+                sheet_row_ref=sheet_row_ref,
+            )
+            .on_conflict_do_nothing(
+                index_elements=[self.sheet_appends.c.idempotency_key],
+            )
         )
         with self._engine.begin() as conn:
             conn.execute(stmt)
@@ -383,25 +460,32 @@ class PostgresRepository:
     def get_append_ref(self, idempotency_key: str) -> str | None:
         with self._engine.connect() as conn:
             value = conn.execute(
-                select(self.sheet_appends.c.sheet_row_ref)
-                .where(self.sheet_appends.c.idempotency_key == idempotency_key)
+                select(self.sheet_appends.c.sheet_row_ref).where(
+                    self.sheet_appends.c.idempotency_key == idempotency_key
+                )
             ).scalar()
         return value
 
     def get_oauth_token(self, provider: str) -> str | None:
         with self._engine.connect() as conn:
             value = conn.execute(
-                select(self.oauth_tokens.c.encrypted_token)
-                .where(self.oauth_tokens.c.provider == provider)
+                select(self.oauth_tokens.c.encrypted_token).where(
+                    self.oauth_tokens.c.provider == provider
+                )
             ).scalar()
         return value
 
     def set_oauth_token(self, provider: str, encrypted: str) -> None:
-        stmt = pg_insert(self.oauth_tokens).values(
-            provider=provider, encrypted_token=encrypted,
-        ).on_conflict_do_update(
-            index_elements=[self.oauth_tokens.c.provider],
-            set_={"encrypted_token": encrypted, "updated_at": func.now()},
+        stmt = (
+            pg_insert(self.oauth_tokens)
+            .values(
+                provider=provider,
+                encrypted_token=encrypted,
+            )
+            .on_conflict_do_update(
+                index_elements=[self.oauth_tokens.c.provider],
+                set_={"encrypted_token": encrypted, "updated_at": func.now()},
+            )
         )
         with self._engine.begin() as conn:
             conn.execute(stmt)
@@ -409,17 +493,23 @@ class PostgresRepository:
     def get_sync_history_id(self) -> str | None:
         with self._engine.connect() as conn:
             value = conn.execute(
-                select(self.gmail_sync_state.c.history_id)
-                .where(self.gmail_sync_state.c.id == "gmail")
+                select(self.gmail_sync_state.c.history_id).where(
+                    self.gmail_sync_state.c.id == "gmail"
+                )
             ).scalar()
         return value
 
     def set_sync_history_id(self, history_id: str) -> None:
-        stmt = pg_insert(self.gmail_sync_state).values(
-            id="gmail", history_id=history_id,
-        ).on_conflict_do_update(
-            index_elements=[self.gmail_sync_state.c.id],
-            set_={"history_id": history_id, "updated_at": func.now()},
+        stmt = (
+            pg_insert(self.gmail_sync_state)
+            .values(
+                id="gmail",
+                history_id=history_id,
+            )
+            .on_conflict_do_update(
+                index_elements=[self.gmail_sync_state.c.id],
+                set_={"history_id": history_id, "updated_at": func.now()},
+            )
         )
         with self._engine.begin() as conn:
             conn.execute(stmt)

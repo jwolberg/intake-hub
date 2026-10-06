@@ -35,8 +35,10 @@ def pg_repo():
 def test_postgres_round_trip(pg_repo):
     sample = json.loads((SAMPLES / "inv_clean_001.json").read_text())
     invoice = process(
-        sample, pg_repo,
-        llm=PassthroughLLMClient(), sheets=StubSheetsClient(),
+        sample,
+        pg_repo,
+        llm=PassthroughLLMClient(),
+        sheets=StubSheetsClient(),
     )
 
     reloaded = pg_repo.get_invoice(invoice.id)

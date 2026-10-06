@@ -75,9 +75,7 @@ def effective_metadata(metadata: InvoiceMetadata, audit: list[AuditEvent]) -> In
     return InvoiceMetadata(**merged)
 
 
-def apply_match_overlay(
-    matches: list[MatchResult], audit: list[AuditEvent]
-) -> list[MatchResult]:
+def apply_match_overlay(matches: list[MatchResult], audit: list[AuditEvent]) -> list[MatchResult]:
     """Overlay human match corrections onto freshly computed matches.
 
     A corrected line keeps the human's chosen catalog item as a fixed input;

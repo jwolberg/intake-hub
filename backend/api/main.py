@@ -80,6 +80,7 @@ def health() -> dict:
 
 # --- dependencies (overridable in tests) ------------------------------------
 
+
 def get_repo() -> Repository:
     return get_repository()
 
@@ -111,8 +112,11 @@ _NEEDS_REVIEW_STATUSES = {InvoiceStatus.HELD, InvoiceStatus.FAILED}
 # category / overall). Includes the ledger hold reasons so the "low confidence"
 # chip actually surfaces the most common holds (ambiguous type, low category conf).
 _LOW_CONFIDENCE_FLAGS = {
-    "low_extraction_confidence", "moderate_extraction_confidence", "low_confidence",
-    "ambiguous_income_expense", "low_category_confidence",
+    "low_extraction_confidence",
+    "moderate_extraction_confidence",
+    "low_confidence",
+    "ambiguous_income_expense",
+    "low_category_confidence",
 }
 # A filed item below this confidence is worth a second look even though it cleared the floor.
 _SUBMIT_CONFIDENCE_WATCH = 0.75
@@ -120,7 +124,11 @@ _SUBMIT_CONFIDENCE_WATCH = 0.75
 # Filter keys the API accepts. Statuses double as tags so the same membership test
 # serves every chip.
 FILTER_KEYS = {
-    "posted", "held", "failed", "needs_review", "low_confidence",
+    "posted",
+    "held",
+    "failed",
+    "needs_review",
+    "low_confidence",
 }
 
 
@@ -163,6 +171,7 @@ def _summary(invoice, repo: Repository) -> dict:
 
 
 # --- invoice routes (PRD §13) -----------------------------------------------
+
 
 @app.post("/api/invoices/process")
 def process_invoice(sample: dict, repo: RepoDep, clients: ClientsDep) -> dict:
@@ -232,11 +241,13 @@ def review_queue(repo: RepoDep) -> list[dict]:
     for inv in held:
         exceptions = repo.get_exceptions(inv.id)
         primary = exceptions[0] if exceptions else None
-        rows.append({
-            **_summary(inv, repo),
-            "reason": primary.type if primary else None,
-            "reason_title": primary.message if primary else None,
-        })
+        rows.append(
+            {
+                **_summary(inv, repo),
+                "reason": primary.type if primary else None,
+                "reason_title": primary.message if primary else None,
+            }
+        )
     # Group by reason (so same-reason items are worked together) and oldest-first
     # within each group (so the longest-waiting item of a reason is handled first).
     rows.sort(key=lambda r: (r["reason"] or "", r["updated_at"]))
@@ -279,8 +290,14 @@ def spot_check(body: SpotCheckRequest, repo: RepoDep) -> dict:
     """
     sample = sample_posted(posted_items(repo.list_invoices()), body.k)
     for inv in sample:
-        record(repo, inv.id, AuditAction.NOTE, actor=Actor.SYSTEM,
-               reason="spot-check sample", details={"spot_check": True})
+        record(
+            repo,
+            inv.id,
+            AuditAction.NOTE,
+            actor=Actor.SYSTEM,
+            reason="spot-check sample",
+            details={"spot_check": True},
+        )
     return {"count": len(sample), "sampled": [_summary(inv, repo) for inv in sample]}
 
 
@@ -297,15 +314,17 @@ def invoice_trace(invoice_id: str, repo: RepoDep) -> dict:
     for event in repo.get_audit(invoice_id):
         failed = event.action is AuditAction.FAILED
         kind = event.details.get("kind") if failed else None
-        steps.append({
-            "stage": event.action.value,
-            "actor": event.actor.value,
-            "at": event.timestamp,
-            "ok": not failed,
-            "kind": kind,
-            "error": event.details.get("reason") if failed else None,
-            "retryable": is_retryable(kind) if kind else None,
-        })
+        steps.append(
+            {
+                "stage": event.action.value,
+                "actor": event.actor.value,
+                "at": event.timestamp,
+                "ok": not failed,
+                "kind": kind,
+                "error": event.details.get("reason") if failed else None,
+                "retryable": is_retryable(kind) if kind else None,
+            }
+        )
     return {"invoice_id": invoice_id, "status": invoice.status.value, "steps": steps}
 
 
@@ -544,8 +563,13 @@ def correct_metadata(invoice_id: str, body: MetadataCorrection, repo: RepoDep) -
     current = corrections.effective_metadata(invoice.metadata, repo.get_audit(invoice_id))
     before = {field: _as_str(getattr(current, field)) for field in body.updates}
     record(
-        repo, invoice_id, AuditAction.CORRECTED, actor=Actor.HUMAN,
-        details={"target": "metadata"}, before=before, after=body.updates,
+        repo,
+        invoice_id,
+        AuditAction.CORRECTED,
+        actor=Actor.HUMAN,
+        details={"target": "metadata"},
+        before=before,
+        after=body.updates,
         reason=body.reason,
     )
     _set_status(repo, invoice, InvoiceStatus.CORRECTED)
@@ -571,9 +595,14 @@ def correct_line_item(invoice_id: str, body: LineItemCorrection, repo: RepoDep) 
         "catalog_description": body.catalog_description,
     }
     record(
-        repo, invoice_id, AuditAction.CORRECTED, actor=Actor.HUMAN,
+        repo,
+        invoice_id,
+        AuditAction.CORRECTED,
+        actor=Actor.HUMAN,
         details={"target": "line_item", "line_item_id": body.line_item_id},
-        before=before, after=after, reason=body.reason,
+        before=before,
+        after=after,
+        reason=body.reason,
     )
     _set_status(repo, invoice, InvoiceStatus.CORRECTED)
     return _require_detail(invoice_id, repo)
@@ -594,9 +623,13 @@ def correct_category(invoice_id: str, body: CategoryCorrection, repo: RepoDep) -
     if prior is None:
         prior = latest_details(audit, AuditAction.CATEGORIZED).get("category")
     record(
-        repo, invoice_id, AuditAction.CORRECTED, actor=Actor.HUMAN,
+        repo,
+        invoice_id,
+        AuditAction.CORRECTED,
+        actor=Actor.HUMAN,
         details={"target": "category"},
-        before={"category": prior}, after={"category": body.category},
+        before={"category": prior},
+        after={"category": body.category},
         reason=body.reason,
     )
     _set_status(repo, invoice, InvoiceStatus.CORRECTED)
@@ -628,8 +661,12 @@ def confirm_citation(invoice_id: str, body: CitationConfirm, repo: RepoDep) -> d
     """
     _get_invoice_or_404(invoice_id, repo)
     record(
-        repo, invoice_id, AuditAction.CONFIRMED, actor=Actor.HUMAN,
-        details={"target_id": body.target_id}, reason=body.reason,
+        repo,
+        invoice_id,
+        AuditAction.CONFIRMED,
+        actor=Actor.HUMAN,
+        details={"target_id": body.target_id},
+        reason=body.reason,
     )
     return _require_detail(invoice_id, repo)
 

@@ -2160,3 +2160,15 @@ An 8-angle multi-agent review of the whole pivot surfaced these real issues, now
   `test_build_gmail_inbox_constructs_client_with_injected_repo` failed. Fixed the fixture
   to a real `Fernet.generate_key()` value — the encrypted persistence path now genuinely
   runs. (Confirms the production encrypt/decrypt + at-rest persistence work end to end.)
+
+## 2026-10-06 — Build-quality audit fixes (tickets #0001–#0017, branch `fix/audit-hardening`)
+
+Audit of the repo against current standards filed 17 tickets; each lands as its own commit.
+Decisions taken up front (asked): auth = IAP + HTTPS load balancer (#0001); migrations =
+in-repo numbered-SQL runner, no new dependency (#0013); Python 3.12 + `uv pip compile
+--generate-hashes` lockfiles generated from the existing `requirements*.txt`, installed with
+plain pip (#0008; consistent with the "keep pip + requirements files" prior).
+
+### #0009 — ruff format repo-wide
+- Formatting-only commit (49 files). Its SHA goes in `.git-blame-ignore-revs` in a follow-up
+  commit (a commit can't contain its own hash).

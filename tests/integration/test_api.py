@@ -26,12 +26,22 @@ HOLDS = "inv_body_003.json"
 # A document that holds only for a missing amount (a categorizable line + vendor, no
 # total) — correcting the total on rerun clears the hold and it files.
 HOLD_MISSING_TOTAL = {
-    "source": {"channel": "email", "message_id": "m-missing-total",
-               "subject": "Adobe receipt", "sender": "billing@adobe.com"},
+    "source": {
+        "channel": "email",
+        "message_id": "m-missing-total",
+        "subject": "Adobe receipt",
+        "sender": "billing@adobe.com",
+    },
     "document": {
         "metadata": {"vendor_name": "Adobe", "currency": "USD"},
-        "line_items": [{"raw_description": "Creative Cloud subscription",
-                        "quantity": "1", "unit_price": "52.99", "total": "52.99"}],
+        "line_items": [
+            {
+                "raw_description": "Creative Cloud subscription",
+                "quantity": "1",
+                "unit_price": "52.99",
+                "total": "52.99",
+            }
+        ],
     },
 }
 
@@ -192,8 +202,7 @@ def test_trace_reconstructs_pipeline_path_for_posted(client):
     trace = client.get(f"/api/invoices/{invoice_id}/trace").json()
     assert trace["status"] == "posted"
     stages = [s["stage"] for s in trace["steps"]]
-    assert stages == ["received", "parsed", "extracted", "classified",
-                      "categorized", "posted"]
+    assert stages == ["received", "parsed", "extracted", "classified", "categorized", "posted"]
     assert all(s["ok"] for s in trace["steps"])
 
 
@@ -202,7 +211,8 @@ def test_trace_marks_failed_stage_typed_and_retryable(client):
     failing = StubSheetsClient()
     failing.fail_always = True
     app.dependency_overrides[get_pipeline_clients] = lambda: {
-        "llm": PassthroughLLMClient(), "sheets": failing,
+        "llm": PassthroughLLMClient(),
+        "sheets": failing,
     }
     invoice_id = client.post("/api/invoices/process", json=_sample(POSTS)).json()["id"]
 
@@ -276,6 +286,7 @@ def test_detail_has_no_citations_without_rasterizable_source(client):
 
 # --- human QC actions -------------------------------------------------------
 
+
 def _process(client, name):
     return client.post("/api/invoices/process", json=_sample(name)).json()["id"]
 
@@ -340,6 +351,7 @@ def test_qc_action_404_for_unknown_invoice(client):
 
 # --- rerun with corrected data ----------------------------------------------
 
+
 def test_rerun_after_metadata_correction_resolves_hold(client):
     # holds for a missing amount (missing_total, and a weak income/expense call
     # without the total), but the category is clear
@@ -366,8 +378,11 @@ def test_rerun_after_metadata_correction_resolves_hold(client):
     assert detail["invoice"]["metadata"]["total_amount"] == "52.99"
     # the correction is still recorded as a human overlay on the audit trail
     assert detail["corrections"]["metadata"]["total_amount"] == "52.99"
-    correction = [e for e in detail["audit"]
-                  if e["action"] == "corrected" and e["details"].get("target") == "metadata"][-1]
+    correction = [
+        e
+        for e in detail["audit"]
+        if e["action"] == "corrected" and e["details"].get("target") == "metadata"
+    ][-1]
     assert correction["details"]["before"]["total_amount"] is None  # AI original preserved
 
 
@@ -397,9 +412,7 @@ def test_confirm_citation_records_human_event(client):
 
 
 def test_confirm_citation_unknown_invoice_404(client):
-    resp = client.post(
-        "/api/invoices/nope/citations/confirm", json={"target_id": "metadata.x"}
-    )
+    resp = client.post("/api/invoices/nope/citations/confirm", json={"target_id": "metadata.x"})
     assert resp.status_code == 404
 
 
@@ -408,13 +421,27 @@ def test_confirm_citation_unknown_invoice_404(client):
 # An ambiguous expense (office vs supplies) holds for low_category_confidence with
 # the runner-up offered as a candidate — the AE2 review scenario.
 AMBIGUOUS = {
-    "source": {"channel": "email", "message_id": "m-amb", "subject": "Depot order",
-               "sender": "orders@depot.example"},
+    "source": {
+        "channel": "email",
+        "message_id": "m-amb",
+        "subject": "Depot order",
+        "sender": "orders@depot.example",
+    },
     "document": {
-        "metadata": {"vendor_name": "Depot", "invoice_date": "2026-03-01",
-                     "currency": "USD", "total_amount": "30.00"},
-        "line_items": [{"raw_description": "office supplies", "quantity": "1",
-                        "unit_price": "30.00", "total": "30.00"}],
+        "metadata": {
+            "vendor_name": "Depot",
+            "invoice_date": "2026-03-01",
+            "currency": "USD",
+            "total_amount": "30.00",
+        },
+        "line_items": [
+            {
+                "raw_description": "office supplies",
+                "quantity": "1",
+                "unit_price": "30.00",
+                "total": "30.00",
+            }
+        ],
     },
 }
 

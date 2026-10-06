@@ -36,7 +36,9 @@ def test_parses_line_items_and_skips_header_row():
     assert len(items) == 2  # header row excluded
     assert items[0] == {
         "raw_description": "Patient screening visit",
-        "quantity": "2", "unit_price": "300.00", "total": "600.00",
+        "quantity": "2",
+        "unit_price": "300.00",
+        "total": "600.00",
     }
 
 

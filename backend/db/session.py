@@ -39,9 +39,7 @@ def _split_statements(sql: str) -> list[str]:
     """
     statements: list[str] = []
     for chunk in sql.split(";"):
-        lines = [
-            line for line in chunk.splitlines() if not line.strip().startswith("--")
-        ]
+        lines = [line for line in chunk.splitlines() if not line.strip().startswith("--")]
         cleaned = "\n".join(lines).strip()
         if cleaned:
             statements.append(cleaned)

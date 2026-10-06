@@ -19,8 +19,9 @@ from backend.domain import (
 
 def _corrected(target, before, after, **extra):
     details = {"target": target, "before": before, "after": after, **extra}
-    return AuditEvent(invoice_id="inv1", actor=Actor.HUMAN,
-                      action=AuditAction.CORRECTED, details=details)
+    return AuditEvent(
+        invoice_id="inv1", actor=Actor.HUMAN, action=AuditAction.CORRECTED, details=details
+    )
 
 
 def test_metadata_overlay_latest_wins():
@@ -47,19 +48,25 @@ def test_effective_metadata_no_overlay_returns_original():
 
 
 def test_match_overlay_and_apply_pins_human_choice():
-    audit = [_corrected(
-        "line_item",
-        {"catalog_item_id": None},
-        {"catalog_item_id": "cat_9", "catalog_description": "Mapped"},
-        line_item_id="line1",
-    )]
+    audit = [
+        _corrected(
+            "line_item",
+            {"catalog_item_id": None},
+            {"catalog_item_id": "cat_9", "catalog_description": "Mapped"},
+            line_item_id="line1",
+        )
+    ]
     assert match_overlay(audit) == {
         "line1": {"catalog_item_id": "cat_9", "catalog_description": "Mapped"}
     }
 
     matches = [
-        MatchResult(line_item_id="line1", confidence=0.0, exceptions=["unmatched_line_item"],
-                    requires_exception_review=True),
+        MatchResult(
+            line_item_id="line1",
+            confidence=0.0,
+            exceptions=["unmatched_line_item"],
+            requires_exception_review=True,
+        ),
         MatchResult(line_item_id="line2", catalog_item_id="cat_2", confidence=0.9),
     ]
     applied = {m.line_item_id: m for m in apply_match_overlay(matches, audit)}

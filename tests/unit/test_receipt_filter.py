@@ -64,11 +64,15 @@ def test_obvious_receipt_via_heuristic_no_llm_call():
 
 def test_ambiguous_message_consults_llm_and_uses_usable_response():
     """Edge case: no strong signal either way → the LLM is consulted."""
-    llm = StubLLMClient(responses=[{
-        "is_receipt": True,
-        "confidence": 0.9,
-        "reason": "reads like an account payment notice",
-    }])
+    llm = StubLLMClient(
+        responses=[
+            {
+                "is_receipt": True,
+                "confidence": 0.9,
+                "reason": "reads like an account payment notice",
+            }
+        ]
+    )
     sample = _sample(sender="hello@acme.com", subject="Your account", body="Just checking in.")
     verdict = classify_receipt(sample, llm)
     assert llm.calls  # adjudication ran

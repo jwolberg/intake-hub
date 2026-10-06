@@ -88,13 +88,15 @@ def test_get_llm_client_selects_provider_by_key(monkeypatch):
 
     # settings is a frozen dataclass; swap the whole reference per case.
     monkeypatch.setattr(
-        clients, "settings",
+        clients,
+        "settings",
         types.SimpleNamespace(anthropic_api_key=None, llm_model="claude-opus-4-7"),
     )
     assert isinstance(clients.get_llm_client(), PassthroughLLMClient)
 
     monkeypatch.setattr(
-        clients, "settings",
+        clients,
+        "settings",
         types.SimpleNamespace(anthropic_api_key="sk-test", llm_model="claude-opus-4-7"),
     )
     client = clients.get_llm_client()

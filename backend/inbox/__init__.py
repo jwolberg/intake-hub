@@ -34,8 +34,12 @@ SAMPLES = ROOT / "samples"
 # two distinct holds, a low-confidence line, an ambiguous-context hold, and a
 # large invoice/catalog — covering submit / ambiguity / mismatch / large (PRD §19).
 DEMO_STEMS = [
-    "inv_clean_001", "inv_hold_unmatched_002", "inv_hold_mismatch_005",
-    "inv_uncertain_006", "inv_ambiguous_008", "inv_large_007",
+    "inv_clean_001",
+    "inv_hold_unmatched_002",
+    "inv_hold_mismatch_005",
+    "inv_uncertain_006",
+    "inv_ambiguous_008",
+    "inv_large_007",
 ]
 
 
@@ -137,15 +141,17 @@ class MockInbox:
             attachment_path: str | None = None
             if self._render_pdf:
                 attachment_path = str(self._render(stem, sample).resolve())
-            messages.append(InboxMessage(
-                message_id=stem,
-                subject=source.get("subject"),
-                sender=source.get("sender"),
-                attachment=source.get("attachment"),
-                attachment_path=attachment_path,
-                document=sample.get("document"),
-                body=sample.get("body") or source.get("body"),
-            ))
+            messages.append(
+                InboxMessage(
+                    message_id=stem,
+                    subject=source.get("subject"),
+                    sender=source.get("sender"),
+                    attachment=source.get("attachment"),
+                    attachment_path=attachment_path,
+                    document=sample.get("document"),
+                    body=sample.get("body") or source.get("body"),
+                )
+            )
         return messages
 
     def on_processed(self, message: InboxMessage, invoice: Invoice) -> None:
@@ -179,8 +185,7 @@ def get_inbox_client() -> InboxClient:
     if provider == "gmail":
         return _build_gmail_inbox(settings)
     raise ValueError(
-        f"unknown INBOX_PROVIDER '{settings.inbox_provider}' "
-        "(expected 'mock', 'drive', or 'gmail')"
+        f"unknown INBOX_PROVIDER '{settings.inbox_provider}' (expected 'mock', 'drive', or 'gmail')"
     )
 
 
@@ -282,9 +287,7 @@ def _load_refresh_token(repo, settings) -> str:
         stored = repo.get_oauth_token("gmail")
         if stored is not None:
             return _crypto.decrypt_token(stored, key)
-        repo.set_oauth_token(
-            "gmail", _crypto.encrypt_token(settings.gmail_refresh_token, key)
-        )
+        repo.set_oauth_token("gmail", _crypto.encrypt_token(settings.gmail_refresh_token, key))
         return settings.gmail_refresh_token
     except _crypto.TokenCryptoUnavailable:
         logger.warning(
@@ -300,6 +303,7 @@ def _load_refresh_token(repo, settings) -> str:
         logger.warning(
             "gmail: could not use the stored encrypted refresh token (%s); falling "
             "back to GMAIL_REFRESH_TOKEN. If you rotated GMAIL_TOKEN_ENC_KEY, run "
-            "backend/tools/gmail_revoke.py to clear the stale token row.", exc,
+            "backend/tools/gmail_revoke.py to clear the stale token row.",
+            exc,
         )
         return settings.gmail_refresh_token

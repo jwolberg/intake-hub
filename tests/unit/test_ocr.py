@@ -48,14 +48,16 @@ def test_default_ocr_client_is_offline_stub():
 
 # Minimal image_to_data TSV: a header, two structural rows (conf -1), one blank
 # token, and two real words at known pixel positions on a 1000x2000 page.
-_TSV = "\n".join([
-    "level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext",
-    "1\t1\t0\t0\t0\t0\t0\t0\t1000\t2000\t-1\t",
-    "4\t1\t1\t1\t1\t0\t100\t200\t300\t40\t-1\t",
-    "5\t1\t1\t1\t1\t1\t100\t200\t140\t40\t96\tINV-1001",
-    "5\t1\t1\t1\t1\t2\t250\t200\t100\t40\t91\tRiverside",
-    "5\t1\t1\t1\t1\t3\t400\t200\t10\t40\t0\t   ",
-])
+_TSV = "\n".join(
+    [
+        "level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext",
+        "1\t1\t0\t0\t0\t0\t0\t0\t1000\t2000\t-1\t",
+        "4\t1\t1\t1\t1\t0\t100\t200\t300\t40\t-1\t",
+        "5\t1\t1\t1\t1\t1\t100\t200\t140\t40\t96\tINV-1001",
+        "5\t1\t1\t1\t1\t2\t250\t200\t100\t40\t91\tRiverside",
+        "5\t1\t1\t1\t1\t3\t400\t200\t10\t40\t0\t   ",
+    ]
+)
 
 
 def test_parse_tesseract_tsv_normalizes_and_skips_non_words():
@@ -65,8 +67,8 @@ def test_parse_tesseract_tsv_normalizes_and_skips_non_words():
     assert [w.index for w in words] == [0, 1]
 
     first = words[0]
-    assert first.bbox.x == pytest.approx(0.1)      # 100/1000
-    assert first.bbox.y == pytest.approx(0.1)      # 200/2000
+    assert first.bbox.x == pytest.approx(0.1)  # 100/1000
+    assert first.bbox.y == pytest.approx(0.1)  # 200/2000
     assert first.bbox.width == pytest.approx(0.14)  # 140/1000
     assert first.bbox.height == pytest.approx(0.02)  # 40/2000
 

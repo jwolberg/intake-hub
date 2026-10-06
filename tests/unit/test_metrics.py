@@ -9,24 +9,43 @@ from backend.orchestrator import process
 
 # A clean expense: clear vendor + a categorizable line + a total → posted.
 CLEAN_EXPENSE = {
-    "source": {"channel": "email", "message_id": "m-clean",
-               "subject": "Your receipt from Notion", "sender": "billing@notion.so"},
+    "source": {
+        "channel": "email",
+        "message_id": "m-clean",
+        "subject": "Your receipt from Notion",
+        "sender": "billing@notion.so",
+    },
     "document": {
-        "metadata": {"invoice_number": "N-1", "vendor_name": "Notion",
-                     "currency": "USD", "total_amount": "10.00"},
-        "line_items": [{"raw_description": "Notion subscription",
-                        "quantity": "1", "unit_price": "10.00", "total": "10.00"}],
+        "metadata": {
+            "invoice_number": "N-1",
+            "vendor_name": "Notion",
+            "currency": "USD",
+            "total_amount": "10.00",
+        },
+        "line_items": [
+            {
+                "raw_description": "Notion subscription",
+                "quantity": "1",
+                "unit_price": "10.00",
+                "total": "10.00",
+            }
+        ],
     },
 }
 
 # No categorizable keyword → held (no Sheet write).
 UNCATEGORIZABLE = {
-    "source": {"channel": "email", "message_id": "m-hold", "subject": "note",
-               "sender": "someone@example.com"},
+    "source": {
+        "channel": "email",
+        "message_id": "m-hold",
+        "subject": "note",
+        "sender": "someone@example.com",
+    },
     "document": {
         "metadata": {"vendor_name": "Bob", "total_amount": "10.00"},
-        "line_items": [{"raw_description": "thing", "quantity": "1",
-                        "unit_price": "10.00", "total": "10.00"}],
+        "line_items": [
+            {"raw_description": "thing", "quantity": "1", "unit_price": "10.00", "total": "10.00"}
+        ],
     },
 }
 
@@ -45,15 +64,22 @@ def test_throughput_and_auto_submit_rate():
     assert (m.total, m.submitted, m.held, m.failed) == (2, 1, 1, 0)
     assert m.auto_submit_rate == 0.5
     # no human has touched anything yet
-    assert m.false_submit_rate == 0.0      # 0 of 1 posts known-wrong
-    assert m.hold_precision is None        # no hold dispositioned yet → no data
+    assert m.false_submit_rate == 0.0  # 0 of 1 posts known-wrong
+    assert m.hold_precision is None  # no hold dispositioned yet → no data
 
 
 def test_false_submit_and_hold_precision_from_human_outcomes():
     repo, posted, held = _seed()
     # a human had to correct an auto-posted invoice → it was a false submit
-    record(repo, posted.id, AuditAction.CORRECTED, actor=Actor.HUMAN,
-           before={"vendor_name": "X"}, after={"vendor_name": "Y"}, reason="wrong vendor")
+    record(
+        repo,
+        posted.id,
+        AuditAction.CORRECTED,
+        actor=Actor.HUMAN,
+        before={"vendor_name": "X"},
+        after={"vendor_name": "Y"},
+        reason="wrong vendor",
+    )
     # a human escalated the held invoice → the hold genuinely needed a human
     record(repo, held.id, AuditAction.ESCALATED, actor=Actor.HUMAN, reason="needs finance")
 

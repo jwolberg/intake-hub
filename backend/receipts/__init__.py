@@ -34,21 +34,44 @@ from backend.clients.llm import LLMClient
 
 # Sender local-parts that are unambiguously transactional (billing systems,
 # e-commerce order confirmations) — a strong receipt signal on their own.
-_RECEIPT_SENDER_LOCALPARTS = frozenset({
-    "billing", "invoices", "invoice", "receipts", "receipt", "orders", "order",
-    "no-reply", "noreply", "payments", "sales",
-})
+_RECEIPT_SENDER_LOCALPARTS = frozenset(
+    {
+        "billing",
+        "invoices",
+        "invoice",
+        "receipts",
+        "receipt",
+        "orders",
+        "order",
+        "no-reply",
+        "noreply",
+        "payments",
+        "sales",
+    }
+)
 
 _RECEIPT_SUBJECT_TELLS = (
-    "receipt", "invoice", "order confirmation", "your order", "payment", "paid",
-    "purchase", "subscription", "renewal",
+    "receipt",
+    "invoice",
+    "order confirmation",
+    "your order",
+    "payment",
+    "paid",
+    "purchase",
+    "subscription",
+    "renewal",
 )
 
 # Newsletter/marketing tells. Checked only when no receipt signal fired, so a
 # marketing email that also happens to mention "payment" still reads as a
 # receipt candidate rather than being auto-dropped.
 _NON_RECEIPT_TELLS = (
-    "unsubscribe", "newsletter", "digest", "webinar", "follow us", "new post",
+    "unsubscribe",
+    "newsletter",
+    "digest",
+    "webinar",
+    "follow us",
+    "new post",
     "weekly update",
 )
 

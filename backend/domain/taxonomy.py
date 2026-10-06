@@ -39,8 +39,12 @@ _REASONS: list[HoldReason] = [
     HoldReason("missing_invoice_number", "Missing invoice number", Severity.HIGH),
     HoldReason("missing_total", "Missing invoice total", Severity.HIGH),
     HoldReason("low_extraction_confidence", "Low extraction confidence", Severity.HIGH),
-    HoldReason("moderate_extraction_confidence", "Moderate extraction confidence",
-               Severity.MEDIUM, fr8=False),
+    HoldReason(
+        "moderate_extraction_confidence",
+        "Moderate extraction confidence",
+        Severity.MEDIUM,
+        fr8=False,
+    ),
     HoldReason("missing_optional_fields", "Missing optional fields", Severity.LOW, fr8=False),
     # Matching (FR8: unmatched line items; amount mismatch).
     HoldReason("unmatched_line_item", "Unmatched line item", Severity.HIGH),
@@ -54,25 +58,43 @@ _REASONS: list[HoldReason] = [
     # --- Ledger pivot: classification / categorization / duplicate / adversarial /
     # Sheet-write holds. These replace the sponsor/catalog codes above (removed in
     # U5). fr8=False: they are not in the original clinical-trial FR8 list. ---
-    HoldReason("ambiguous_income_expense", "Ambiguous income vs expense", Severity.HIGH,
-               fr8=False),
-    HoldReason("low_category_confidence", "Low category confidence", Severity.HIGH,
-               fr8=False),
-    HoldReason("suspected_duplicate", "Suspected duplicate transaction", Severity.HIGH,
-               fr8=False),
-    HoldReason("suspected_adversarial", "Suspected adversarial/spoofed content",
-               Severity.HIGH, fr8=False),
-    HoldReason("sheet_write_failed", "Sheet append failed (retryable)", Severity.HIGH,
-               fr8=False, retryable=True),
+    HoldReason("ambiguous_income_expense", "Ambiguous income vs expense", Severity.HIGH, fr8=False),
+    HoldReason("low_category_confidence", "Low category confidence", Severity.HIGH, fr8=False),
+    HoldReason("suspected_duplicate", "Suspected duplicate transaction", Severity.HIGH, fr8=False),
+    HoldReason(
+        "suspected_adversarial", "Suspected adversarial/spoofed content", Severity.HIGH, fr8=False
+    ),
+    HoldReason(
+        "sheet_write_failed",
+        "Sheet append failed (retryable)",
+        Severity.HIGH,
+        fr8=False,
+        retryable=True,
+    ),
     # Overall + operational failures (FR8: backend submission failure).
     HoldReason("low_confidence", "Low overall decision confidence", Severity.HIGH, fr8=False),
     HoldReason("submission_failed", "Backend submission failure", Severity.HIGH, retryable=True),
-    HoldReason("catalog_fetch_failed", "Catalog fetch failed (retryable)", Severity.HIGH,
-               fr8=False, retryable=True),
-    HoldReason("extraction_failed", "LLM extraction failed (retryable)", Severity.HIGH,
-               fr8=False, retryable=True),
-    HoldReason("stage_failure", "Processing stage failed (retryable)", Severity.HIGH,
-               fr8=False, retryable=True),
+    HoldReason(
+        "catalog_fetch_failed",
+        "Catalog fetch failed (retryable)",
+        Severity.HIGH,
+        fr8=False,
+        retryable=True,
+    ),
+    HoldReason(
+        "extraction_failed",
+        "LLM extraction failed (retryable)",
+        Severity.HIGH,
+        fr8=False,
+        retryable=True,
+    ),
+    HoldReason(
+        "stage_failure",
+        "Processing stage failed (retryable)",
+        Severity.HIGH,
+        fr8=False,
+        retryable=True,
+    ),
 ]
 
 REGISTRY: dict[str, HoldReason] = {r.code: r for r in _REASONS}

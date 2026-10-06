@@ -32,8 +32,14 @@ PDF_DIR = SAMPLES / "pdf"
 # Demo seed set (PRD §19, P3-T6): a clean submit, two distinct holds, a
 # low-confidence line, an ambiguous-context hold, and a large invoice matched
 # against a larger catalog — covering submit / ambiguity / mismatch / large.
-STEMS = ["inv_clean_001", "inv_hold_unmatched_002", "inv_hold_mismatch_005",
-         "inv_uncertain_006", "inv_ambiguous_008", "inv_large_007"]
+STEMS = [
+    "inv_clean_001",
+    "inv_hold_unmatched_002",
+    "inv_hold_mismatch_005",
+    "inv_uncertain_006",
+    "inv_ambiguous_008",
+    "inv_large_007",
+]
 
 
 def _post(api: str, sample: dict) -> dict:

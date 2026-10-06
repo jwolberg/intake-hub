@@ -73,14 +73,16 @@ class PassthroughLLMClient:
 # Exception class names that signal the provider was unreachable — a transport
 # failure, not a bad response. Matched by name so this module needs no eager
 # anthropic/httpx import (the SDK stays lazy in ``AnthropicLLMClient``).
-_CONNECTION_ERROR_NAMES = frozenset({
-    "APIConnectionError",  # anthropic SDK; message is the "Connection error." we see
-    "APITimeoutError",
-    "ConnectError",  # httpx
-    "ConnectTimeout",
-    "ReadTimeout",
-    "PoolTimeout",
-})
+_CONNECTION_ERROR_NAMES = frozenset(
+    {
+        "APIConnectionError",  # anthropic SDK; message is the "Connection error." we see
+        "APITimeoutError",
+        "ConnectError",  # httpx
+        "ConnectTimeout",
+        "ReadTimeout",
+        "PoolTimeout",
+    }
+)
 
 
 def _is_connection_error(exc: BaseException) -> bool:
@@ -143,8 +145,7 @@ def parse_json_or_raise(raw: str) -> dict:
 
 # Appended to the caller's system prompt so the provider returns parseable JSON.
 _JSON_ONLY = (
-    "\n\nReturn ONLY a single JSON object. No prose, no explanation, "
-    "no markdown code fences."
+    "\n\nReturn ONLY a single JSON object. No prose, no explanation, no markdown code fences."
 )
 
 
@@ -202,11 +203,13 @@ class AnthropicLLMClient:
         message = client.messages.create(
             model=self._model,
             max_tokens=self._max_tokens,
-            system=[{
-                "type": "text",
-                "text": system + _JSON_ONLY,
-                "cache_control": {"type": "ephemeral"},
-            }],
+            system=[
+                {
+                    "type": "text",
+                    "text": system + _JSON_ONLY,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
             messages=[{"role": "user", "content": user}],
         )
         text = "".join(block.text for block in message.content if block.type == "text")

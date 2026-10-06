@@ -26,11 +26,14 @@ def run(pdf_path: str) -> int:
 
     repo = InMemoryRepository()
     sheets = StubSheetsClient()
-    sample = {"source": {"channel": "upload", "attachment": path.name,
-                         "attachment_path": str(path)}}
+    sample = {
+        "source": {"channel": "upload", "attachment": path.name, "attachment_path": str(path)}
+    }
     invoice = process(
-        sample, repo,
-        llm=LayoutLLMClient(), sheets=sheets,
+        sample,
+        repo,
+        llm=LayoutLLMClient(),
+        sheets=sheets,
     )
 
     line_items = repo.get_line_items(invoice.id)
@@ -38,8 +41,10 @@ def run(pdf_path: str) -> int:
 
     print(f"\n=== {path.name} ===")
     print(f"status   : {invoice.status.value}")
-    print(f"decision : {invoice.decision.value if invoice.decision else '-'}"
-          f"  (confidence {invoice.decision_confidence})")
+    print(
+        f"decision : {invoice.decision.value if invoice.decision else '-'}"
+        f"  (confidence {invoice.decision_confidence})"
+    )
     print(f"vendor   : {invoice.metadata.vendor_name}")
     print(f"total    : {invoice.metadata.total_amount} {invoice.metadata.currency or ''}".rstrip())
 

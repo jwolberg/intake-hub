@@ -162,7 +162,9 @@ class GmailInbox:
         logger.info(
             "gmail: %s processed (status=%s) — label '%s' not applied "
             "(gmail.readonly has no modify scope)",
-            message.message_id, invoice.status, self._label,
+            message.message_id,
+            invoice.status,
+            self._label,
         )
 
     # --- sync -----------------------------------------------------------
@@ -246,10 +248,12 @@ class GmailInbox:
             # R17 minimal retention: only id/sender/subject/verdict are ever
             # touched for a drop — the body is never fetched, let alone kept.
             logger.info(
-                "gmail: dropping non-receipt id=%s sender=%s subject=%r "
-                "confidence=%.2f reason=%s",
-                verdict.message_id, verdict.sender, verdict.subject,
-                verdict.confidence, verdict.reason,
+                "gmail: dropping non-receipt id=%s sender=%s subject=%r confidence=%.2f reason=%s",
+                verdict.message_id,
+                verdict.sender,
+                verdict.subject,
+                verdict.confidence,
+                verdict.reason,
             )
             self._sync_state.mark_seen(message_id)
             return None
@@ -278,7 +282,8 @@ class GmailInbox:
         attachment_b64: str | None = None
         pdf_attachment = next(
             (
-                a for a in full.attachments
+                a
+                for a in full.attachments
                 if a.mime_type == "application/pdf" or a.filename.lower().endswith(".pdf")
             ),
             None,
@@ -289,7 +294,8 @@ class GmailInbox:
             except GmailClientError:
                 logger.warning(
                     "gmail: could not fetch attachment %s on %s (falling back to body)",
-                    pdf_attachment.filename, message_id,
+                    pdf_attachment.filename,
+                    message_id,
                 )
             else:
                 attachment_name = pdf_attachment.filename

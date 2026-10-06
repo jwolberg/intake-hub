@@ -80,12 +80,14 @@ class StubOCRClient:
                     x0, y0, x1, y1, text = word[0], word[1], word[2], word[3], word[4]
                     if not text.strip():
                         continue
-                    words.append(WordBox(
-                        page_number=page_number,
-                        index=index,
-                        text=text,
-                        bbox=_normalized_box(x0, y0, x1 - x0, y1 - y0, rect.width, rect.height),
-                    ))
+                    words.append(
+                        WordBox(
+                            page_number=page_number,
+                            index=index,
+                            text=text,
+                            bbox=_normalized_box(x0, y0, x1 - x0, y1 - y0, rect.width, rect.height),
+                        )
+                    )
         return words
 
 
@@ -128,12 +130,14 @@ def parse_tesseract_tsv(
         top = float(cells[columns["top"]])
         width = float(cells[columns["width"]])
         height = float(cells[columns["height"]])
-        words.append(WordBox(
-            page_number=page_number,
-            index=index,
-            text=text,
-            bbox=_normalized_box(left, top, width, height, page_width, page_height),
-        ))
+        words.append(
+            WordBox(
+                page_number=page_number,
+                index=index,
+                text=text,
+                bbox=_normalized_box(left, top, width, height, page_width, page_height),
+            )
+        )
         index += 1
     return words
 
@@ -156,8 +160,12 @@ class TesseractOCRClient:
         for page in pages:
             with Image.open(io.BytesIO(page.image_png)) as image:
                 tsv = pytesseract.image_to_data(image)
-            words.extend(parse_tesseract_tsv(
-                tsv, page_number=page.page_number,
-                page_width=page.width, page_height=page.height,
-            ))
+            words.extend(
+                parse_tesseract_tsv(
+                    tsv,
+                    page_number=page.page_number,
+                    page_width=page.width,
+                    page_height=page.height,
+                )
+            )
         return words

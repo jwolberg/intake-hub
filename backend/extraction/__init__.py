@@ -79,9 +79,7 @@ def extract(invoice_id: str, parsed: ParsedDocument, llm: LLMClient) -> Extracti
     metadata, field_confidence, field_evidence, missing_fields = _build_metadata(
         metadata_raw, parsed
     )
-    line_items = [
-        _read_line_item(invoice_id, item) for item in raw.get("line_items", [])
-    ]
+    line_items = [_read_line_item(invoice_id, item) for item in raw.get("line_items", [])]
     return ExtractionResult(
         metadata=metadata,
         line_items=line_items,

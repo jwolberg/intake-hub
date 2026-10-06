@@ -181,9 +181,7 @@ def _gmail_client(repo: InMemoryRepository, gmail: StubGmailClient) -> TestClien
     # The repo doubles as GmailInbox's sync_state, mirroring production
     # (_build_gmail_inbox passes the same repo for both) — this is also what
     # lets GmailInbox's own is_seen guard cooperate with the route's.
-    app.dependency_overrides[get_inbox] = lambda: GmailInbox(
-        gmail, tax_year=2026, sync_state=repo
-    )
+    app.dependency_overrides[get_inbox] = lambda: GmailInbox(gmail, tax_year=2026, sync_state=repo)
     return TestClient(app)
 
 
@@ -195,13 +193,15 @@ def test_gmail_fetch_processes_a_receipt_to_a_terminal_state():
     but the assertion doesn't over-specify the categorization result)."""
     repo = InMemoryRepository()
     gmail = StubGmailClient()
-    gmail.add_message(GmailMessage(
-        id="gm-1",
-        thread_id="t-1",
-        subject="Your receipt from Acme",
-        sender="billing@acme.example",  # heuristic receipt signal
-        body_html="<p>Vendor: Acme Co<br>Total: $42.00<br>Date: 2026-03-01</p>",
-    ))
+    gmail.add_message(
+        GmailMessage(
+            id="gm-1",
+            thread_id="t-1",
+            subject="Your receipt from Acme",
+            sender="billing@acme.example",  # heuristic receipt signal
+            body_html="<p>Vendor: Acme Co<br>Total: $42.00<br>Date: 2026-03-01</p>",
+        )
+    )
 
     client = _gmail_client(repo, gmail)
     body = client.post("/api/inbox/fetch").json()
@@ -218,10 +218,15 @@ def test_gmail_fetch_processes_a_receipt_to_a_terminal_state():
 def test_gmail_refetch_is_idempotent():
     repo = InMemoryRepository()
     gmail = StubGmailClient()
-    gmail.add_message(GmailMessage(
-        id="gm-1", thread_id="t-1", subject="Your receipt", sender="billing@acme.example",
-        body_html="<p>Total: $42.00</p>",
-    ))
+    gmail.add_message(
+        GmailMessage(
+            id="gm-1",
+            thread_id="t-1",
+            subject="Your receipt",
+            sender="billing@acme.example",
+            body_html="<p>Total: $42.00</p>",
+        )
+    )
 
     client = _gmail_client(repo, gmail)
     first = client.post("/api/inbox/fetch").json()
@@ -246,10 +251,15 @@ def test_gmail_non_receipt_never_reaches_the_pipeline():
     never re-offered."""
     repo = InMemoryRepository()
     gmail = StubGmailClient()
-    gmail.add_message(GmailMessage(
-        id="newsletter-1", thread_id="t-2", subject="Weekly digest: what's new",
-        sender="newsletter@list.example.com", body_html="<p>secret body</p>",
-    ))
+    gmail.add_message(
+        GmailMessage(
+            id="newsletter-1",
+            thread_id="t-2",
+            subject="Weekly digest: what's new",
+            sender="newsletter@list.example.com",
+            body_html="<p>secret body</p>",
+        )
+    )
 
     client = _gmail_client(repo, gmail)
     body = client.post("/api/inbox/fetch").json()

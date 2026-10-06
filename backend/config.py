@@ -53,9 +53,7 @@ class Settings:
 
     @classmethod
     def from_env(cls) -> Settings:
-        origins = os.environ.get(
-            "CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
-        )
+        origins = os.environ.get("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
         return cls(
             database_url=os.environ.get(
                 "DATABASE_URL",
@@ -75,9 +73,7 @@ class Settings:
             gmail_refresh_token=os.environ.get("GMAIL_REFRESH_TOKEN") or None,
             gmail_token_enc_key=os.environ.get("GMAIL_TOKEN_ENC_KEY") or None,
             gmail_label=os.environ.get("GMAIL_LABEL") or None,
-            gmail_tax_year=int(
-                os.environ.get("GMAIL_TAX_YEAR") or date.today().year
-            ),
+            gmail_tax_year=int(os.environ.get("GMAIL_TAX_YEAR") or date.today().year),
         )
 
 

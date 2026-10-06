@@ -19,10 +19,18 @@ from backend.exceptions import build, from_decision
 
 # The PRD FR8 hold reasons, mapped to taxonomy codes.
 FR8_CODES = {
-    "unresolved_sponsor", "unresolved_study", "unresolved_site",
-    "context_ambiguity", "missing_invoice_number", "missing_total",
-    "unmatched_line_item", "amount_mismatch", "catalog_unavailable",
-    "low_extraction_confidence", "submission_failed", "context_mismatch",
+    "unresolved_sponsor",
+    "unresolved_study",
+    "unresolved_site",
+    "context_ambiguity",
+    "missing_invoice_number",
+    "missing_total",
+    "unmatched_line_item",
+    "amount_mismatch",
+    "catalog_unavailable",
+    "low_extraction_confidence",
+    "submission_failed",
+    "context_mismatch",
 }
 
 # Codes the orchestrator raises directly on failure paths.
@@ -91,6 +99,8 @@ def test_from_decision_reports_medium_and_high_only():
     severities = {r.severity for r in records}
     assert Severity.LOW not in severities  # informational flags create no exception
     # the LOW missing_optional_fields flag exists on the decision but is not reported
-    assert any(f.type == "missing_optional_fields" and f.severity is Severity.LOW
-               for f in decision.risk_flags)
+    assert any(
+        f.type == "missing_optional_fields" and f.severity is Severity.LOW
+        for f in decision.risk_flags
+    )
     assert all(r.type in REGISTRY for r in records)
