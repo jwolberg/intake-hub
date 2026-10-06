@@ -33,6 +33,7 @@ from backend.db import get_engine, init_schema
 from backend.db.repository import Repository, get_repository
 from backend.domain import Actor, AuditAction, Decision, InvoiceMetadata, InvoiceStatus
 from backend.domain.taxonomy import is_retryable
+from backend.domain.transitions import allowed_actions, is_allowed
 from backend.inbox import InboxClient, get_inbox_client, message_to_sample
 from backend.ledger_integrity import posted_items, sample_posted
 from backend.orchestrator import process, recover, rerun
@@ -455,6 +456,8 @@ def _build_detail(invoice_id: str, repo: Repository) -> dict | None:
         for p in _rendered_pages(invoice_id, repo)
     ]
     detail["citations"] = extracted.get("citations", [])
+    # QC actions the current status allows (#0003), so the hub hides the rest.
+    detail["allowed_actions"] = allowed_actions(detail["invoice"].status)
     return detail
 
 
@@ -620,6 +623,15 @@ def _get_invoice_or_404(invoice_id: str, repo: Repository):
     return invoice
 
 
+def _require_allowed(invoice, action: str) -> None:
+    """409 when ``action`` isn't allowed from the item's current status (#0003)."""
+    if not is_allowed(action, invoice.status):
+        raise HTTPException(
+            status_code=409,
+            detail=f"cannot {action} an item that is {invoice.status.value}",
+        )
+
+
 def _set_status(repo: Repository, invoice, status: InvoiceStatus) -> None:
     invoice.status = status
     invoice.updated_at = datetime.now(UTC)
@@ -630,6 +642,7 @@ def _set_status(repo: Repository, invoice, status: InvoiceStatus) -> None:
 def correct_metadata(invoice_id: str, body: MetadataCorrection, repo: RepoDep) -> dict:
     """Overlay a human correction onto extracted metadata (PRD FR10)."""
     invoice = _get_invoice_or_404(invoice_id, repo)
+    _require_allowed(invoice, "correct")
     unknown = set(body.updates) - set(InvoiceMetadata.model_fields)
     if unknown:
         raise HTTPException(status_code=422, detail=f"unknown field(s): {sorted(unknown)}")
@@ -654,6 +667,7 @@ def correct_metadata(invoice_id: str, body: MetadataCorrection, repo: RepoDep) -
 def correct_line_item(invoice_id: str, body: LineItemCorrection, repo: RepoDep) -> dict:
     """Overlay a human correction onto a line-item catalog match (PRD FR10)."""
     invoice = _get_invoice_or_404(invoice_id, repo)
+    _require_allowed(invoice, "correct")
     if all(li.id != body.line_item_id for li in repo.get_line_items(invoice_id)):
         raise HTTPException(status_code=404, detail="line item not found")
 
@@ -692,6 +706,7 @@ def correct_category(invoice_id: str, body: CategoryCorrection, repo: RepoDep) -
     confident input, so correcting a held ambiguous item lets it file.
     """
     invoice = _get_invoice_or_404(invoice_id, repo)
+    _require_allowed(invoice, "correct")
     audit = repo.get_audit(invoice_id)
     prior = corrections.category_overlay(audit)
     if prior is None:
@@ -719,6 +734,7 @@ def reject_invoice(invoice_id: str, body: ReviewNote, repo: RepoDep) -> dict:
     is ever written for it.
     """
     invoice = _get_invoice_or_404(invoice_id, repo)
+    _require_allowed(invoice, "reject")
     record(repo, invoice_id, AuditAction.REJECTED, actor=Actor.HUMAN, reason=body.note)
     _set_status(repo, invoice, InvoiceStatus.REJECTED)
     return _require_detail(invoice_id, repo)
@@ -757,6 +773,7 @@ def mark_reviewed(invoice_id: str, body: ReviewNote, repo: RepoDep) -> dict:
 def escalate(invoice_id: str, body: EscalateBody, repo: RepoDep) -> dict:
     """Route the invoice to manual exception handling (PRD FR10)."""
     invoice = _get_invoice_or_404(invoice_id, repo)
+    _require_allowed(invoice, "escalate")
     record(repo, invoice_id, AuditAction.ESCALATED, actor=Actor.HUMAN, reason=body.reason)
     _set_status(repo, invoice, InvoiceStatus.ESCALATED)
     return _require_detail(invoice_id, repo)
@@ -773,7 +790,7 @@ def add_note(invoice_id: str, body: NoteBody, repo: RepoDep) -> dict:
 @app.post("/api/invoices/{invoice_id}/rerun")
 def rerun_invoice(invoice_id: str, repo: RepoDep, clients: ClientsDep) -> dict:
     """Re-enter the pipeline using corrected data as fixed inputs (PRD FR10)."""
-    _get_invoice_or_404(invoice_id, repo)
+    _require_allowed(_get_invoice_or_404(invoice_id, repo), "rerun")
     rerun(invoice_id, repo, **clients)
     return _require_detail(invoice_id, repo)
 
@@ -781,9 +798,7 @@ def rerun_invoice(invoice_id: str, repo: RepoDep, clients: ClientsDep) -> dict:
 @app.post("/api/invoices/{invoice_id}/retry")
 def retry_invoice(invoice_id: str, repo: RepoDep, clients: ClientsDep) -> dict:
     """Resume a FAILED invoice from the failed stage (P3-T1; PRD §15 retry option)."""
-    invoice = _get_invoice_or_404(invoice_id, repo)
-    if invoice.status is not InvoiceStatus.FAILED:
-        raise HTTPException(status_code=409, detail="only failed invoices can be retried")
+    _require_allowed(_get_invoice_or_404(invoice_id, repo), "retry")
     recover(invoice_id, repo, **clients)
     return _require_detail(invoice_id, repo)
 

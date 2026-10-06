@@ -218,7 +218,9 @@ export default function InvoiceDetail({ detail, onAction, setError }) {
   const d = decisionEvent?.details ?? {};
   const rationale = d.reason ?? d.rationale ?? d.error;
   const riskFlags = d.risk_flags ?? [];
-  const isHeld = invoice.status === "held";
+  // QC actions the item's status allows (server-side transition table, #0003).
+  const allowed = new Set(detail.allowed_actions ?? []);
+  const can = (action) => allowed.has(action);
 
   const [metaEdits, setMetaEdits] = useState({});
   const [metaReason, setMetaReason] = useState("");
@@ -340,22 +342,26 @@ export default function InvoiceDetail({ detail, onAction, setError }) {
           >
             Mark reviewed
           </button>
-          <button disabled={busy} onClick={() => run(rerunInvoice(invoice.id))}>
-            Rerun with corrections
-          </button>
-          {invoice.status === "failed" && (
+          {can("rerun") && (
+            <button disabled={busy} onClick={() => run(rerunInvoice(invoice.id))}>
+              Rerun with corrections
+            </button>
+          )}
+          {can("retry") && (
             <button disabled={busy} onClick={() => run(retryInvoice(invoice.id))}>
               Retry failed stage
             </button>
           )}
-          <button
-            disabled={busy}
-            className="danger"
-            onClick={() => run(escalateInvoice(invoice.id, note || null))}
-          >
-            Escalate
-          </button>
-          {isHeld && (
+          {can("escalate") && (
+            <button
+              disabled={busy}
+              className="danger"
+              onClick={() => run(escalateInvoice(invoice.id, note || null))}
+            >
+              Escalate
+            </button>
+          )}
+          {can("reject") && (
             <button
               disabled={busy}
               className="danger"
@@ -581,7 +587,13 @@ export default function InvoiceDetail({ detail, onAction, setError }) {
             value={metaReason}
             onChange={(e) => setMetaReason(e.target.value)}
           />
-          <button disabled={busy} onClick={saveMetadata}>Save metadata corrections</button>
+          <button
+            disabled={busy || !can("correct")}
+            title={can("correct") ? undefined : `Can't correct an item that is ${invoice.status}`}
+            onClick={saveMetadata}
+          >
+            Save metadata corrections
+          </button>
         </div>
       </div>
 
@@ -629,7 +641,7 @@ export default function InvoiceDetail({ detail, onAction, setError }) {
             </p>
           </>
         )}
-        {isHeld && (
+        {can("correct") && (
           <div className="qc-actions">
             <select
               className="cell-input"

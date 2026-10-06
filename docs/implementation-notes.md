@@ -2239,3 +2239,20 @@ plain pip (#0008; consistent with the "keep pip + requirements files" prior).
   TestClient without `with` doesn't run lifespan.
 - **Tradeoff:** no per-user audit attribution yet — the verified email is set on
   `request.state.user` but audit events still record `actor=human`. Possible follow-up.
+
+### #0003 — status-transition guards on QC actions
+- One table, `backend/domain/transitions.py`, decides which QC actions each status allows.
+  Disallowed actions are a 409, and the detail payload exposes `allowed_actions` so the hub
+  hides buttons that would fail.
+- **Decision (posted items):** corrections/rerun/reject/escalate on `posted` are 409. The
+  Sheet append is deduped by item id, so a post-filing correction + rerun could never reach
+  the Sheet; allowing it would only make the hub disagree with the ledger. Fixing a filed
+  row = edit it in the Sheet. Notes / "mark reviewed" / citation confirms still work on any
+  status (they don't change state), so spot-checks are unaffected.
+- `rejected` is terminal (AE4). The audit repro (hold → reject → correct → rerun → posted)
+  now 409s at the correction and the rerun, and no POSTED event is written.
+- **Behavior change:** `/rerun` on a `failed` item is now 409; `/retry` is the failed path
+  (rerun reuses the extraction, which a failed item may not have).
+- Two existing tests that corrected a *posted* item now use a held one.
+- Guards are enforced at the API. `orchestrator.rerun()` itself doesn't check status — the
+  API is its only caller.

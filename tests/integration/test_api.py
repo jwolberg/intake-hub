@@ -346,7 +346,7 @@ def _process(client, name):
 
 
 def test_correct_metadata_records_overlay_and_reflects_state(client):
-    invoice_id = _process(client, POSTS)
+    invoice_id = _process(client, HOLDS)  # corrections apply to items not yet filed
 
     resp = client.post(
         f"/api/invoices/{invoice_id}/corrections/metadata",
@@ -372,7 +372,7 @@ def test_correct_metadata_records_overlay_and_reflects_state(client):
 
 
 def test_correct_metadata_rejects_unknown_field(client):
-    invoice_id = _process(client, POSTS)
+    invoice_id = _process(client, HOLDS)
     resp = client.post(
         f"/api/invoices/{invoice_id}/corrections/metadata",
         json={"updates": {"nonsense": "x"}},
@@ -550,3 +550,69 @@ def test_metrics_endpoint(client):
     assert metrics["submitted"] == 1 and metrics["held"] == 1
     assert metrics["auto_submit_rate"] == 0.5
     assert metrics["hold_precision"] is None  # nothing dispositioned yet
+
+
+# --- status transitions (#0003) ---------------------------------------------
+
+
+def _held_missing_total(client):
+    resp = client.post("/api/invoices/process", json=HOLD_MISSING_TOTAL).json()
+    assert resp["status"] == "held"
+    return resp["id"]
+
+
+def test_rejected_item_can_never_be_filed(client):
+    # The audit repro: hold -> reject -> correct -> rerun used to end "posted".
+    invoice_id = _held_missing_total(client)
+    client.post(f"/api/invoices/{invoice_id}/reject", json={"note": "not a receipt"})
+
+    correct = client.post(
+        f"/api/invoices/{invoice_id}/corrections/metadata",
+        json={"updates": {"total_amount": "52.99"}},
+    )
+    rerun = client.post(f"/api/invoices/{invoice_id}/rerun", json={})
+
+    assert correct.status_code == 409
+    assert rerun.status_code == 409
+    detail = client.get(f"/api/invoices/{invoice_id}").json()
+    assert detail["invoice"]["status"] == "rejected"
+    assert not [e for e in detail["audit"] if e["action"] == "posted"]
+
+
+@pytest.mark.parametrize(
+    "path,body",
+    [
+        ("corrections/metadata", {"updates": {"vendor_name": "X"}}),
+        ("corrections/category", {"category": "Supplies"}),
+        ("rerun", {}),
+        ("reject", {}),
+        ("escalate", {}),
+    ],
+)
+def test_actions_on_posted_item_are_409_and_keep_status(client, path, body):
+    invoice_id = _process(client, POSTS)
+    resp = client.post(f"/api/invoices/{invoice_id}/{path}", json=body)
+    assert resp.status_code == 409
+    assert client.get(f"/api/invoices/{invoice_id}").json()["invoice"]["status"] == "posted"
+
+
+@pytest.mark.parametrize("path", ["escalate", "reject", "corrections/category"])
+def test_actions_on_rejected_item_are_409(client, path):
+    invoice_id = _held_missing_total(client)
+    client.post(f"/api/invoices/{invoice_id}/reject", json={})
+    body = {"category": "Supplies"} if "category" in path else {}
+    assert client.post(f"/api/invoices/{invoice_id}/{path}", json=body).status_code == 409
+
+
+def test_notes_and_review_allowed_on_any_status(client):
+    invoice_id = _process(client, POSTS)
+    assert client.post(f"/api/invoices/{invoice_id}/note", json={"note": "ok"}).status_code == 200
+    assert client.post(f"/api/invoices/{invoice_id}/reviewed", json={}).status_code == 200
+
+
+def test_detail_lists_allowed_actions(client):
+    held = client.get(f"/api/invoices/{_held_missing_total(client)}").json()
+    posted = client.get(f"/api/invoices/{_process(client, POSTS)}").json()
+    assert {"correct", "rerun", "reject", "escalate"} <= set(held["allowed_actions"])
+    assert "retry" not in held["allowed_actions"]
+    assert posted["allowed_actions"] == []
