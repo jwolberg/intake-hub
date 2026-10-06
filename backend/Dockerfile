@@ -12,6 +12,10 @@ RUN pip install --no-cache-dir --require-hashes -r /app/backend/requirements.loc
 
 COPY backend /app/backend
 
+# Run unprivileged (#0014).
+RUN useradd --system --uid 10001 --no-create-home app
+USER app
+
 EXPOSE 8000
 # Shell form so Cloud Run's injected $PORT (8080) is honored; defaults to 8000
 # for local Compose (which maps 8000:8000 and sets no PORT).

@@ -47,3 +47,33 @@ def test_process_all_logs_swallowed_errors(monkeypatch, caplog):
     assert results == []
     assert "m-1" in caplog.text
     assert caplog.records[0].exc_info is not None
+
+
+# --- CORS (#0014) -------------------------------------------------------------
+
+ORIGIN = "http://localhost:5173"  # a default CORS_ORIGINS entry
+
+
+def _preflight(method, headers="content-type"):
+    return TestClient(api.app).options(
+        "/api/invoices",
+        headers={
+            "Origin": ORIGIN,
+            "Access-Control-Request-Method": method,
+            "Access-Control-Request-Headers": headers,
+        },
+    )
+
+
+def test_cors_allows_the_methods_and_headers_the_hub_uses():
+    resp = _preflight("POST", "content-type")
+    assert resp.status_code == 200
+    assert resp.headers["access-control-allow-origin"] == ORIGIN
+
+
+def test_cors_rejects_other_methods():
+    assert _preflight("DELETE").status_code == 400
+
+
+def test_cors_rejects_arbitrary_headers():
+    assert _preflight("POST", "x-evil-header").status_code == 400

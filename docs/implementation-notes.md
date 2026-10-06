@@ -2309,3 +2309,20 @@ plain pip (#0008; consistent with the "keep pip + requirements files" prior).
   behind IAP).
 - `process_all` logs each swallowed exception (`logger.exception`) with the item's
   message id / attachment / subject.
+
+### #0014 — containers, CORS, security headers
+- Backend image runs as an unprivileged `app` user (uid 10001). Runtime writes only go to
+  `/tmp` (Drive downloads), which stays writable.
+- Hub image is `nginxinc/nginx-unprivileged` (uid 101, 8080), and `RUN nginx -t` validates
+  the config during the build. There's no local nginx/Docker, so the CI `images` job is
+  where it gets checked — **not verified locally**.
+- nginx sends CSP, nosniff, `X-Frame-Options: DENY`, Referrer-Policy, Permissions-Policy.
+  The CSP allows only same origin plus Google Fonts (the one third party in `index.html`)
+  and needs no `'unsafe-inline'` (the hub has no inline scripts or style attributes). A
+  split-origin build would need its API origin added to `connect-src`/`img-src`.
+- CORS narrowed to GET/POST and `Content-Type`/`Authorization`. **Also fixed a middleware
+  ordering bug:** Starlette makes the last-added middleware outermost, so CORS (added first)
+  ran *inside* auth — a cross-origin preflight got a bare 401 with no CORS headers. CORS is
+  now registered last (outermost), with a regression test that fails without the fix.
+- Pre-existing, not changed: the mock inbox can't render demo PDFs inside the backend image
+  (`samples/` and reportlab aren't in it). Demo seeding goes through `seed_hub`/`seed_cloud`.

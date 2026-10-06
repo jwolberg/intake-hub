@@ -61,15 +61,6 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="IntakeHub", version="0.0.1", lifespan=lifespan)
 
-# The hub is served from a different origin (Vite :5173) than the API (:8000),
-# so browser fetches need CORS. Origins are configurable via CORS_ORIGINS.
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=list(settings.cors_origins),
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 
 # Upload bounds (#0002). A decoded inline attachment over MAX_ATTACHMENT_BYTES is
 # refused, and any request whose declared body exceeds MAX_REQUEST_BYTES is refused
@@ -102,6 +93,18 @@ async def limit_request_size(request: Request, call_next):
     if declared and declared.isdigit() and int(declared) > MAX_REQUEST_BYTES:
         return JSONResponse(status_code=413, content={"detail": "request body too large"})
     return await call_next(request)
+
+
+# CORS for local dev, where the hub (Vite :5173) and API (:8000) are different
+# origins; in production they share one origin behind the IAP load balancer.
+# Only what the hub sends is allowed (#0014). Registered *after* the other
+# middlewares so it is outermost: preflights and 401s still carry CORS headers.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=list(settings.cors_origins),
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type", "Authorization"],
+)
 
 
 def _db_status() -> str:

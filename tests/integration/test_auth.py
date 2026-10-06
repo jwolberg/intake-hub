@@ -169,3 +169,17 @@ def test_cert_fetch_failure_is_503(iap_client, keypair, monkeypatch):
     monkeypatch.setattr(auth, "_fetch_certs", boom)
     resp = iap_client.get("/api/invoices", headers={auth.IAP_HEADER: _token(signer)})
     assert resp.status_code == 503
+
+
+def test_cors_preflight_is_answered_before_auth(iap_client):
+    # CORS is the outermost middleware, so a cross-origin preflight (which never
+    # carries credentials) gets CORS headers instead of a bare 401.
+    resp = iap_client.options(
+        "/api/invoices",
+        headers={
+            "Origin": "http://localhost:5173",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.headers["access-control-allow-origin"] == "http://localhost:5173"
