@@ -2172,3 +2172,15 @@ plain pip (#0008; consistent with the "keep pip + requirements files" prior).
 ### #0009 — ruff format repo-wide
 - Formatting-only commit (49 files). Its SHA goes in `.git-blame-ignore-revs` in a follow-up
   commit (a commit can't contain its own hash).
+
+### #0008 — pin dependencies, Python 3.12 everywhere
+- `backend/requirements.lock` / `requirements-dev.lock` generated with `uv pip compile
+  --generate-hashes --universal` from the existing `.txt` files (still the human-edited
+  source). Docker installs with `pip --require-hashes`. Regeneration steps in RUNBOOK.
+- Python 3.12: Dockerfile, `.python-version`, ruff `target-version`. Local `.venv` was rebuilt
+  on 3.12 (old 3.10 venv moved out of the repo, not deleted).
+- Lock resolution bumped some majors within existing ranges (e.g. starlette 1.x via fastapi
+  0.142, pypdf 5.9); full suite green on 3.12, so accepted.
+- Ruff `UP042` (`str, Enum` → `StrEnum`) ignored: it changes `str(member)` output, so it's a
+  behavior change, not a lint fix. `UP017` (`datetime.UTC`) applied.
+- Hub images now `COPY package-lock.json` + `npm ci`.

@@ -15,7 +15,7 @@ from __future__ import annotations
 import base64
 import binascii
 import pathlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from backend import corrections
 from backend.audit import latest_details, record
@@ -51,7 +51,7 @@ from backend.parser.raster import is_rasterizable, render_pages
 
 def _advance(repo: Repository, invoice: Invoice, status: InvoiceStatus) -> None:
     invoice.status = status
-    invoice.updated_at = datetime.now(timezone.utc)
+    invoice.updated_at = datetime.now(UTC)
     repo.save_invoice(invoice)
 
 
@@ -420,7 +420,7 @@ def _file_to_sheet(
 def _fail(repo: Repository, invoice: Invoice, kind: str, message: str) -> None:
     repo.add_exceptions([build_exception(invoice.id, kind, message=message)])
     invoice.status = InvoiceStatus.FAILED
-    invoice.updated_at = datetime.now(timezone.utc)
+    invoice.updated_at = datetime.now(UTC)
     repo.save_invoice(invoice)
     record(
         repo,

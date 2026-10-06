@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 import pathlib
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Response
@@ -548,7 +548,7 @@ def _get_invoice_or_404(invoice_id: str, repo: Repository):
 
 def _set_status(repo: Repository, invoice, status: InvoiceStatus) -> None:
     invoice.status = status
-    invoice.updated_at = datetime.now(timezone.utc)
+    invoice.updated_at = datetime.now(UTC)
     repo.save_invoice(invoice)
 
 

@@ -179,9 +179,9 @@ clients talk directly to Google's APIs (or their offline stubs).
 docker compose up -d db
 
 # 2. Python env (from repo root)
-python3 -m venv .venv
+python3.12 -m venv .venv
 source .venv/bin/activate
-pip install -r backend/requirements-dev.txt
+pip install --require-hashes -r backend/requirements-dev.lock
 
 # 3. run the API against the local-mapped DB
 export DATABASE_URL=postgresql+psycopg://intakehub:intakehub@localhost:5432/intakehub
@@ -208,7 +208,7 @@ they need no DB or network.
 
 ```bash
 source .venv/bin/activate           # (create per Path B if needed)
-pip install -r backend/requirements-dev.txt
+pip install --require-hashes -r backend/requirements-dev.lock
 
 ruff check .                        # lint
 ruff check --fix .                  # lint + autofix
@@ -245,7 +245,7 @@ PDFs, then run one through the full pipeline. No DB, network, or API key needed.
 
 ```bash
 source .venv/bin/activate
-pip install -r backend/requirements-dev.txt   # pulls reportlab (generator) + pypdf (parser)
+pip install --require-hashes -r backend/requirements-dev.lock   # pulls reportlab (generator) + pypdf (parser)
 
 # 1. generate sample PDFs → samples/pdf/*.pdf  (also committed, so this is optional)
 python -m samples.generate_pdfs
@@ -536,3 +536,15 @@ truth.
 | API 500 on `/api/invoices` | App can't reach Postgres (it uses `PostgresRepository`). Bring up `db` and set `DATABASE_URL`. |
 | Hub shows "API unreachable" | API not running on `VITE_API_URL` (default `:8000`), or CORS/host mismatch. |
 | Postgres round-trip test always skips | Expected without a DB; see "Validating the Postgres path". |
+
+## Updating Python dependencies
+
+`backend/requirements.txt` / `requirements-dev.txt` hold the direct, ranged deps;
+the `.lock` files are generated, hash-pinned, and what Docker/CI/venvs install.
+After editing a `.txt`, regenerate both locks (needs [uv](https://docs.astral.sh/uv/)):
+
+```bash
+for f in requirements requirements-dev; do
+  uv pip compile backend/$f.txt --generate-hashes --universal --python-version 3.12 -o backend/$f.lock
+done
+```

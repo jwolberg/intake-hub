@@ -140,7 +140,7 @@ stage**; reject a non-receipt to drop it from the queue.
 ## Testing
 
 ```bash
-pip install -r backend/requirements-dev.txt
+pip install --require-hashes -r backend/requirements-dev.lock
 ruff check .          # lint
 pytest -q             # 248 passed, 1 skipped (Postgres round-trip; runs with a live DB)
 ```
