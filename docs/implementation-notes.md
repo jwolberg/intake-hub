@@ -2267,3 +2267,20 @@ plain pip (#0008; consistent with the "keep pip + requirements files" prior).
   trail (each HELD/FAILED event records its reason). The RERUN/RECOVERED event also lists
   `superseded_exceptions` (the types it cleared).
 - Checked: metrics and ledger integrity don't read exception history.
+
+### #0005 — inbox fetch serialized
+- **Confirmed the race before fixing** (it was only inferred in the audit): two overlapping
+  fetches over the 6-message mock inbox created 8 items.
+- Fix: `Repository.inbox_fetch_lock()` — a Postgres session-level advisory lock on a
+  dedicated connection (works across Cloud Run instances), and a non-blocking
+  `threading.Lock` in memory. An overlapping fetch gets **409** and the poller retries next tick.
+- **Tradeoff:** a lock around the whole fetch instead of claiming each message before
+  processing. Claim-first is at-most-once — a crash mid-pipeline would silently drop that
+  receipt from the ledger. The lock keeps today's at-least-once semantics (poison messages
+  are still marked seen).
+- The lock is unlocked explicitly in `finally`, because a pooled connection keeps session
+  locks after it's returned. Tests cover release after success and after an exception.
+- Tests run two fetches concurrently (barrier + a slow inbox) against both Postgres and the
+  in-memory repo: exactly one 200 and one 409, each message processed once. Passed 3
+  repeated runs; there's a small theoretical flake window if a CI runner stalls one thread
+  for more than 0.5 s.

@@ -11,11 +11,13 @@ state by holding a reference — matching how a real datastore behaves.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+import threading
+from collections.abc import Iterator, Mapping
+from contextlib import AbstractContextManager, contextmanager
 from functools import lru_cache
 from typing import Protocol
 
-from sqlalchemy import Engine, MetaData, Table, delete, func, insert, select
+from sqlalchemy import Engine, MetaData, Table, delete, func, insert, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from backend.db.session import get_engine
@@ -54,6 +56,11 @@ class Repository(Protocol):
     def get_detail(self, invoice_id: str) -> dict | None: ...
     def is_seen(self, message_id: str) -> bool: ...
     def mark_seen(self, message_id: str) -> None: ...
+    def inbox_fetch_lock(self) -> AbstractContextManager[bool]:
+        """Non-blocking exclusive lock around an inbox fetch (#0005); yields
+        whether it was acquired. Released when the block exits, even on error."""
+        ...
+
     def is_appended(self, idempotency_key: str) -> bool: ...
     def record_append(self, idempotency_key: str, sheet_row_ref: str) -> None: ...
     def get_append_ref(self, idempotency_key: str) -> str | None: ...
@@ -79,6 +86,7 @@ class InMemoryRepository:
         self._sheet_appends: dict[str, str] = {}
         self._oauth_tokens: dict[str, str] = {}
         self._gmail_history_id: str | None = None
+        self._inbox_fetch_lock = threading.Lock()
 
     def save_invoice(self, invoice: Invoice) -> None:
         self._invoices[invoice.id] = invoice.model_copy(deep=True)
@@ -145,6 +153,15 @@ class InMemoryRepository:
     def is_seen(self, message_id: str) -> bool:
         return message_id in self._seen_messages
 
+    @contextmanager
+    def inbox_fetch_lock(self) -> Iterator[bool]:
+        acquired = self._inbox_fetch_lock.acquire(blocking=False)
+        try:
+            yield acquired
+        finally:
+            if acquired:
+                self._inbox_fetch_lock.release()
+
     def mark_seen(self, message_id: str) -> None:
         self._seen_messages.add(message_id)
 
@@ -186,6 +203,10 @@ def _to_invoice(m: Mapping) -> Invoice:
         created_at=m["created_at"],
         updated_at=m["updated_at"],
     )
+
+
+# Arbitrary, stable advisory-lock id for "an inbox fetch is running".
+_INBOX_FETCH_LOCK_KEY = 0x1A7EF37C
 
 
 class PostgresRepository:
@@ -430,6 +451,26 @@ class PostgresRepository:
                 )
             ).first()
         return row is not None
+
+    @contextmanager
+    def inbox_fetch_lock(self) -> Iterator[bool]:
+        # A session-level advisory lock on a dedicated connection: serializes
+        # fetches across processes and Cloud Run instances. Unlocked explicitly
+        # because a pooled connection keeps session locks after it's returned
+        # (if the connection dies instead, Postgres drops the lock with it).
+        with self._engine.connect() as conn:
+            acquired = bool(
+                conn.execute(
+                    text("SELECT pg_try_advisory_lock(:key)"), {"key": _INBOX_FETCH_LOCK_KEY}
+                ).scalar()
+            )
+            try:
+                yield acquired
+            finally:
+                if acquired:
+                    conn.execute(
+                        text("SELECT pg_advisory_unlock(:key)"), {"key": _INBOX_FETCH_LOCK_KEY}
+                    )
 
     def mark_seen(self, message_id: str) -> None:
         stmt = (

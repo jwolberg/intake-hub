@@ -264,28 +264,33 @@ def fetch_inbox(repo: RepoDep, clients: ClientsDep, inbox: InboxDep) -> dict:
     existing pipeline; already-seen messages are skipped so a re-fetch never
     double-processes (idempotent; PRD §14).
     """
-    received: list[dict] = []
-    skipped = 0
-    for message in inbox.fetch_messages():
-        if repo.is_seen(message.message_id):
-            skipped += 1
-            continue
-        try:
-            invoice = process(message_to_sample(message), repo, **clients)
-        except Exception:
-            # process() isolates stage failures and returns a FAILED invoice, so
-            # reaching here is unexpected. Fall through to mark_seen so one poison
-            # message can't wedge every future poll, then skip it.
-            logger.exception("inbox: unexpected error processing %s", message.message_id)
-            invoice = None
-        # Idempotency is committed BEFORE the post-decision move (KTD3): a move
-        # failure inside on_processed can never cause reprocessing. on_processed
-        # isolates its own errors, so the loop needs no provider-specific guard.
-        repo.mark_seen(message.message_id)
-        if invoice is None:
-            continue
-        inbox.on_processed(message, invoice)
-        received.append({"message_id": message.message_id, **_summary(invoice, repo)})
+    # One fetch at a time (#0005): is_seen -> process -> mark_seen isn't atomic,
+    # so overlapping fetches (poller + hub button) could process a message twice.
+    with repo.inbox_fetch_lock() as acquired:
+        if not acquired:
+            raise HTTPException(status_code=409, detail="an inbox fetch is already running")
+        received: list[dict] = []
+        skipped = 0
+        for message in inbox.fetch_messages():
+            if repo.is_seen(message.message_id):
+                skipped += 1
+                continue
+            try:
+                invoice = process(message_to_sample(message), repo, **clients)
+            except Exception:
+                # process() isolates stage failures and returns a FAILED invoice, so
+                # reaching here is unexpected. Fall through to mark_seen so one poison
+                # message can't wedge every future poll, then skip it.
+                logger.exception("inbox: unexpected error processing %s", message.message_id)
+                invoice = None
+            # Idempotency is committed BEFORE the post-decision move (KTD3): a move
+            # failure inside on_processed can never cause reprocessing. on_processed
+            # isolates its own errors, so the loop needs no provider-specific guard.
+            repo.mark_seen(message.message_id)
+            if invoice is None:
+                continue
+            inbox.on_processed(message, invoice)
+            received.append({"message_id": message.message_id, **_summary(invoice, repo)})
     return {"count": len(received), "skipped": skipped, "received": received}
 
 
