@@ -616,3 +616,64 @@ def test_detail_lists_allowed_actions(client):
     assert {"correct", "rerun", "reject", "escalate"} <= set(held["allowed_actions"])
     assert "retry" not in held["allowed_actions"]
     assert posted["allowed_actions"] == []
+
+
+# --- exceptions superseded by a new pass (#0004) ----------------------------
+
+
+def test_rerun_that_files_clears_stale_hold_reasons(client):
+    invoice_id = _held_missing_total(client)
+    assert client.get("/api/notifications").json()["held_count"] == 1
+
+    client.post(
+        f"/api/invoices/{invoice_id}/corrections/metadata",
+        json={"updates": {"total_amount": "52.99"}},
+    )
+    detail = client.post(f"/api/invoices/{invoice_id}/rerun", json={}).json()
+    assert detail["invoice"]["status"] == "posted"
+
+    row = next(r for r in client.get("/api/invoices").json() if r["id"] == invoice_id)
+    assert row["exception_count"] == 0
+    assert "low_confidence" not in row["filter_tags"]
+    assert "needs_review" not in row["filter_tags"]
+    assert detail["exceptions"] == []
+    assert client.get("/api/notifications").json() == {"held_count": 0, "by_reason": {}}
+
+    # History isn't lost: the rerun event names what it superseded.
+    rerun_event = [e for e in detail["audit"] if e["action"] == "rerun"][-1]
+    assert rerun_event["details"]["superseded_exceptions"]
+
+
+def test_rerun_that_holds_again_reports_only_current_reasons(client):
+    invoice_id = _held_missing_total(client)
+    before = client.get(f"/api/invoices/{invoice_id}").json()["exceptions"]
+
+    detail = client.post(f"/api/invoices/{invoice_id}/rerun", json={}).json()
+
+    assert detail["invoice"]["status"] == "held"
+    assert len(detail["exceptions"]) == len(before)  # replaced, not doubled
+
+
+def test_retry_that_succeeds_clears_the_failure_exception():
+    from backend.api.main import app, get_pipeline_clients, get_repo
+
+    repo = InMemoryRepository()
+    sheets = StubSheetsClient()
+    sheets.fail_always = True
+    app.dependency_overrides[get_repo] = lambda: repo
+    app.dependency_overrides[get_pipeline_clients] = lambda: {
+        "llm": PassthroughLLMClient(),
+        "sheets": sheets,
+    }
+    try:
+        c = TestClient(app)
+        invoice_id = c.post("/api/invoices/process", json=_sample(POSTS)).json()["id"]
+        assert c.get(f"/api/invoices/{invoice_id}").json()["invoice"]["status"] == "failed"
+
+        sheets.fail_always = False
+        detail = c.post(f"/api/invoices/{invoice_id}/retry", json={}).json()
+
+        assert detail["invoice"]["status"] == "posted"
+        assert detail["exceptions"] == []
+    finally:
+        app.dependency_overrides.clear()

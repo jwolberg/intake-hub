@@ -2256,3 +2256,14 @@ plain pip (#0008; consistent with the "keep pip + requirements files" prior).
 - Two existing tests that corrected a *posted* item now use a held one.
 - Guards are enforced at the API. `orchestrator.rerun()` itself doesn't check status — the
   API is its only caller.
+
+### #0004 — stale hold exceptions superseded on rerun/recover
+- Exceptions now mean "why the item is held/failed *now*". `rerun` and `recover` clear the
+  previous pass's exceptions before running (`Repository.clear_exceptions`), so a rerun that
+  files shows 0 exceptions, loses its stale needs_review/low_confidence tags, and leaves
+  notifications/review-queue counts. A rerun that holds again has only the new reasons
+  (replaced, not doubled).
+- Chose clear over a "resolved" flag: no schema change, and history is already on the audit
+  trail (each HELD/FAILED event records its reason). The RERUN/RECOVERED event also lists
+  `superseded_exceptions` (the types it cleared).
+- Checked: metrics and ledger integrity don't read exception history.

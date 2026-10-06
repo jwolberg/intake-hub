@@ -48,6 +48,7 @@ class Repository(Protocol):
     def get_matches(self, invoice_id: str) -> list[MatchResult]: ...
     def add_exceptions(self, exceptions: list[ExceptionRecord]) -> None: ...
     def get_exceptions(self, invoice_id: str) -> list[ExceptionRecord]: ...
+    def clear_exceptions(self, invoice_id: str) -> None: ...
     def append_audit(self, event: AuditEvent) -> None: ...
     def get_audit(self, invoice_id: str) -> list[AuditEvent]: ...
     def get_detail(self, invoice_id: str) -> dict | None: ...
@@ -117,6 +118,9 @@ class InMemoryRepository:
 
     def get_exceptions(self, invoice_id: str) -> list[ExceptionRecord]:
         return [e.model_copy(deep=True) for e in self._exceptions.get(invoice_id, [])]
+
+    def clear_exceptions(self, invoice_id: str) -> None:
+        self._exceptions.pop(invoice_id, None)
 
     def append_audit(self, event: AuditEvent) -> None:
         self._audit.setdefault(event.invoice_id, []).append(event.model_copy(deep=True))
@@ -337,6 +341,10 @@ class PostgresRepository:
         ]
         with self._engine.begin() as conn:
             conn.execute(insert(self.exceptions), rows)
+
+    def clear_exceptions(self, invoice_id: str) -> None:
+        with self._engine.begin() as conn:
+            conn.execute(delete(self.exceptions).where(self.exceptions.c.invoice_id == invoice_id))
 
     def get_exceptions(self, invoice_id: str) -> list[ExceptionRecord]:
         with self._engine.connect() as conn:

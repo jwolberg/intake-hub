@@ -35,3 +35,16 @@ def test_postgres_round_trip(pg_repo):
     assert detail["context"] is None  # resolved_context table removed (U5)
     assert detail["matches"] == []  # match_results table removed (U5)
     assert len(detail["audit"]) > 0
+
+
+def test_postgres_clear_exceptions(pg_repo):
+    from backend.exceptions import build as build_exception
+
+    sample = json.loads((SAMPLES / "inv_clean_001.json").read_text())
+    invoice = process(sample, pg_repo, llm=PassthroughLLMClient(), sheets=StubSheetsClient())
+    pg_repo.add_exceptions([build_exception(invoice.id, "low_confidence", message="x")])
+    assert pg_repo.get_exceptions(invoice.id)
+
+    pg_repo.clear_exceptions(invoice.id)
+
+    assert pg_repo.get_exceptions(invoice.id) == []

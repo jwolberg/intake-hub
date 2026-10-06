@@ -440,6 +440,19 @@ def _fail(repo: Repository, invoice: Invoice, kind: str, message: str) -> None:
     )
 
 
+def _supersede_exceptions(repo: Repository, invoice_id: str) -> list[str]:
+    """Clear the previous pass's exceptions before a new pass (#0004).
+
+    Exceptions describe the item's *current* state (why it's held/failed now), so
+    a rerun/recover replaces them rather than piling up stale hold reasons. The
+    superseded types are returned for the audit event, and each HELD/FAILED event
+    already recorded its reason, so history isn't lost.
+    """
+    superseded = sorted({e.type for e in repo.get_exceptions(invoice_id)})
+    repo.clear_exceptions(invoice_id)
+    return superseded
+
+
 def rerun(
     invoice_id: str,
     repo: Repository,
@@ -480,7 +493,10 @@ def rerun(
         AuditAction.RERUN,
         actor=Actor.HUMAN,
         reason="rerun with corrected data",
-        details={"corrected_fields": sorted(corrections.metadata_overlay(audit))},
+        details={
+            "corrected_fields": sorted(corrections.metadata_overlay(audit)),
+            "superseded_exceptions": _supersede_exceptions(repo, invoice_id),
+        },
     )
     _advance(repo, invoice, InvoiceStatus.RERUN_REQUESTED)
 
@@ -531,7 +547,10 @@ def recover(
         AuditAction.RECOVERED,
         actor=Actor.SYSTEM,
         reason="retry failed stage",
-        details={"from_status": invoice.status.value},
+        details={
+            "from_status": invoice.status.value,
+            "superseded_exceptions": _supersede_exceptions(repo, invoice_id),
+        },
     )
     _advance(repo, invoice, InvoiceStatus.RERUN_REQUESTED)
 
