@@ -104,16 +104,29 @@ async def limit_request_size(request: Request, call_next):
     return await call_next(request)
 
 
-@app.get("/health")
-def health() -> dict:
-    """Liveness probe plus a best-effort database connectivity check."""
-    db_status = "up"
+def _db_status() -> str:
     try:
         with get_engine().connect() as conn:
             conn.execute(text("SELECT 1"))
     except SQLAlchemyError:
-        db_status = "down"
-    return {"status": "ok", "service": "intakehub-api", "db": db_status}
+        return "down"
+    return "up"
+
+
+@app.get("/health")
+def health() -> dict:
+    """Liveness: the process is up (always 200). ``db`` is informational —
+    use ``/ready`` to gate traffic or alert on the database (#0015)."""
+    return {"status": "ok", "service": "intakehub-api", "db": _db_status()}
+
+
+@app.get("/ready")
+def ready() -> JSONResponse:
+    """Readiness: 503 while the database is unreachable."""
+    db = _db_status()
+    if db != "up":
+        return JSONResponse(status_code=503, content={"status": "not ready", "db": db})
+    return JSONResponse(content={"status": "ready", "db": db})
 
 
 # --- dependencies (overridable in tests) ------------------------------------

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import logging
 import pathlib
 from datetime import UTC, datetime
 
@@ -47,6 +48,8 @@ from backend.ocr import OCRClient
 from backend.parser import parse
 from backend.parser.pdf import LayoutLLMClient
 from backend.parser.raster import is_rasterizable, render_pages, render_pdf_bytes
+
+logger = logging.getLogger("intakehub.orchestrator")
 
 
 def _advance(repo: Repository, invoice: Invoice, status: InvoiceStatus) -> None:
@@ -658,5 +661,8 @@ def process_all(samples: list[dict], repo: Repository, **clients) -> list[Invoic
         try:
             results.append(process(sample, repo, **clients))
         except Exception:  # defensive: even an unexpected error can't halt the batch
+            source = sample.get("source", {})
+            ref = source.get("message_id") or source.get("attachment") or source.get("subject")
+            logger.exception("process_all: unexpected error processing %s", ref)
             continue
     return results

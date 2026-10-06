@@ -2301,3 +2301,11 @@ plain pip (#0008; consistent with the "keep pip + requirements files" prior).
 - Tests inject a crash between writes (a HELD audit append; a status save after a CORRECTED
   record), against both Postgres and in-memory: no orphaned hold exceptions, no CORRECTED
   event without its status, and nested blocks roll back with the outer one.
+
+### #0015 — liveness vs readiness; batch errors logged
+- `/health` stays the liveness probe (always 200; `db` is now informational only). The new
+  `/ready` returns 503 while the DB is unreachable — use it for uptime alerts. Both are
+  outside `/api`, so the app doesn't require auth for them (at the edge everything is still
+  behind IAP).
+- `process_all` logs each swallowed exception (`logger.exception`) with the item's
+  message id / attachment / subject.
