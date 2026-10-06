@@ -33,8 +33,10 @@ from backend.parser.raster import RenderedPage
 
 @runtime_checkable
 class OCRClient(Protocol):
-    def extract_words(self, source: str, pages: list[RenderedPage]) -> list[WordBox]:
-        """Return every page's words as ``WordBox`` (index 0-based per page)."""
+    def extract_words(self, source: str | bytes, pages: list[RenderedPage]) -> list[WordBox]:
+        """Return every page's words as ``WordBox`` (index 0-based per page).
+
+        ``source`` is a file path or the raw bytes of an inline PDF."""
         ...
 
 
@@ -62,15 +64,21 @@ class StubOCRClient:
     needs the real ``TesseractOCRClient``.
     """
 
-    def extract_words(self, source: str, pages: list[RenderedPage] | None = None) -> list[WordBox]:
-        path = pathlib.Path(source)
-        if path.suffix.lower() != ".pdf" or not path.is_file():
-            return []
-
+    def extract_words(
+        self, source: str | bytes, pages: list[RenderedPage] | None = None
+    ) -> list[WordBox]:
         import fitz  # lazy: only the OCR/raster path pulls in PyMuPDF
 
+        if isinstance(source, bytes):
+            opened = fitz.open(stream=source, filetype="pdf")
+        else:
+            path = pathlib.Path(source)
+            if path.suffix.lower() != ".pdf" or not path.is_file():
+                return []
+            opened = fitz.open(path)
+
         words: list[WordBox] = []
-        with fitz.open(path) as doc:
+        with opened as doc:
             for page_number, page in enumerate(doc, start=1):
                 rect = page.rect
                 if not rect.width or not rect.height:
@@ -150,7 +158,7 @@ class TesseractOCRClient:
     ``get_ocr_client`` (and ``pip install pytesseract pillow`` + the binary).
     """
 
-    def extract_words(self, source: str, pages: list[RenderedPage]) -> list[WordBox]:
+    def extract_words(self, source: str | bytes, pages: list[RenderedPage]) -> list[WordBox]:
         import io
 
         import pytesseract

@@ -16,9 +16,10 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Response
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -64,6 +65,21 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# Upload bounds (#0002). A decoded inline attachment over MAX_ATTACHMENT_BYTES is
+# refused, and any request whose declared body exceeds MAX_REQUEST_BYTES is refused
+# before it is read (base64 inflates ~4/3, plus JSON overhead).
+MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
+MAX_REQUEST_BYTES = 28 * 1024 * 1024
+
+
+@app.middleware("http")
+async def limit_request_size(request: Request, call_next):
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > MAX_REQUEST_BYTES:
+        return JSONResponse(status_code=413, content={"detail": "request body too large"})
+    return await call_next(request)
 
 
 @app.get("/health")
@@ -173,10 +189,47 @@ def _summary(invoice, repo: Repository) -> dict:
 # --- invoice routes (PRD §13) -----------------------------------------------
 
 
+class IntakeSource(BaseModel):
+    """Where an HTTP-submitted item came from.
+
+    Deliberately has no ``attachment_path``: a path makes the server read a file
+    off its own disk, so only trusted in-process inbox adapters may set one
+    (#0002). HTTP clients send the document inline as ``attachment_b64``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    channel: str | None = None
+    message_id: str | None = None
+    subject: str | None = None
+    sender: str | None = None
+    attachment: str | None = None
+    attachment_b64: str | None = None
+    body: dict | str | None = None
+
+
+class IntakeSample(BaseModel):
+    """An item submitted over HTTP: ``source`` plus a structured ``document``
+    and/or an email ``body`` (the shape ``orchestrator.process`` consumes)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source: IntakeSource = IntakeSource()
+    document: dict | None = None
+    body: dict | str | None = None
+
+
+def _decoded_size(b64: str) -> int:
+    return len(b64) * 3 // 4
+
+
 @app.post("/api/invoices/process")
-def process_invoice(sample: dict, repo: RepoDep, clients: ClientsDep) -> dict:
+def process_invoice(sample: IntakeSample, repo: RepoDep, clients: ClientsDep) -> dict:
     """Run a sample invoice through the AI pipeline and return its outcome."""
-    invoice = process(sample, repo, **clients)
+    b64 = sample.source.attachment_b64
+    if b64 and _decoded_size(b64) > MAX_ATTACHMENT_BYTES:
+        raise HTTPException(status_code=413, detail="attachment too large")
+    invoice = process(sample.model_dump(exclude_none=True), repo, **clients)
     return _summary(invoice, repo)
 
 

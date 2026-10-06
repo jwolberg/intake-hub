@@ -140,10 +140,64 @@ def test_detail_404_for_unknown_invoice(client):
 _PDF = SAMPLES / "pdf" / "inv_clean_001.pdf"
 
 
+def _attach_inline_pdf(sample: dict) -> None:
+    """Attach the committed PDF the only way HTTP clients can: inline base64."""
+    import base64
+
+    sample["source"]["attachment"] = _PDF.name
+    sample["source"]["attachment_b64"] = base64.b64encode(_PDF.read_bytes()).decode()
+
+
+def test_attachment_path_from_request_is_rejected(client, tmp_path):
+    # A caller must never be able to make the server read a file off its own disk
+    # (the old /process trusted source.attachment_path and served it back).
+    secret = tmp_path / "secret.pdf"
+    secret.write_bytes(_PDF.read_bytes())
+    sample = _sample(POSTS)
+    sample["source"]["attachment"] = "secret.pdf"
+    sample["source"]["attachment_path"] = str(secret)
+
+    resp = client.post("/api/invoices/process", json=sample)
+
+    assert resp.status_code == 422
+    assert client.get("/api/invoices").json() == []
+
+
+def test_unknown_top_level_sample_field_is_rejected(client):
+    sample = _sample(POSTS)
+    sample["unexpected"] = True
+    assert client.post("/api/invoices/process", json=sample).status_code == 422
+
+
+def test_oversized_inline_attachment_is_rejected(client, monkeypatch):
+    import backend.api.main as api
+
+    monkeypatch.setattr(api, "MAX_ATTACHMENT_BYTES", 1024)
+    sample = _sample(POSTS)
+    _attach_inline_pdf(sample)  # the sample PDF is > 1 KiB
+
+    resp = client.post("/api/invoices/process", json=sample)
+
+    assert resp.status_code == 413
+    assert client.get("/api/invoices").json() == []
+
+
+def test_oversized_request_body_is_rejected_before_parsing(client, monkeypatch):
+    import backend.api.main as api
+
+    monkeypatch.setattr(api, "MAX_REQUEST_BYTES", 1024)
+    resp = client.post(
+        "/api/invoices/process",
+        content=b"{" + b" " * 4096 + b"}",
+        headers={"Content-Type": "application/json"},
+    )
+    assert resp.status_code == 413
+
+
 def test_pages_and_image_for_rasterizable_source(client):
     # Attach the committed PDF so the page-image endpoints have a source to render.
     sample = _sample(POSTS)
-    sample["source"]["attachment_path"] = str(_PDF)
+    _attach_inline_pdf(sample)
     invoice_id = client.post("/api/invoices/process", json=sample).json()["id"]
 
     pages = client.get(f"/api/invoices/{invoice_id}/pages").json()
@@ -173,7 +227,7 @@ def test_pages_empty_for_body_only_invoice(client):
 
 def test_source_pdf_served_and_flagged_for_pdf_invoice(client):
     sample = _sample(POSTS)
-    sample["source"]["attachment_path"] = str(_PDF)
+    _attach_inline_pdf(sample)
     invoice_id = client.post("/api/invoices/process", json=sample).json()["id"]
 
     detail = client.get(f"/api/invoices/{invoice_id}").json()
@@ -257,7 +311,7 @@ def test_detail_exposes_pages_and_resolved_citations(client):
     # The controlled PDF extracts via the offline layout stand-in, so the detail
     # payload carries page rasters + source-anchored highlight boxes.
     sample = _sample(POSTS)
-    sample["source"]["attachment_path"] = str(_PDF)
+    _attach_inline_pdf(sample)
     invoice_id = client.post("/api/invoices/process", json=sample).json()["id"]
 
     detail = client.get(f"/api/invoices/{invoice_id}").json()
@@ -395,7 +449,7 @@ def test_rerun_unknown_invoice_404(client):
 
 def test_confirm_citation_records_human_event(client):
     sample = _sample(POSTS)
-    sample["source"]["attachment_path"] = str(_PDF)
+    _attach_inline_pdf(sample)
     invoice_id = client.post("/api/invoices/process", json=sample).json()["id"]
 
     resp = client.post(

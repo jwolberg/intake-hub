@@ -19,10 +19,9 @@ curl -X POST http://localhost:8000/api/invoices/process \
   -H 'Content-Type: application/json' --data @samples/inv_clean_001.json
 ```
 
-`seed_hub` renders the samples to real PDFs and posts them. The dev-only
-`docker-compose.override.yml` (auto-loaded) mounts `samples/` into the `api`
-container at the host path so the container can read those PDFs — run both
-`docker compose` and `seed_hub` from the repo root so `$PWD` matches. Seeded
+`seed_hub` renders the samples to real PDFs and posts them inline (base64) —
+the API never reads a file path supplied by an HTTP client, so no volume mount
+is needed. Seeded
 data persists in the `db_data` volume, so after a reboot just `docker compose
 up -d` (no re-seed needed). This path is offline (no key); export
 `ANTHROPIC_API_KEY` before `up` to use the real provider instead.

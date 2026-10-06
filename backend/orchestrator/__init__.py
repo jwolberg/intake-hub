@@ -46,7 +46,7 @@ from backend.ledger_integrity import find_duplicate, posted_items
 from backend.ocr import OCRClient
 from backend.parser import parse
 from backend.parser.pdf import LayoutLLMClient
-from backend.parser.raster import is_rasterizable, render_pages
+from backend.parser.raster import is_rasterizable, render_pages, render_pdf_bytes
 
 
 def _advance(repo: Repository, invoice: Invoice, status: InvoiceStatus) -> None:
@@ -104,14 +104,22 @@ def _attach_citations(
     resolves the indices to highlight boxes (P4-T4). Citations are additive: any
     render/OCR failure leaves the extraction untouched rather than failing the
     invoice. Invoices with no rasterizable source (e.g. email-body) get none.
+
+    The source is a trusted local path (inbox adapters) or an inline PDF
+    (``attachment_b64`` — every HTTP submission, Gmail, the cloud).
     """
     path = source.get("attachment_path")
-    if not path or not is_rasterizable(path):
-        return extraction
     try:
-        pages = render_pages(path)
-        words = ocr.extract_words(path, pages)
-    except (FileNotFoundError, ValueError, RuntimeError):
+        if path and is_rasterizable(path):
+            pages = render_pages(path)
+            words = ocr.extract_words(path, pages)
+        elif _is_real_pdf(source) and source.get("attachment_b64"):
+            data = base64.b64decode(source["attachment_b64"])
+            pages = render_pdf_bytes(data)
+            words = ocr.extract_words(data, pages)
+        else:
+            return extraction
+    except (FileNotFoundError, ValueError, RuntimeError, binascii.Error):
         return extraction
     if not words:
         return extraction

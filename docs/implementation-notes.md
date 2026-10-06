@@ -2200,3 +2200,20 @@ plain pip (#0008; consistent with the "keep pip + requirements files" prior).
   locally, so CI is where image builds get verified). Workflow validated as YAML only;
   actionlint isn't installed and it hasn't run on GitHub yet.
 - Locally verified against a throwaway Postgres 17: 251 passed, 0 skipped.
+
+### #0002 — client-supplied attachment_path no longer trusted
+- `/api/invoices/process` now takes a strict `IntakeSample` model (`extra="forbid"`) with no
+  `attachment_path`; sending one is a 422 and nothing is stored. Verified the original
+  exploit request now returns 422 with 0 items stored.
+- Size limits: a decoded `attachment_b64` over 20 MiB → 413; any request whose
+  `Content-Length` exceeds 28 MiB → 413 before the body is read. *Tradeoff:* a chunked
+  request without `Content-Length` isn't caught by the middleware (the attachment check still
+  bounds what gets processed; Cloud Run also caps requests at 32 MiB).
+- **Deviation (scope):** inline-base64 PDFs previously got no highlight citations —
+  `_attach_citations` only worked from a local path, so Gmail/cloud PDFs never had overlays.
+  Since every HTTP submission is now inline, `seed_hub` would have lost the overlay too, so
+  `StubOCRClient.extract_words` (and the `OCRClient` protocol) now also accepts PDF bytes.
+- `seed_hub` posts PDFs inline like `seed_cloud`; `docker-compose.override.yml` (whose only
+  job was mounting host sample paths into the api container) is removed.
+- Note: `seed_hub`/`seed_cloud` regenerate `samples/pdf/*.pdf` on every run — that's why
+  those files showed as modified in the working tree before this branch. Left untouched.
