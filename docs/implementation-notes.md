@@ -2184,3 +2184,19 @@ plain pip (#0008; consistent with the "keep pip + requirements files" prior).
 - Ruff `UP042` (`str, Enum` → `StrEnum`) ignored: it changes `str(member)` output, so it's a
   behavior change, not a lint fix. `UP017` (`datetime.UTC`) applied.
 - Hub images now `COPY package-lock.json` + `npm ci`.
+
+### #0007 — real CI (Python + Postgres, hub build, image builds)
+- **Bug found while wiring Postgres:** `init_schema()` failed on every *fresh* database —
+  `_split_statements` split on `;` before stripping comments, and the `oauth_tokens` comment
+  in `schema.sql` contains `(e.g. 'gmail');`, so a comment fragment was sent as SQL. The
+  Postgres test hid it because it skipped on *any* `SQLAlchemyError`. Fixed the splitter
+  (comments stripped first) with a regression test; a fresh deploy would have booted with no
+  tables. (#0013 replaces startup schema init with migrations anyway.)
+- Shared `tests/integration/conftest.py` `pg_repo` fixture: skips only on an unreachable DB
+  (`OperationalError`), truncates between tests, and `REQUIRE_POSTGRES=1` (set in CI) turns a
+  skip into a failure.
+- CI jobs: backend (ruff check + format check + pytest against a Postgres 16 service), hub
+  (`npm ci && npm run build`), images (docker build of both Dockerfiles — Docker isn't running
+  locally, so CI is where image builds get verified). Workflow validated as YAML only;
+  actionlint isn't installed and it hasn't run on GitHub yet.
+- Locally verified against a throwaway Postgres 17: 251 passed, 0 skipped.

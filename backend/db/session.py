@@ -34,13 +34,14 @@ def init_schema() -> None:
 def _split_statements(sql: str) -> list[str]:
     """Split a SQL script into individual statements on ``;`` boundaries.
 
-    Comment-only fragments are dropped so the driver never receives an empty
-    statement.
+    ``--`` comment lines are stripped *before* splitting, so a ``;`` inside a
+    comment can't cut a statement in half; empty fragments are dropped so the
+    driver never receives an empty statement.
     """
+    lines = [line for line in sql.splitlines() if not line.strip().startswith("--")]
     statements: list[str] = []
-    for chunk in sql.split(";"):
-        lines = [line for line in chunk.splitlines() if not line.strip().startswith("--")]
-        cleaned = "\n".join(lines).strip()
+    for chunk in "\n".join(lines).split(";"):
+        cleaned = chunk.strip()
         if cleaned:
             statements.append(cleaned)
     return statements
