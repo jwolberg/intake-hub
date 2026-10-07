@@ -130,6 +130,8 @@ app.add_middleware(
     allow_origins=list(settings.cors_origins),
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type", "Authorization"],
+    # The hub reads the list total from this header (pagination, #0012).
+    expose_headers=["X-Total-Count"],
 )
 
 

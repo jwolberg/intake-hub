@@ -93,3 +93,15 @@ def test_unreachable_db_fails_fast_instead_of_hanging():
         with engine.connect():
             pass
     assert time.monotonic() - start < 8
+
+
+def test_cors_exposes_the_pagination_total():
+    # Split-origin dev: without this the hub can't read X-Total-Count, so
+    # "Load more" never appears and lists silently stop at one page.
+    api.app.dependency_overrides[api.get_repo] = InMemoryRepository
+    try:
+        resp = TestClient(api.app).get("/api/invoices", headers={"Origin": ORIGIN})
+    finally:
+        api.app.dependency_overrides.clear()
+    assert resp.status_code == 200
+    assert "x-total-count" in resp.headers["access-control-expose-headers"].lower()

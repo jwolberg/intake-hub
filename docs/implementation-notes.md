@@ -2441,3 +2441,8 @@ belongs to.
   - `/docs`, `/redoc`, `/openapi.json` now require auth too (they were public in IAP mode).
   - Hub: a 401 reloaded the page unconditionally, so a persistent 401 looped forever. Now at
     most one reload per 30 s (sessionStorage guard), then a "sign in again" error.
+- **#0012 — `X-Total-Count` wasn't readable cross-origin:** CORS didn't expose it, so in
+  split-origin dev (hub :5173 → API :8000) the hub fell back to `rows.length` and "Load
+  more" never appeared (silently capped at 200). Now in `expose_headers`; same-origin
+  production was unaffected. Not changed: the list stays oldest-first (existing behavior),
+  so with more than 200 items the newest need "Load more" — worth revisiting as a UX call.
