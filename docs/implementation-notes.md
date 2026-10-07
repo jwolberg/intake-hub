@@ -2460,3 +2460,19 @@ belongs to.
   re-entrant and the pool returns the same connection, so the old tests passed even with
   the unlock deleted (the reviewer showed this). They now probe from an independent
   session; mutation-checked — deleting the unlock fails both.
+- **#0016 — two stale docstrings:** `PostgresRepository` (still said the lifespan applies
+  the schema) and `seed_cloud` (contrasted itself with a `seed_hub` path behavior that no
+  longer exists).
+- **Reviewer findings not fixed here** (low; documented):
+  - The migration splitter doesn't handle an inline `-- comment` containing `;` after a
+    statement, `$$` bodies, or `CREATE INDEX CONCURRENTLY` (documented in `migrate.py`).
+  - A chunked request with no `Content-Length` is buffered before the attachment-size check.
+  - A crash between `process()` and `mark_seen()` re-processes that message (at-least-once,
+    by design — see #0005).
+  - `InMemoryRepository.transaction` isn't thread-safe (tests/offline only).
+  - `_attach_citations` still renders the full PDF once at intake (`lru_cache(16)`).
+  - `/ready` is public and reveals db/schema state.
+  - Compose publishes 5432/8000 on all interfaces with the dev password (local only).
+  - **Before redeploy (#0017):** the old prod API was public, so its DB may hold
+    RECEIVED events with attacker-written `attachment_path`s, which the page/PDF endpoints
+    still read. Scrub or ignore those rows before pointing new code at that DB.

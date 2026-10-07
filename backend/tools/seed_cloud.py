@@ -1,12 +1,13 @@
 """Seed a *remote* hub (Cloud Run) with PDF-backed sample invoices (P5-T3).
 
-Unlike ``seed_hub`` — which sets ``source.attachment_path`` to a host file the
-API reads off local disk — this carries the PDF **in the request** as base64
-(``source.attachment_b64``), because Cloud Run cannot read host paths. The API
+Like ``seed_hub``, this carries the PDF **in the request** as base64
+(``source.attachment_b64``) — the API never reads a client-supplied file path
+(#0002), and Cloud Run has no host files anyway. Behind IAP, set ``IAP_TOKEN``
+(docs/DEPLOY.md §7). The API
 persists the bytes (``invoices.source_pdf``), so the deployed hub gets real
 source documents: page-image preview *and* the "Open original PDF" download.
 
-    python -m backend.tools.seed_cloud https://intakehub-api-...run.app
+    python -m backend.tools.seed_cloud https://<domain>
 
 Offline-friendly: the controlled sample PDFs extract via the offline
 ``LayoutLLMClient`` (no API key needed), exactly as the local PDF path does.

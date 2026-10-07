@@ -289,8 +289,9 @@ _INBOX_FETCH_LOCK_KEY = 0x1A7EF37C
 class PostgresRepository:
     """SQLAlchemy-backed repository for the running app.
 
-    Tables are reflected on construction, so the migrations (``backend.db.migrate``) must have
-    run first (the app lifespan does this on startup).
+    Tables are reflected on construction, so the schema migrations
+    (``python -m backend.db.migrate``) must have been applied first — the API no
+    longer does this on startup (#0013).
     """
 
     def __init__(self, engine: Engine) -> None:
