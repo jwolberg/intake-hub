@@ -8,9 +8,28 @@
 export const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
 // An expired IAP session surfaces as 401 on an API call; a full reload sends the
-// browser back through IAP's Google sign-in.
+// browser back through IAP's Google sign-in. Guarded: a 401 that persists after
+// a reload (e.g. misconfigured audience) must not reload the page forever.
+const RELOAD_KEY = "intakehub:auth-reload-at";
+const RELOAD_GUARD_MS = 30_000;
+
 function checkAuth(resp) {
-  if (resp.status === 401) window.location.reload();
+  if (resp.status !== 401) return;
+  let last = 0;
+  try {
+    last = Number(sessionStorage.getItem(RELOAD_KEY) ?? 0);
+  } catch {
+    // storage unavailable: fall through and allow one reload
+  }
+  if (Date.now() - last > RELOAD_GUARD_MS) {
+    try {
+      sessionStorage.setItem(RELOAD_KEY, String(Date.now()));
+    } catch {
+      // ignore
+    }
+    window.location.reload();
+  }
+  throw new Error("Not signed in — reload the page to sign in again.");
 }
 
 // URL of a rendered page raster (1-based) for the Source overlay (P4-T5).

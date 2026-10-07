@@ -27,6 +27,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
+from starlette.concurrency import run_in_threadpool
 
 from backend import corrections
 from backend.api import auth
@@ -82,6 +83,15 @@ MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
 MAX_REQUEST_BYTES = 28 * 1024 * 1024
 
 
+# Paths that require a verified identity: the API plus the generated API docs
+# (they describe every route). /health and /ready stay public for probes.
+_PROTECTED_PREFIXES = ("/api/", "/docs", "/redoc", "/openapi.json")
+
+
+def _is_protected(path: str) -> bool:
+    return path.startswith(_PROTECTED_PREFIXES)
+
+
 @app.middleware("http")
 async def require_auth(request: Request, call_next):
     """Every ``/api/*`` route requires a verified IAP identity (#0001).
@@ -89,9 +99,12 @@ async def require_auth(request: Request, call_next):
     A middleware rather than per-route dependencies so a new route can't be added
     unauthenticated by forgetting a ``Depends``. ``/health`` stays public.
     """
-    if request.url.path.startswith("/api/"):
+    if _is_protected(request.url.path):
         try:
-            request.state.user = auth.authenticate(request.headers, settings)
+            # Off the event loop: key fetches are blocking network I/O.
+            request.state.user = await run_in_threadpool(
+                auth.authenticate, request.headers, settings
+            )
         except auth.AuthError:
             return JSONResponse(status_code=401, content={"detail": "not authenticated"})
         except auth.CertsUnavailable:

@@ -2431,3 +2431,13 @@ belongs to.
 - **#0015 — `/health` hung ~75 s on a black-holed DB** (the reviewer measured it with an
   unroutable host): no connect timeout. The engine now sets `connect_timeout=5` and
   `pool_timeout=5`; a test asserts an unroutable host fails in under 8 s.
+- **#0001 — auth hardening from review:**
+  - Token verification ran *on the event loop*, so a slow gstatic key fetch stalled every
+    request, `/health` included (the reviewer measured 2.9 s). It now runs in the
+    threadpool; a test checks that `/health` answers within 1 s while a key fetch takes 1.5 s.
+  - Key cache: stale keys keep working if the endpoint is down; with no keys, a failure is
+    remembered for 30 s (no per-request network storm); a token naming an unknown key id
+    forces one refetch (key rotation), rate-limited to once a minute.
+  - `/docs`, `/redoc`, `/openapi.json` now require auth too (they were public in IAP mode).
+  - Hub: a 401 reloaded the page unconditionally, so a persistent 401 looped forever. Now at
+    most one reload per 30 s (sessionStorage guard), then a "sign in again" error.

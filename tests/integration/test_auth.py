@@ -183,3 +183,129 @@ def test_cors_preflight_is_answered_before_auth(iap_client):
     )
     assert resp.status_code == 200
     assert resp.headers["access-control-allow-origin"] == "http://localhost:5173"
+
+
+# --- review follow-ups ------------------------------------------------------
+
+
+@pytest.mark.parametrize("path", ["/docs", "/redoc", "/openapi.json"])
+def test_api_docs_require_auth(iap_client, path):
+    assert iap_client.get(path).status_code == 401
+
+
+def test_slow_key_fetch_does_not_block_other_requests(monkeypatch, keypair):
+    # Verification runs off the event loop: while one request waits on IAP's key
+    # endpoint, an unrelated /health still answers immediately.
+    import asyncio
+
+    import httpx
+
+    signer, certs = keypair
+    monkeypatch.setattr(
+        api, "settings", dataclasses.replace(api.settings, auth_mode="iap", iap_audience=AUDIENCE)
+    )
+
+    def slow_certs():
+        time.sleep(1.5)
+        return certs
+
+    monkeypatch.setattr(auth, "_fetch_certs", slow_certs)
+
+    async def run():
+        transport = httpx.ASGITransport(app=api.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as client:
+            slow = asyncio.create_task(
+                client.get("/api/invoices", headers={auth.IAP_HEADER: _token(signer)})
+            )
+            await asyncio.sleep(0.1)
+            start = time.monotonic()
+            health = await client.get("/health")
+            elapsed = time.monotonic() - start
+            await slow
+            return health.status_code, elapsed
+
+    status, elapsed = asyncio.run(run())
+    assert status == 200
+    assert elapsed < 1.0
+
+
+@pytest.fixture
+def fresh_cache(monkeypatch):
+    monkeypatch.setattr(
+        auth,
+        "_certs_cache",
+        {"certs": None, "fetched_at": 0.0, "failed_at": None, "forced_at": None},
+    )
+
+
+def test_unknown_key_id_triggers_one_refetch(keypair, monkeypatch, fresh_cache):
+    # IAP rotated its keys: a token signed with a kid we haven't cached yet must
+    # verify after a refetch, not 401 until the hourly cache expiry.
+    signer, certs = keypair
+    responses = [{"old-kid": "unused"}, certs]
+    calls = []
+
+    def fake_get(url, timeout):
+        calls.append(url)
+        return _FakeResp(responses[min(len(calls) - 1, 1)])
+
+    monkeypatch.setattr(auth.httpx, "get", fake_get)
+    auth._fetch_certs()  # warm the cache with the pre-rotation keys
+
+    assert auth.verify_iap_assertion(_token(signer), AUDIENCE) == "jay@example.com"
+    assert len(calls) == 2
+
+
+def test_unknown_key_ids_cannot_force_a_refetch_per_request(keypair, monkeypatch, fresh_cache):
+    # Garbage tokens naming random kids must not turn into a gstatic request each.
+    signer, certs = keypair
+    calls = []
+
+    def fake_get(url, timeout):
+        calls.append(url)
+        return _FakeResp({"some-other-kid": "unused"})
+
+    monkeypatch.setattr(auth.httpx, "get", fake_get)
+    auth._fetch_certs()
+    for _ in range(5):
+        with pytest.raises(auth.AuthError):
+            auth.verify_iap_assertion(_token(signer), AUDIENCE)
+    assert len(calls) == 2  # the warm fetch + one rate-limited forced refetch
+
+
+def test_stale_keys_are_used_when_the_key_endpoint_is_down(keypair, monkeypatch, fresh_cache):
+    signer, certs = keypair
+    monkeypatch.setattr(auth.httpx, "get", lambda url, timeout: _FakeResp(certs))
+    auth._fetch_certs()
+    auth._certs_cache["fetched_at"] -= 10 * 3600  # expired
+
+    def down(url, timeout):
+        raise auth.httpx.ConnectError("gstatic down")
+
+    monkeypatch.setattr(auth.httpx, "get", down)
+    assert auth.verify_iap_assertion(_token(signer), AUDIENCE) == "jay@example.com"
+
+
+def test_key_fetch_failure_without_cached_keys_fails_fast_afterwards(monkeypatch, fresh_cache):
+    calls = []
+
+    def down(url, timeout):
+        calls.append(url)
+        raise auth.httpx.ConnectError("gstatic down")
+
+    monkeypatch.setattr(auth.httpx, "get", down)
+    for _ in range(3):
+        with pytest.raises(auth.CertsUnavailable):
+            auth._fetch_certs()
+    assert len(calls) == 1  # failures are remembered briefly; no request storm
+
+
+class _FakeResp:
+    def __init__(self, body):
+        self._body = body
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return self._body
