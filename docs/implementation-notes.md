@@ -2348,3 +2348,22 @@ plain pip (#0008; consistent with the "keep pip + requirements files" prior).
     Removing them changes extraction/categorization results, so that's filed as follow-up
     **#0018**.
 - The `invoice` → `item` domain rename stays out of scope (breaking: table + API paths).
+
+### #0012 — N+1 queries, pagination, lazy page renders
+- Measured before fixing (Postgres): `/api/invoices` made 7 queries for 3 items and 25 for
+  12; `/api/review-queue` 7 → 34; `/api/notifications` 3 → 12. Now constant, using batch
+  reads `get_exceptions_by_invoice` / `get_audit_by_invoice` (the list loads only CORRECTED
+  events, which are all the metadata overlay needs). `/api/metrics` batched the same way.
+- `list_invoices` / `get_invoice` no longer `SELECT *` — they used to pull every stored
+  PDF blob and the source text on each list request. A test asserts no list query touches
+  those columns.
+- `/api/invoices` takes `limit` (default 200, max 1000) and `offset`, applied *after* the
+  filter, with the filtered total in `X-Total-Count`. The body is still a list, so existing
+  callers are unaffected. The hub shows "Load more". **Tradeoff:** filtering and tags are
+  still computed in Python over all items (now in 3 queries); filter-chip counts in the
+  hub cover loaded rows only (labeled). SQL-side filtering would need the tag logic in
+  SQL — not worth it at this scale.
+- Pages: detail and `/pages` read page geometry only (no rasterization). Computed dims
+  matched `get_pixmap` output exactly on the sample PDFs and an odd-sized page. An image
+  request renders just its page, cached in a 32-entry LRU keyed by item id + page (a stored
+  PDF never changes after intake) or path + mtime + page.

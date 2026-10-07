@@ -88,8 +88,10 @@ def compute_metrics(repo: Repository) -> WorkflowMetrics:
     holds_reviewed = 0
     holds_confirmed = 0
 
+    # One read for every item's trail (#0012), not one per item.
+    audit_by = repo.get_audit_by_invoice([inv.id for inv in invoices])
     for inv in invoices:
-        audit = repo.get_audit(inv.id)
+        audit = audit_by.get(inv.id, [])
         first = _first_decision(audit)
         human = {e.action for e in audit if e.actor is Actor.HUMAN}
         if first is AuditAction.POSTED:

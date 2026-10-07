@@ -90,15 +90,85 @@ def _render_cached_bytes(data: bytes, dpi: int) -> tuple[RenderedPage, ...]:
 
 
 def _render_doc(doc, dpi: int) -> tuple[RenderedPage, ...]:
-    pages: list[RenderedPage] = []
+    return tuple(_rasterize(page, number, dpi) for number, page in enumerate(doc, start=1))
+
+
+def _rasterize(page, number: int, dpi: int) -> RenderedPage:
+    """Render one page — the only expensive step (the tests count calls to it)."""
+    pixmap = page.get_pixmap(dpi=dpi)
+    return RenderedPage(
+        page_number=number,
+        width=pixmap.width,
+        height=pixmap.height,
+        image_png=pixmap.tobytes("png"),
+    )
+
+
+# --- lazy per-page access (#0012) --------------------------------------------
+# The detail view needs only page sizes, and an image request only its own page,
+# so neither should rasterize the whole document.
+
+
+@dataclass(frozen=True)
+class PageDims:
+    """A page's 1-based number and the pixel size it renders to at ``dpi``."""
+
+    page_number: int
+    width: int
+    height: int
+
+
+def _dims(doc, dpi: int) -> list[PageDims]:
+    import fitz
+
+    zoom = fitz.Matrix(dpi / 72, dpi / 72)
+    out = []
     for number, page in enumerate(doc, start=1):
-        pixmap = page.get_pixmap(dpi=dpi)
-        pages.append(
-            RenderedPage(
-                page_number=number,
-                width=pixmap.width,
-                height=pixmap.height,
-                image_png=pixmap.tobytes("png"),
-            )
-        )
-    return tuple(pages)
+        box = (page.rect * zoom).irect  # the same bbox get_pixmap(dpi=) renders
+        out.append(PageDims(page_number=number, width=box.width, height=box.height))
+    return out
+
+
+def _open_bytes(data: bytes):
+    import fitz  # lazy: only the rasterization path pulls in PyMuPDF
+
+    return fitz.open(stream=data, filetype="pdf")
+
+
+def _open_path(source):
+    import fitz
+
+    path = pathlib.Path(source)
+    if not path.is_file():
+        raise FileNotFoundError(source)
+    if not is_rasterizable(path):
+        raise ValueError(f"unsupported source format: {path.suffix!r}")
+    return fitz.open(path)
+
+
+def pdf_page_dims(data: bytes, *, dpi: int = RENDER_DPI) -> list[PageDims]:
+    """Page sizes of an in-memory PDF without rasterizing anything."""
+    with _open_bytes(data) as doc:
+        return _dims(doc, dpi)
+
+
+def page_dims(source, *, dpi: int = RENDER_DPI) -> list[PageDims]:
+    """Page sizes of a PDF/image file without rasterizing anything."""
+    with _open_path(source) as doc:
+        return _dims(doc, dpi)
+
+
+def render_pdf_page(data: bytes, page_number: int, *, dpi: int = RENDER_DPI) -> RenderedPage | None:
+    """Rasterize one 1-based page of an in-memory PDF; ``None`` if out of range."""
+    with _open_bytes(data) as doc:
+        if not 1 <= page_number <= doc.page_count:
+            return None
+        return _rasterize(doc[page_number - 1], page_number, dpi)
+
+
+def render_page(source, page_number: int, *, dpi: int = RENDER_DPI) -> RenderedPage | None:
+    """Rasterize one 1-based page of a PDF/image file; ``None`` if out of range."""
+    with _open_path(source) as doc:
+        if not 1 <= page_number <= doc.page_count:
+            return None
+        return _rasterize(doc[page_number - 1], page_number, dpi)

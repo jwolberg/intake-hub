@@ -21,7 +21,7 @@ function pct(value) {
   return value == null ? "—" : `${Math.round(value * 100)}%`;
 }
 
-export default function InvoiceList({ invoices, onSelect }) {
+export default function InvoiceList({ invoices, total, onLoadMore, onSelect }) {
   const [active, setActive] = useState(null);
 
   if (invoices.length === 0) {
@@ -104,6 +104,14 @@ export default function InvoiceList({ invoices, onSelect }) {
             ))}
           </tbody>
         </table>
+      )}
+      {total > invoices.length && (
+        <p className="muted small">
+          Showing {invoices.length} of {total} (filter counts cover loaded rows){" "}
+          <button className="small-btn" onClick={onLoadMore}>
+            Load more
+          </button>
+        </p>
       )}
     </div>
   );

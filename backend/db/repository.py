@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import copy
 import threading
-from collections.abc import Iterator, Mapping
+from collections.abc import Collection, Iterator, Mapping
 from contextlib import AbstractContextManager, contextmanager
 from contextvars import ContextVar
 from functools import lru_cache
@@ -51,6 +51,19 @@ class Repository(Protocol):
     def clear_exceptions(self, invoice_id: str) -> None: ...
     def append_audit(self, event: AuditEvent) -> None: ...
     def get_audit(self, invoice_id: str) -> list[AuditEvent]: ...
+    def get_exceptions_by_invoice(
+        self, invoice_ids: Collection[str]
+    ) -> dict[str, list[ExceptionRecord]]:
+        """Exceptions for many items in one read (#0012); missing ids → no key."""
+        ...
+
+    def get_audit_by_invoice(
+        self, invoice_ids: Collection[str], actions: Collection[AuditAction] | None = None
+    ) -> dict[str, list[AuditEvent]]:
+        """Chronological audit events for many items in one read, optionally only
+        the given actions (#0012); missing ids → no key."""
+        ...
+
     def get_detail(self, invoice_id: str) -> dict | None: ...
     def is_seen(self, message_id: str) -> bool: ...
     def mark_seen(self, message_id: str) -> None: ...
@@ -165,6 +178,21 @@ class InMemoryRepository:
     def get_audit(self, invoice_id: str) -> list[AuditEvent]:
         return [e.model_copy(deep=True) for e in self._audit.get(invoice_id, [])]
 
+    def get_exceptions_by_invoice(
+        self, invoice_ids: Collection[str]
+    ) -> dict[str, list[ExceptionRecord]]:
+        return {i: self.get_exceptions(i) for i in invoice_ids if self._exceptions.get(i)}
+
+    def get_audit_by_invoice(
+        self, invoice_ids: Collection[str], actions: Collection[AuditAction] | None = None
+    ) -> dict[str, list[AuditEvent]]:
+        out: dict[str, list[AuditEvent]] = {}
+        for i in invoice_ids:
+            events = [e for e in self.get_audit(i) if actions is None or e.action in actions]
+            if events:
+                out[i] = events
+        return out
+
     def get_detail(self, invoice_id: str) -> dict | None:
         invoice = self.get_invoice(invoice_id)
         if invoice is None:
@@ -232,6 +260,28 @@ def _to_invoice(m: Mapping) -> Invoice:
     )
 
 
+def _to_exception(m: Mapping) -> ExceptionRecord:
+    return ExceptionRecord(
+        id=m["id"],
+        invoice_id=m["invoice_id"],
+        type=m["type"],
+        severity=Severity(m["severity"]),
+        message=m["message"],
+        created_at=m["created_at"],
+    )
+
+
+def _to_audit(m: Mapping) -> AuditEvent:
+    return AuditEvent(
+        id=m["id"],
+        invoice_id=m["invoice_id"],
+        actor=Actor(m["actor"]),
+        action=AuditAction(m["action"]),
+        details=m["details"],
+        timestamp=m["timestamp"],
+    )
+
+
 # Arbitrary, stable advisory-lock id for "an inbox fetch is running".
 _INBOX_FETCH_LOCK_KEY = 0x1A7EF37C
 
@@ -256,6 +306,12 @@ class PostgresRepository:
         self.gmail_sync_state = Table("gmail_sync_state", md, autoload_with=engine)
         # The connection of the transaction active in this context, if any.
         self._tx: ContextVar = ContextVar(f"pg_tx_{id(self)}", default=None)
+
+    def _summary_columns(self):
+        """Every invoices column except the heavy blobs (#0012: list reads must not
+        pull each stored PDF and its source text)."""
+        heavy = {"source_pdf", "source_text"}
+        return [c for c in self.invoices.c if c.name not in heavy]
 
     @contextmanager
     def transaction(self) -> Iterator[None]:
@@ -326,7 +382,9 @@ class PostgresRepository:
     def get_invoice(self, invoice_id: str) -> Invoice | None:
         with self._connect() as conn:
             row = (
-                conn.execute(select(self.invoices).where(self.invoices.c.id == invoice_id))
+                conn.execute(
+                    select(*self._summary_columns()).where(self.invoices.c.id == invoice_id)
+                )
                 .mappings()
                 .first()
             )
@@ -335,7 +393,7 @@ class PostgresRepository:
     def list_invoices(self) -> list[Invoice]:
         with self._connect() as conn:
             rows = (
-                conn.execute(select(self.invoices).order_by(self.invoices.c.created_at))
+                conn.execute(select(*self._summary_columns()).order_by(self.invoices.c.created_at))
                 .mappings()
                 .all()
             )
@@ -427,17 +485,27 @@ class PostgresRepository:
                 .mappings()
                 .all()
             )
-        return [
-            ExceptionRecord(
-                id=r["id"],
-                invoice_id=r["invoice_id"],
-                type=r["type"],
-                severity=Severity(r["severity"]),
-                message=r["message"],
-                created_at=r["created_at"],
+        return [_to_exception(r) for r in rows]
+
+    def get_exceptions_by_invoice(
+        self, invoice_ids: Collection[str]
+    ) -> dict[str, list[ExceptionRecord]]:
+        if not invoice_ids:
+            return {}
+        with self._connect() as conn:
+            rows = (
+                conn.execute(
+                    select(self.exceptions)
+                    .where(self.exceptions.c.invoice_id.in_(list(invoice_ids)))
+                    .order_by(self.exceptions.c.created_at)
+                )
+                .mappings()
+                .all()
             )
-            for r in rows
-        ]
+        out: dict[str, list[ExceptionRecord]] = {}
+        for r in rows:
+            out.setdefault(r["invoice_id"], []).append(_to_exception(r))
+        return out
 
     def append_audit(self, event: AuditEvent) -> None:
         with self._begin() as conn:
@@ -464,17 +532,24 @@ class PostgresRepository:
                 .mappings()
                 .all()
             )
-        return [
-            AuditEvent(
-                id=r["id"],
-                invoice_id=r["invoice_id"],
-                actor=Actor(r["actor"]),
-                action=AuditAction(r["action"]),
-                details=r["details"],
-                timestamp=r["timestamp"],
-            )
-            for r in rows
-        ]
+        return [_to_audit(r) for r in rows]
+
+    def get_audit_by_invoice(
+        self, invoice_ids: Collection[str], actions: Collection[AuditAction] | None = None
+    ) -> dict[str, list[AuditEvent]]:
+        if not invoice_ids:
+            return {}
+        query = select(self.audit_events).where(
+            self.audit_events.c.invoice_id.in_(list(invoice_ids))
+        )
+        if actions is not None:
+            query = query.where(self.audit_events.c.action.in_([a.value for a in actions]))
+        with self._connect() as conn:
+            rows = conn.execute(query.order_by(self.audit_events.c.timestamp)).mappings().all()
+        out: dict[str, list[AuditEvent]] = {}
+        for r in rows:
+            out.setdefault(r["invoice_id"], []).append(_to_audit(r))
+        return out
 
     def get_detail(self, invoice_id: str) -> dict | None:
         invoice = self.get_invoice(invoice_id)

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import pathlib
+from collections import OrderedDict
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Annotated
@@ -38,10 +39,12 @@ from backend.inbox import InboxClient, get_inbox_client, message_to_sample
 from backend.ledger_integrity import posted_items, sample_posted
 from backend.orchestrator import process, recover, rerun
 from backend.parser.raster import (
-    RenderedPage,
+    PageDims,
     is_rasterizable,
-    render_pages,
-    render_pdf_bytes,
+    page_dims,
+    pdf_page_dims,
+    render_page,
+    render_pdf_page,
 )
 
 logger = logging.getLogger("intakehub.api")
@@ -203,12 +206,27 @@ def _filter_tags(invoice, exceptions) -> list[str]:
     return sorted(tags)
 
 
+def _summaries(invoices: list, repo: Repository) -> list[dict]:
+    """List-row views for many invoices in a constant number of reads (#0012)."""
+    ids = [inv.id for inv in invoices]
+    exceptions_by = repo.get_exceptions_by_invoice(ids)
+    # Only CORRECTED events feed the metadata overlay, so only those are loaded.
+    corrections_by = repo.get_audit_by_invoice(ids, actions={AuditAction.CORRECTED})
+    return [
+        _summary_row(inv, exceptions_by.get(inv.id, []), corrections_by.get(inv.id, []))
+        for inv in invoices
+    ]
+
+
 def _summary(invoice, repo: Repository) -> dict:
-    """List-row view of an invoice (the reviewer hub's list)."""
-    exceptions = repo.get_exceptions(invoice.id)
+    """List-row view of one invoice."""
+    return _summaries([invoice], repo)[0]
+
+
+def _summary_row(invoice, exceptions, audit) -> dict:
     # Reflect human metadata corrections in the listed fields (R10) without mutating
     # the AI output: apply the overlay from the audit trail.
-    meta = corrections.effective_metadata(invoice.metadata, repo.get_audit(invoice.id))
+    meta = corrections.effective_metadata(invoice.metadata, audit)
     total = meta.total_amount
     return {
         "id": invoice.id,
@@ -313,15 +331,23 @@ def fetch_inbox(repo: RepoDep, clients: ClientsDep, inbox: InboxDep) -> dict:
 @app.get("/api/invoices")
 def list_invoices(
     repo: RepoDep,
+    response: Response,
     filter: str | None = Query(default=None, description="One of FILTER_KEYS; omit for all."),
+    limit: int = Query(default=200, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
 ) -> list[dict]:
-    """List invoices, optionally narrowed to one triage filter (PRD §10)."""
-    rows = [_summary(inv, repo) for inv in repo.list_invoices()]
-    if filter is None:
-        return rows
-    if filter not in FILTER_KEYS:
+    """List invoices, optionally narrowed to one triage filter (PRD §10).
+
+    Paginated (#0012): ``limit``/``offset`` over the filtered rows, with the full
+    filtered count in ``X-Total-Count``.
+    """
+    if filter is not None and filter not in FILTER_KEYS:
         raise HTTPException(status_code=422, detail=f"unknown filter '{filter}'")
-    return [row for row in rows if filter in row["filter_tags"]]
+    rows = _summaries(repo.list_invoices(), repo)
+    if filter is not None:
+        rows = [row for row in rows if filter in row["filter_tags"]]
+    response.headers["X-Total-Count"] = str(len(rows))
+    return rows[offset : offset + limit]
 
 
 @app.get("/api/review-queue")
@@ -333,13 +359,14 @@ def review_queue(repo: RepoDep) -> list[dict]:
     held and work the oldest first.
     """
     held = [inv for inv in repo.list_invoices() if inv.status is InvoiceStatus.HELD]
+    exceptions_by = repo.get_exceptions_by_invoice([inv.id for inv in held])
     rows = []
-    for inv in held:
-        exceptions = repo.get_exceptions(inv.id)
+    for inv, summary in zip(held, _summaries(held, repo), strict=True):
+        exceptions = exceptions_by.get(inv.id, [])
         primary = exceptions[0] if exceptions else None
         rows.append(
             {
-                **_summary(inv, repo),
+                **summary,
                 "reason": primary.type if primary else None,
                 "reason_title": primary.message if primary else None,
             }
@@ -367,8 +394,8 @@ def notifications(repo: RepoDep) -> dict:
     """
     held = [i for i in repo.list_invoices() if i.status is InvoiceStatus.HELD]
     by_reason: dict[str, int] = {}
-    for inv in held:
-        for exc in repo.get_exceptions(inv.id):
+    for exceptions in repo.get_exceptions_by_invoice([i.id for i in held]).values():
+        for exc in exceptions:
             by_reason[exc.type] = by_reason.get(exc.type, 0) + 1
     return {"held_count": len(held), "by_reason": by_reason}
 
@@ -473,7 +500,7 @@ def _build_detail(invoice_id: str, repo: Repository) -> dict | None:
     # rasterizable source or the extractor found no anchored values.
     detail["pages"] = [
         {"page_number": p.page_number, "width": p.width, "height": p.height}
-        for p in _rendered_pages(invoice_id, repo)
+        for p in _page_dims(invoice_id, repo)
     ]
     detail["citations"] = extracted.get("citations", [])
     # QC actions the current status allows (#0003), so the hub hides the rest.
@@ -510,27 +537,58 @@ def _source_image_path(invoice_id: str, repo: Repository) -> str | None:
     return path
 
 
-def _rendered_pages(invoice_id: str, repo: Repository) -> list[RenderedPage]:
-    """Render the invoice's source pages, or [] when there is nothing to render.
+def _page_dims(invoice_id: str, repo: Repository) -> list[PageDims]:
+    """Page sizes of the invoice's source, or [] when there is nothing to render.
 
-    Prefers the persisted PDF blob (works on Cloud Run, which has no local file),
-    falling back to rasterizing the recorded file path (dev, and image sources).
+    Reads page geometry only — no rasterization (#0012). Prefers the persisted PDF
+    blob (works on Cloud Run, which has no local file), falling back to the
+    recorded file path (dev, and image sources).
     """
     _get_invoice_or_404(invoice_id, repo)
     pdf = repo.get_source_pdf(invoice_id)
-    if pdf:
-        try:
-            return render_pdf_bytes(pdf)
-        except (ValueError, RuntimeError):
-            return []
-    path = _source_image_path(invoice_id, repo)
-    if path is None:
-        return []
     try:
-        return render_pages(path)
-    except (FileNotFoundError, ValueError):
+        if pdf:
+            return pdf_page_dims(pdf)
+        path = _source_image_path(invoice_id, repo)
+        return page_dims(path) if path else []
+    except (FileNotFoundError, ValueError, RuntimeError):
         # Source recorded but unreadable/unsupported: no preview, not a crash.
         return []
+
+
+# Rendered page PNGs, LRU by (source key, page). A stored PDF never changes after
+# intake, so the item id is its key; a file source keys on path + mtime.
+_PAGE_CACHE: OrderedDict[tuple, bytes] = OrderedDict()
+_PAGE_CACHE_SIZE = 32
+
+
+def _page_png(invoice_id: str, page_number: int, repo: Repository) -> bytes | None:
+    _get_invoice_or_404(invoice_id, repo)
+    key = ("pdf", invoice_id, page_number)
+    if key in _PAGE_CACHE:
+        _PAGE_CACHE.move_to_end(key)
+        return _PAGE_CACHE[key]
+    pdf = repo.get_source_pdf(invoice_id)
+    try:
+        if pdf:
+            page = render_pdf_page(pdf, page_number)
+        else:
+            path = _source_image_path(invoice_id, repo)
+            if path is None:
+                return None
+            key = ("path", path, pathlib.Path(path).stat().st_mtime_ns, page_number)
+            if key in _PAGE_CACHE:
+                _PAGE_CACHE.move_to_end(key)
+                return _PAGE_CACHE[key]
+            page = render_page(path, page_number)
+    except (FileNotFoundError, ValueError, RuntimeError):
+        return None
+    if page is None:
+        return None
+    _PAGE_CACHE[key] = page.image_png
+    while len(_PAGE_CACHE) > _PAGE_CACHE_SIZE:
+        _PAGE_CACHE.popitem(last=False)
+    return page.image_png
 
 
 @app.get("/api/invoices/{invoice_id}/pages")
@@ -538,18 +596,17 @@ def list_pages(invoice_id: str, repo: RepoDep) -> list[dict]:
     """Page count + raster dimensions for the invoice's source (PRD §10)."""
     return [
         {"page_number": p.page_number, "width": p.width, "height": p.height}
-        for p in _rendered_pages(invoice_id, repo)
+        for p in _page_dims(invoice_id, repo)
     ]
 
 
 @app.get("/api/invoices/{invoice_id}/pages/{page_number}/image")
 def get_page_image(invoice_id: str, page_number: int, repo: RepoDep) -> Response:
     """The rendered raster (PNG) for a 1-based page of the invoice's source."""
-    pages = _rendered_pages(invoice_id, repo)
-    page = next((p for p in pages if p.page_number == page_number), None)
-    if page is None:
+    png = _page_png(invoice_id, page_number, repo)
+    if png is None:
         raise HTTPException(status_code=404, detail="page image not found")
-    return Response(content=page.image_png, media_type="image/png")
+    return Response(content=png, media_type="image/png")
 
 
 def _has_source_pdf(invoice_id: str, repo: Repository) -> bool:

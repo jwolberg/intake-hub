@@ -42,8 +42,18 @@ async function postJSON(path, body) {
   return resp.json();
 }
 
-export function listInvoices() {
-  return getJSON("/api/invoices");
+// Paginated list (#0012): resolves to { rows, total } — `total` comes from the
+// API's X-Total-Count header (the row count across all pages).
+export const PAGE_SIZE = 200;
+
+export async function listInvoices({ offset = 0, limit = PAGE_SIZE } = {}) {
+  const path = `/api/invoices?limit=${limit}&offset=${offset}`;
+  const resp = await fetch(`${API_URL}${path}`);
+  checkAuth(resp);
+  if (!resp.ok) throw new Error(`${path} → ${resp.status}`);
+  const rows = await resp.json();
+  const total = Number(resp.headers.get("X-Total-Count") ?? rows.length);
+  return { rows, total };
 }
 
 export function getInvoice(id) {
