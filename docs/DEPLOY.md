@@ -195,8 +195,20 @@ first deploy, create the backend service first (§6 steps 1–3), read its
 audience, then deploy with it — the API will not start without it.
 
 Notes:
-- Run schema migrations before the new revision takes traffic (see
-  [`RUNBOOK.md`](./RUNBOOK.md) "Migrations").
+- **Migrations run before each deploy**, as a Cloud Run job using the same image
+  (the API never changes the schema; `/ready` is 503 while any are pending):
+
+  ```bash
+  gcloud run jobs create intakehub-migrate --image "$IMG/backend:latest" \
+    --region "$REGION" --set-cloudsql-instances "$INSTANCE_CONN" \
+    --set-secrets "DATABASE_URL=ledgerrun-database-url:latest" \
+    --command python --args=-m,backend.db.migrate
+  # every release, before `gcloud run deploy intakehub-api`:
+  gcloud run jobs update intakehub-migrate --image "$IMG/backend:latest" --region "$REGION"
+  gcloud run jobs execute intakehub-migrate --region "$REGION" --wait
+  ```
+
+  See [`RUNBOOK.md`](./RUNBOOK.md) "Migrations".
 - **Google Drive folder intake (optional).** Add `INBOX_PROVIDER=drive` and
   `DRIVE_FOLDER_ID=<id>`, and provide the service-account key per §4
   (`GOOGLE_APPLICATION_CREDENTIALS`). Full setup:

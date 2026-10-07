@@ -30,7 +30,7 @@ from backend.audit import latest_details, record
 from backend.audit.metrics import WorkflowMetrics, compute_metrics
 from backend.clients import get_llm_client, get_sheets_client
 from backend.config import settings
-from backend.db import get_engine, init_schema
+from backend.db import get_engine, migrate
 from backend.db.repository import Repository, get_repository
 from backend.domain import Actor, AuditAction, Decision, InvoiceMetadata, InvoiceStatus
 from backend.domain.taxonomy import is_retryable
@@ -54,11 +54,17 @@ logger = logging.getLogger("intakehub.api")
 async def lifespan(app: FastAPI):
     # Refuse to start with an auth config that would leave the API open (#0001).
     auth.validate_config(settings)
+    # The schema is migrated as an explicit deploy step (#0013), never here.
     try:
-        init_schema()
-        logger.info("schema initialized")
+        todo = migrate.pending(get_engine())
+        if todo:
+            logger.error(
+                "schema has %d pending migration(s) (%s): run `python -m backend.db.migrate`",
+                len(todo),
+                ", ".join(m.name for m in todo),
+            )
     except SQLAlchemyError as exc:  # pragma: no cover - depends on live DB
-        logger.warning("schema init skipped, database unavailable: %s", exc)
+        logger.warning("could not check migrations, database unavailable: %s", exc)
     yield
 
 
@@ -128,11 +134,19 @@ def health() -> dict:
 
 @app.get("/ready")
 def ready() -> JSONResponse:
-    """Readiness: 503 while the database is unreachable."""
+    """Readiness: 503 while the database is unreachable or has pending migrations."""
     db = _db_status()
     if db != "up":
         return JSONResponse(status_code=503, content={"status": "not ready", "db": db})
-    return JSONResponse(content={"status": "ready", "db": db})
+    try:
+        schema = "pending" if migrate.pending(get_engine()) else "current"
+    except SQLAlchemyError:
+        return JSONResponse(status_code=503, content={"status": "not ready", "db": "down"})
+    status = "ready" if schema == "current" else "not ready"
+    return JSONResponse(
+        status_code=200 if schema == "current" else 503,
+        content={"status": status, "db": db, "schema": schema},
+    )
 
 
 # --- dependencies (overridable in tests) ------------------------------------

@@ -50,7 +50,7 @@ Everything is local-first; no cloud accounts are required.
 backend/    FastAPI app + pipeline stages + clients + persistence (package: backend)
   api/        HTTP routes (PRD §13)
   domain/     Pydantic domain types
-  db/         schema.sql, engine/bootstrap, Repository (in-memory + Postgres)
+  db/         migrations/ (versioned SQL) + migrate runner, engine, Repository (in-memory + Postgres)
   clients/    LLM / Drive / Gmail / Sheets clients
   inbox receipts intake parser extraction categorize decision ledger_integrity exceptions audit corrections orchestrator
 frontend/   React/Vite reviewer hub
@@ -142,8 +142,8 @@ docker compose down                # stop
 docker compose down -v             # stop + wipe the DB volume
 ```
 
-The API applies the DB schema on startup (`init_schema`), so no migration step is
-needed. Then:
+Compose runs the `migrate` service (`python -m backend.db.migrate`) before the
+API starts, so the schema is current. Then:
 
 ```bash
 # Health (also reports DB connectivity)
@@ -547,3 +547,23 @@ for f in requirements requirements-dev; do
   uv pip compile backend/$f.txt --generate-hashes --universal --python-version 3.12 -o backend/$f.lock
 done
 ```
+
+## Migrations
+
+The schema lives in versioned SQL files, `backend/db/migrations/NNNN_name.sql`,
+applied in order by `python -m backend.db.migrate` and recorded in
+`schema_migrations`. The API never changes the schema itself; `/ready` returns
+503 (`"schema": "pending"`) until migrations are applied.
+
+```bash
+python -m backend.db.migrate --status   # applied / PENDING; exits 1 if any pending
+python -m backend.db.migrate            # apply pending (each file in its own transaction)
+```
+
+- **Adding a change:** create the next `NNNN_short_name.sql`; never edit an applied
+  file. Prefer additive, backward-compatible DDL (the old revision keeps serving
+  traffic while the new one rolls out). A failing migration rolls back entirely
+  and is not recorded.
+- **Existing databases** created before versioned migrations already match
+  `0001_baseline` (all `IF NOT EXISTS`), so the first run just records it.
+- Keep `;` out of string literals and function bodies — the runner splits files on `;`.

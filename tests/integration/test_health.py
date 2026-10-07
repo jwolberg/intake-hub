@@ -31,7 +31,7 @@ def test_ready_is_503_when_db_is_down(monkeypatch):
 def test_ready_is_200_when_db_is_up(pg_engine):
     resp = TestClient(api.app).get("/ready")
     assert resp.status_code == 200
-    assert resp.json() == {"status": "ready", "db": "up"}
+    assert resp.json() == {"status": "ready", "db": "up", "schema": "current"}
 
 
 def test_process_all_logs_swallowed_errors(monkeypatch, caplog):

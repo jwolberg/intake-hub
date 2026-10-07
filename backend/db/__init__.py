@@ -1,5 +1,5 @@
-"""Persistence: engine, schema bootstrap (ARCHITECTURE.md §12)."""
+"""Persistence: engine + versioned migrations (ARCHITECTURE.md §12)."""
 
-from .session import get_engine, init_schema
+from .session import get_engine
 
-__all__ = ["get_engine", "init_schema"]
+__all__ = ["get_engine"]

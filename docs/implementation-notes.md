@@ -2367,3 +2367,25 @@ plain pip (#0008; consistent with the "keep pip + requirements files" prior).
   matched `get_pixmap` output exactly on the sample PDFs and an odd-sized page. An image
   request renders just its page, cached in a 32-entry LRU keyed by item id + page (a stored
   PDF never changes after intake) or path + mtime + page.
+
+### #0013 — versioned schema migrations
+- Chosen (asked): a small in-repo runner, `backend/db/migrate.py`, with no new dependency.
+  Numbered `backend/db/migrations/NNNN_name.sql` files are applied in order, each in its own
+  transaction together with its `schema_migrations` row (Postgres DDL is transactional, so
+  a failure leaves neither partial DDL nor a version row). A transaction-scoped advisory
+  lock serializes concurrent runners. Misnamed `.sql` files and duplicate versions are
+  hard errors.
+- `0001_baseline.sql` = the old `schema.sql` (moved with `git mv`). It's all `IF NOT
+  EXISTS`, so a database created by the old startup `init_schema` adopts it without
+  changes — tested with a pre-populated row surviving. **No separate "stamp" command
+  needed.**
+- **Behavior change:** the API no longer creates or alters the schema on startup
+  (`init_schema` removed). Startup logs an error if migrations are pending, and `/ready`
+  returns 503 with `"schema": "pending"` until they're applied.
+- Wired in: compose `migrate` service (the API waits for it to complete), a CI step before
+  pytest, a Cloud Run job in DEPLOY.md, and a RUNBOOK "Migrations" section. The CLI was
+  exercised on a fresh DB (`--status` exit 1 → apply → exit 0).
+- Tests use a throwaway database per test (CREATE/DROP DATABASE), so they need a role that
+  can create databases — true for the CI service container and local trust auth.
+- **Not verified:** the compose `migrate` service and the Cloud Run job (no Docker here,
+  billing off).

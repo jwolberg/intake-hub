@@ -9,7 +9,8 @@ failure too, so the Postgres suite can never silently skip there.
 import os
 
 import pytest
-from backend.db.session import get_engine, init_schema
+from backend.db import migrate
+from backend.db.session import get_engine
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 
@@ -29,7 +30,7 @@ def pg_engine():
         if os.environ.get("REQUIRE_POSTGRES") == "1":
             pytest.fail(f"REQUIRE_POSTGRES=1 but no Postgres reachable: {exc}")
         pytest.skip("no Postgres reachable at DATABASE_URL")
-    init_schema()
+    migrate.apply(engine)
     return engine
 
 

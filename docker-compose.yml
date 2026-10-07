@@ -20,6 +20,18 @@ services:
       timeout: 5s
       retries: 10
 
+  # Applies pending schema migrations, then exits; the API waits for it (#0013).
+  migrate:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: python -m backend.db.migrate
+    environment:
+      DATABASE_URL: postgresql+psycopg://intakehub:intakehub@db:5432/intakehub
+    depends_on:
+      db:
+        condition: service_healthy
+
   api:
     build:
       context: .
@@ -62,6 +74,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
   hub:
     build:

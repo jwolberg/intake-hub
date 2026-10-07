@@ -36,6 +36,8 @@ jobs:
         run: ruff check .
       - name: Format check
         run: ruff format --check .
+      - name: Migrate
+        run: python -m backend.db.migrate
       - name: Tests
         run: pytest -q -rs
 

@@ -243,7 +243,7 @@ class InMemoryRepository:
 
 
 # --- Postgres implementation ------------------------------------------------
-# Reflects the schema created by db.session.init_schema (the canonical DDL), so
+# Reflects the schema built by the migrations in backend/db/migrations/, so
 # there is no second copy of the table definitions to drift.
 
 
@@ -289,7 +289,7 @@ _INBOX_FETCH_LOCK_KEY = 0x1A7EF37C
 class PostgresRepository:
     """SQLAlchemy-backed repository for the running app.
 
-    Tables are reflected on construction, so ``db.session.init_schema`` must have
+    Tables are reflected on construction, so the migrations (``backend.db.migrate``) must have
     run first (the app lifespan does this on startup).
     """
 
