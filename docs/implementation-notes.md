@@ -2409,3 +2409,16 @@ plain pip (#0008; consistent with the "keep pip + requirements files" prior).
   is now 0. The hub builds on Vite 8; dev server not exercised in a browser here. jsdom
   pinned to 26 (jsdom 30 needs Node ≥ 22.22; local is 22.14). New dev deps are pinned exact.
 - CI hub job: `npm ci` → lint → test → build.
+
+### #0016 — docs drift
+- `CLAUDE.md` (it was an untracked template, now committed): real description and status,
+  pickup steps (venv from the lock, compose with migrate, Postgres-backed tests, hub
+  lint/test), corrected conventions (the template said bun + Tailwind; this repo is pip +
+  npm with plain CSS), and repo-specific sensitive surfaces (IAP auth, no client file paths,
+  Gmail token, Sheet dedup). Also fixed its link to `docs/ARCHITECTURE.md` (case).
+- `backend/api/main.py` module docstring now describes the real routes, auth, middleware
+  order, and migrations (it still said "Phase 0 exposes only /health").
+- `DEPLOY.md`: new "Current live state (checked 2026-10-06)" section — billing off, SQL
+  suspended, the pre-pivot public `invoicescreener-*` services, link to #0017. Cost note now
+  includes the load balancer.
+- README test section no longer hardcodes a stale test count.

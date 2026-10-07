@@ -315,11 +315,29 @@ gcloud iap web add-iam-policy-binding --resource-type backend-services \
 
 ## Cost & ops notes
 
-- Cloud Run scales to zero — idle cost is ~the Cloud SQL instance only. Use
-  `db-f1-micro` for demo; size up for real load.
+- Cloud Run scales to zero — idle cost is the Cloud SQL instance plus the HTTPS
+  load balancer's forwarding rule (§0). Use `db-f1-micro` for demo; size up for
+  real load.
 - Set `--min-instances=0` (demo) or `1` (avoid cold starts) on the API.
 - Logs: `gcloud run services logs read intakehub-api --region "$REGION"`.
 - Cloud SQL is **not** scale-to-zero; stop the instance when idle to save cost.
+
+## Current live state (checked 2026-10-06)
+
+**Production is down, and what's deployed is not this code.**
+
+- Billing is disabled on `ledgerrun-1`, so Cloud SQL `invoicescreener-db` is
+  `SUSPENDED` (`BILLING_ISSUE`), and all four Cloud Run services return Google
+  front-end 500/503 pages.
+- The deployed services are the **pre-pivot** `invoicescreener-api`,
+  `-hub`, `-clinrun`, and `-mcp` (last API deploy 2026-06-04), public
+  (`--allow-unauthenticated`), on the old clinical-trial code.
+- None of the `intakehub-*` services or the LB/IAP topology above exist yet.
+
+Redeploying current main in the IAP topology and retiring the
+`invoicescreener-*` services is backlog ticket **#0017** (needs billing
+re-enabled and an explicit go-ahead; the old services must not be re-exposed
+publicly).
 
 ## Deployment record (2026-05-30, project `ledgerrun-1`, region `us-central1`)
 

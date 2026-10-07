@@ -142,7 +142,8 @@ stage**; reject a non-receipt to drop it from the queue.
 ```bash
 pip install --require-hashes -r backend/requirements-dev.lock
 ruff check .          # lint
-pytest -q             # 248 passed, 1 skipped (Postgres round-trip; runs with a live DB)
+pytest -q             # Postgres tests skip without DATABASE_URL; CI runs them all
+(cd frontend && npm run lint && npm test)
 ```
 
 Coverage spans every stage (unit), the orchestrator's state transitions +

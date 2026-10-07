@@ -1,11 +1,15 @@
 """FastAPI application entrypoint.
 
-Phase 0 exposes only ``/health`` and bootstraps the schema on startup. The
-invoice routes (``/process``, ``/invoices``, ...) arrive in Phase 1 (P1-T10).
+Routes: ``/health`` (liveness) and ``/ready`` (DB reachable + no pending
+migrations) are public; every ``/api/*`` route — intake, the inbox fetch, the
+list/detail/queue views, and the human QC actions — requires a verified IAP
+identity (``backend/api/auth.py``). Middleware order (outermost first): CORS,
+request-size limit, auth.
 
-Schema bootstrap is best-effort: if the database is not reachable at startup the
-app still boots and ``/health`` reports ``db: down`` rather than crashing — one
-unavailable dependency should be visible, not fatal (ARCHITECTURE.md §15).
+The API never alters the schema (migrations are a deploy step:
+``python -m backend.db.migrate``). If the database is unreachable at startup the
+app still boots and reports it via ``/health``/``/ready`` rather than crashing —
+one unavailable dependency should be visible, not fatal (ARCHITECTURE.md §15).
 """
 
 from __future__ import annotations
