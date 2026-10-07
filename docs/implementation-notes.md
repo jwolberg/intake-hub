@@ -2456,3 +2456,7 @@ belongs to.
   reject racing a rerun on the same item could still end rejected-but-filed. That needs two
   simultaneous clicks on one item in a single-user tool; fixing it properly needs a
   row lock or compare-and-set held across the Sheet append. See the follow-up ticket.
+- **#0005 — the lock-release tests couldn't catch a leak:** Postgres session locks are
+  re-entrant and the pool returns the same connection, so the old tests passed even with
+  the unlock deleted (the reviewer showed this). They now probe from an independent
+  session; mutation-checked — deleting the unlock fails both.

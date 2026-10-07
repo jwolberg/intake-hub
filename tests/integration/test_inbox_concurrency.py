@@ -84,18 +84,38 @@ def test_concurrent_fetches_never_double_process_in_memory():
     _assert_each_message_processed_once(repo)
 
 
-def test_lock_is_released_after_a_fetch(pg_repo):
+def _other_session_can_lock(pg_engine) -> bool:
+    """Try the fetch lock from an *independent* connection. Session advisory locks
+    are re-entrant, so probing from the pooled connection the repo used would
+    succeed even if the lock had leaked."""
+    from backend.db.repository import _INBOX_FETCH_LOCK_KEY
+    from backend.db.session import make_engine
+    from sqlalchemy import text
+
+    other = make_engine(pg_engine.url.render_as_string(hide_password=False))
+    try:
+        with other.connect() as conn:
+            got = conn.execute(
+                text("SELECT pg_try_advisory_lock(:k)"), {"k": _INBOX_FETCH_LOCK_KEY}
+            ).scalar()
+            if got:
+                conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": _INBOX_FETCH_LOCK_KEY})
+            return bool(got)
+    finally:
+        other.dispose()
+
+
+def test_lock_excludes_other_sessions_and_is_released_after(pg_repo, pg_engine):
     with pg_repo.inbox_fetch_lock() as acquired:
         assert acquired
-    with pg_repo.inbox_fetch_lock() as acquired_again:
-        assert acquired_again
+        assert not _other_session_can_lock(pg_engine)
+    assert _other_session_can_lock(pg_engine)
 
 
-def test_lock_is_released_when_the_fetch_raises(pg_repo):
+def test_lock_is_released_when_the_fetch_raises(pg_repo, pg_engine):
     try:
         with pg_repo.inbox_fetch_lock():
             raise RuntimeError("boom")
     except RuntimeError:
         pass
-    with pg_repo.inbox_fetch_lock() as acquired:
-        assert acquired
+    assert _other_session_can_lock(pg_engine)
