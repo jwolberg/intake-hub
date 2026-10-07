@@ -9,8 +9,6 @@
 import { useState } from "react";
 
 // PRD §10 Suggested filters, in display order. Keys match the API's FILTER_KEYS.
-// (The clinical-trial mismatched_metadata/unmatched_line_items keys still exist
-// server-side but never match post-pivot, so they're dropped here.)
 const FILTERS = [
   ["posted", "Posted"],
   ["held", "Held"],

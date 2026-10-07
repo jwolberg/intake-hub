@@ -79,10 +79,6 @@ export function correctMetadata(id, updates, reason) {
   return postJSON(`/api/invoices/${id}/corrections/metadata`, { updates, reason });
 }
 
-export function correctLineItem(id, body) {
-  return postJSON(`/api/invoices/${id}/corrections/line-item`, body);
-}
-
 // Overlay a Schedule C category correction on a held item; rerun files it (AE2).
 export function correctCategory(id, category, reason) {
   return postJSON(`/api/invoices/${id}/corrections/category`, { category, reason });

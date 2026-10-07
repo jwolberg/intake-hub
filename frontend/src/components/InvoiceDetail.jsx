@@ -672,7 +672,7 @@ export default function InvoiceDetail({ detail, onAction, setError }) {
       </div>
 
       {/* Line Items (PRD §10) — raw vs normalized + extraction confidence, read-only
-          (the catalog-matching overlay was removed with the ledger pivot). */}
+          per extracted line. */}
       <div className="panel">
         <h2>Line items</h2>
         <table>

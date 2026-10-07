@@ -30,9 +30,8 @@ logger = logging.getLogger(__name__)
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 SAMPLES = ROOT / "samples"
 
-# The curated demo set (parity with ``backend/tools/seed_hub``): a clean submit,
-# two distinct holds, a low-confidence line, an ambiguous-context hold, and a
-# large invoice/catalog — covering submit / ambiguity / mismatch / large (PRD §19).
+# The curated demo set (parity with ``backend/tools/seed_hub``): items that file,
+# items that hold for different reasons, and a large multi-line receipt (PRD §19).
 DEMO_STEMS = [
     "inv_clean_001",
     "inv_hold_unmatched_002",

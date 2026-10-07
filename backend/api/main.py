@@ -465,7 +465,6 @@ def _build_detail(invoice_id: str, repo: Repository) -> dict | None:
     }
     detail["corrections"] = {
         "metadata": corrections.metadata_overlay(audit),
-        "line_items": corrections.match_overlay(audit),
         "category": corrections.category_overlay(audit),
     }
     # Visual Document Review (P4-T4): the page rasters + the source-anchored
@@ -608,13 +607,6 @@ class MetadataCorrection(BaseModel):
     reason: str | None = None
 
 
-class LineItemCorrection(BaseModel):
-    line_item_id: str
-    catalog_item_id: str | None = None
-    catalog_description: str | None = None
-    reason: str | None = None
-
-
 class CategoryCorrection(BaseModel):
     category: str
     reason: str | None = None
@@ -679,40 +671,6 @@ def correct_metadata(invoice_id: str, body: MetadataCorrection, repo: RepoDep) -
             details={"target": "metadata"},
             before=before,
             after=body.updates,
-            reason=body.reason,
-        )
-        _set_status(repo, invoice, InvoiceStatus.CORRECTED)
-    return _require_detail(invoice_id, repo)
-
-
-@app.post("/api/invoices/{invoice_id}/corrections/line-item")
-def correct_line_item(invoice_id: str, body: LineItemCorrection, repo: RepoDep) -> dict:
-    """Overlay a human correction onto a line-item catalog match (PRD FR10)."""
-    invoice = _get_invoice_or_404(invoice_id, repo)
-    _require_allowed(invoice, "correct")
-    if all(li.id != body.line_item_id for li in repo.get_line_items(invoice_id)):
-        raise HTTPException(status_code=404, detail="line item not found")
-
-    prior = next(
-        (m for m in repo.get_matches(invoice_id) if m.line_item_id == body.line_item_id), None
-    )
-    before = {
-        "catalog_item_id": prior.catalog_item_id if prior else None,
-        "catalog_description": prior.catalog_description if prior else None,
-    }
-    after = {
-        "catalog_item_id": body.catalog_item_id,
-        "catalog_description": body.catalog_description,
-    }
-    with repo.transaction():
-        record(
-            repo,
-            invoice_id,
-            AuditAction.CORRECTED,
-            actor=Actor.HUMAN,
-            details={"target": "line_item", "line_item_id": body.line_item_id},
-            before=before,
-            after=after,
             reason=body.reason,
         )
         _set_status(repo, invoice, InvoiceStatus.CORRECTED)

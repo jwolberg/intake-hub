@@ -28,8 +28,8 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 SAMPLES = ROOT / "samples"
 PDF_DIR = SAMPLES / "pdf"
 
-# Same demo set as seed_hub (P3-T6): submit / holds / low-confidence / ambiguity /
-# large invoice + larger catalog.
+# Same demo set as seed_hub (P3-T6): items that file, holds, low confidence,
+# ambiguity, and a large multi-line receipt.
 STEMS = [
     "inv_clean_001",
     "inv_hold_unmatched_002",

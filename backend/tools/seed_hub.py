@@ -32,9 +32,8 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 SAMPLES = ROOT / "samples"
 PDF_DIR = SAMPLES / "pdf"
 
-# Demo seed set (PRD §19, P3-T6): a clean submit, two distinct holds, a
-# low-confidence line, an ambiguous-context hold, and a large invoice matched
-# against a larger catalog — covering submit / ambiguity / mismatch / large.
+# Demo seed set (PRD §19, P3-T6): items that file, holds for different reasons,
+# a low-confidence line, and a large multi-line receipt.
 STEMS = [
     "inv_clean_001",
     "inv_hold_unmatched_002",

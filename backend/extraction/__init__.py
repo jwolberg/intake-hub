@@ -42,7 +42,7 @@ from backend.extraction.citations import UNCERTAIN_BELOW
 _METADATA_FIELDS = ", ".join(InvoiceMetadata.model_fields)
 
 EXTRACTION_SYSTEM = (
-    "Extract clinical-trial invoice header metadata and line items from the "
+    "Extract receipt or invoice header metadata and line items from the "
     "document text into a JSON object with keys 'metadata' and 'line_items'. "
     "The 'metadata' object MUST use exactly these field keys, verbatim — do not "
     "rename, abbreviate, or substitute synonyms: " + _METADATA_FIELDS + ". "

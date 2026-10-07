@@ -56,8 +56,9 @@ _REASONS: list[HoldReason] = [
     # Catalog (FR8: catalog unavailable).
     HoldReason("catalog_unavailable", "Catalog unavailable", Severity.HIGH),
     # --- Ledger pivot: classification / categorization / duplicate / adversarial /
-    # Sheet-write holds. These replace the sponsor/catalog codes above (removed in
-    # U5). fr8=False: they are not in the original clinical-trial FR8 list. ---
+    # Sheet-write holds. These replace the matching/catalog codes above, which
+    # nothing emits any more but stay registered so exceptions stored before the
+    # pivot still render a title (#0011). fr8=False: not in the original FR8 list. ---
     HoldReason("ambiguous_income_expense", "Ambiguous income vs expense", Severity.HIGH, fr8=False),
     HoldReason("low_category_confidence", "Low category confidence", Severity.HIGH, fr8=False),
     HoldReason("suspected_duplicate", "Suspected duplicate transaction", Severity.HIGH, fr8=False),

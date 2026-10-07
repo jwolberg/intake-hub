@@ -3,9 +3,7 @@
 from decimal import Decimal
 
 from backend.corrections import (
-    apply_match_overlay,
     effective_metadata,
-    match_overlay,
     metadata_overlay,
 )
 from backend.domain import (
@@ -13,7 +11,6 @@ from backend.domain import (
     AuditAction,
     AuditEvent,
     InvoiceMetadata,
-    MatchResult,
 )
 
 
@@ -45,35 +42,3 @@ def test_effective_metadata_applies_overlay_and_coerces_types():
 def test_effective_metadata_no_overlay_returns_original():
     meta = InvoiceMetadata(vendor_name="A")
     assert effective_metadata(meta, []) is meta
-
-
-def test_match_overlay_and_apply_pins_human_choice():
-    audit = [
-        _corrected(
-            "line_item",
-            {"catalog_item_id": None},
-            {"catalog_item_id": "cat_9", "catalog_description": "Mapped"},
-            line_item_id="line1",
-        )
-    ]
-    assert match_overlay(audit) == {
-        "line1": {"catalog_item_id": "cat_9", "catalog_description": "Mapped"}
-    }
-
-    matches = [
-        MatchResult(
-            line_item_id="line1",
-            confidence=0.0,
-            exceptions=["unmatched_line_item"],
-            requires_exception_review=True,
-        ),
-        MatchResult(line_item_id="line2", catalog_item_id="cat_2", confidence=0.9),
-    ]
-    applied = {m.line_item_id: m for m in apply_match_overlay(matches, audit)}
-    # the corrected line is pinned to the human's choice, confident and clean
-    assert applied["line1"].catalog_item_id == "cat_9"
-    assert applied["line1"].confidence == 1.0
-    assert applied["line1"].exceptions == []
-    assert applied["line1"].requires_exception_review is False
-    # an untouched line is left exactly as the matcher produced it
-    assert applied["line2"].catalog_item_id == "cat_2"

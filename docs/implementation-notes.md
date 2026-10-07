@@ -2326,3 +2326,25 @@ plain pip (#0008; consistent with the "keep pip + requirements files" prior).
   now registered last (outermost), with a regression test that fails without the fix.
 - Pre-existing, not changed: the mock inbox can't render demo PDFs inside the backend image
   (`samples/` and reportlab aren't in it). Demo seeding goes through `seed_hub`/`seed_cloud`.
+
+### #0011 — pre-pivot leftovers removed
+- Removed: `ContextCandidate`/`ResolvedContext`/`CatalogItem`/`MatchResult` models,
+  `Repository.get_context`/`get_matches` (+ the `context`/`matches` keys in detail payloads),
+  `corrections.match_overlay`/`apply_match_overlay`, the `POST
+  /api/invoices/{id}/corrections/line-item` route and `LineItemCorrection` model, the hub's
+  `correctLineItem` client, and the unused `backend/clients/fixtures.py` (catalog fixtures).
+  **API change:** the line-item correction route is gone (it corrected catalog matches that
+  no longer exist; the hub didn't call it).
+- **Also fixed:** the live-LLM extraction prompts (text and vision) still told the model to
+  extract "clinical-trial invoice" metadata. Reworded to "receipt or invoice". Offline
+  stubs are unaffected; **not exercised against the live model** here.
+- **Kept, with reasons:**
+  - Legacy `InvoiceStatus`/`AuditAction` values (`context_resolved`, `catalog_matched`,
+    `submitted`, …) and the matching/catalog hold-reason codes in `taxonomy.py`: nothing
+    emits them, but rows written before the pivot (e.g. the old prod DB) must still load and
+    render. Comments now say so.
+  - `InvoiceMetadata.sponsor_name`/`study_name`/`protocol_number`/`site_identifier`: still
+    live (PDF parser labels, categorization keyword scan, hub display, sample data).
+    Removing them changes extraction/categorization results, so that's filed as follow-up
+    **#0018**.
+- The `invoice` → `item` domain rename stays out of scope (breaking: table + API paths).

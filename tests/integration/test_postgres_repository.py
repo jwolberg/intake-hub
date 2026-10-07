@@ -32,8 +32,6 @@ def test_postgres_round_trip(pg_repo):
     detail = pg_repo.get_detail(invoice.id)
     assert len(detail["line_items"]) == 4
     assert detail["line_items"][0].total is not None  # NUMERIC round-trip
-    assert detail["context"] is None  # resolved_context table removed (U5)
-    assert detail["matches"] == []  # match_results table removed (U5)
     assert len(detail["audit"]) > 0
 
 

@@ -33,8 +33,6 @@ from backend.domain import (
     InvoiceMetadata,
     InvoiceStatus,
     LineItem,
-    MatchResult,
-    ResolvedContext,
     Severity,
 )
 
@@ -48,8 +46,6 @@ class Repository(Protocol):
     def get_source_pdf(self, invoice_id: str) -> bytes | None: ...
     def replace_line_items(self, invoice_id: str, items: list[LineItem]) -> None: ...
     def get_line_items(self, invoice_id: str) -> list[LineItem]: ...
-    def get_context(self, invoice_id: str) -> ResolvedContext | None: ...
-    def get_matches(self, invoice_id: str) -> list[MatchResult]: ...
     def add_exceptions(self, exceptions: list[ExceptionRecord]) -> None: ...
     def get_exceptions(self, invoice_id: str) -> list[ExceptionRecord]: ...
     def clear_exceptions(self, invoice_id: str) -> None: ...
@@ -85,8 +81,6 @@ class InMemoryRepository:
         self._source_text: dict[str, str] = {}
         self._source_pdf: dict[str, bytes] = {}
         self._line_items: dict[str, list[LineItem]] = {}
-        self._context: dict[str, ResolvedContext] = {}
-        self._matches: dict[str, list[MatchResult]] = {}
         self._exceptions: dict[str, list[ExceptionRecord]] = {}
         self._audit: dict[str, list[AuditEvent]] = {}
         self._seen_messages: set[str] = set()
@@ -102,8 +96,6 @@ class InMemoryRepository:
         "_source_text",
         "_source_pdf",
         "_line_items",
-        "_context",
-        "_matches",
         "_exceptions",
         "_audit",
         "_seen_messages",
@@ -157,13 +149,6 @@ class InMemoryRepository:
     def get_line_items(self, invoice_id: str) -> list[LineItem]:
         return [i.model_copy(deep=True) for i in self._line_items.get(invoice_id, [])]
 
-    def get_context(self, invoice_id: str) -> ResolvedContext | None:
-        stored = self._context.get(invoice_id)
-        return stored.model_copy(deep=True) if stored else None
-
-    def get_matches(self, invoice_id: str) -> list[MatchResult]:
-        return [m.model_copy(deep=True) for m in self._matches.get(invoice_id, [])]
-
     def add_exceptions(self, exceptions: list[ExceptionRecord]) -> None:
         for exc in exceptions:
             self._exceptions.setdefault(exc.invoice_id, []).append(exc.model_copy(deep=True))
@@ -188,8 +173,6 @@ class InMemoryRepository:
             "invoice": invoice,
             "source_text": self._source_text.get(invoice_id),
             "line_items": self.get_line_items(invoice_id),
-            "context": self.get_context(invoice_id),
-            "matches": self.get_matches(invoice_id),
             "exceptions": self.get_exceptions(invoice_id),
             "audit": self.get_audit(invoice_id),
         }
@@ -414,16 +397,6 @@ class PostgresRepository:
             )
         return [LineItem(**dict(r)) for r in rows]
 
-    def get_context(self, invoice_id: str) -> ResolvedContext | None:
-        # Context resolution was part of the clinical-trial pipeline (removed);
-        # no `resolved_context` table exists anymore, so there is nothing to read.
-        return None
-
-    def get_matches(self, invoice_id: str) -> list[MatchResult]:
-        # Catalog matching was part of the clinical-trial pipeline (removed); no
-        # `match_results` table exists anymore, so there is nothing to read.
-        return []
-
     def add_exceptions(self, exceptions: list[ExceptionRecord]) -> None:
         if not exceptions:
             return
@@ -515,8 +488,6 @@ class PostgresRepository:
             "invoice": invoice,
             "source_text": source_text,
             "line_items": self.get_line_items(invoice_id),
-            "context": self.get_context(invoice_id),
-            "matches": self.get_matches(invoice_id),
             "exceptions": self.get_exceptions(invoice_id),
             "audit": self.get_audit(invoice_id),
         }
