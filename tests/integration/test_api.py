@@ -677,3 +677,24 @@ def test_retry_that_succeeds_clears_the_failure_exception():
         assert detail["exceptions"] == []
     finally:
         app.dependency_overrides.clear()
+
+
+def test_item_stuck_mid_rerun_can_be_retried_to_completion(client):
+    # A rerun that died after committing RERUN_REQUESTED (its exceptions already
+    # superseded) must not be left with no way forward.
+    from backend.domain import InvoiceStatus
+
+    invoice_id = _held_missing_total(client)
+    client.post(
+        f"/api/invoices/{invoice_id}/corrections/metadata",
+        json={"updates": {"total_amount": "52.99"}},
+    )
+    repo = app.dependency_overrides[get_repo]()
+    stuck = repo.get_invoice(invoice_id)
+    stuck.status = InvoiceStatus.RERUN_REQUESTED
+    repo.save_invoice(stuck)
+
+    detail = client.get(f"/api/invoices/{invoice_id}").json()
+    assert {"retry", "reject", "escalate"} <= set(detail["allowed_actions"])
+    retried = client.post(f"/api/invoices/{invoice_id}/retry", json={}).json()
+    assert retried["invoice"]["status"] == "posted"

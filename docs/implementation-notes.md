@@ -2446,3 +2446,13 @@ belongs to.
   more" never appeared (silently capped at 200). Now in `expose_headers`; same-origin
   production was unaffected. Not changed: the list stays oldest-first (existing behavior),
   so with more than 200 items the newest need "Load more" — worth revisiting as a UX call.
+- **#0003 — stuck items were dead ends:** the first transition table allowed nothing for
+  in-flight pipeline states. An item left at e.g. `rerun_requested` by a crashed run (its
+  exceptions already superseded) had no button at all — worse than `main`. In-flight and
+  legacy states now allow `retry` / `escalate` / `reject`. Retry is safe even if a run
+  is somehow still going: the Sheet append is deduped by item id. Added an explicit full
+  status × action matrix test, plus a stuck-item → retry → posted test.
+- **Accepted, filed as a follow-up:** the status check and the write aren't atomic, so a
+  reject racing a rerun on the same item could still end rejected-but-filed. That needs two
+  simultaneous clicks on one item in a single-user tool; fixing it properly needs a
+  row lock or compare-and-set held across the Sheet append. See the follow-up ticket.
