@@ -63,12 +63,15 @@ export default function App() {
       .catch(() => setHealth("API unreachable"));
   }, [refresh]);
 
+  // Selecting (or leaving) an item clears the previous detail in the same event,
+  // so a stale item never flashes while the next one loads.
+  const select = useCallback((id) => {
+    setDetail(null);
+    setSelectedId(id);
+  }, []);
+
   useEffect(() => {
-    if (!selectedId) {
-      setDetail(null);
-      return;
-    }
-    loadDetail(selectedId);
+    if (selectedId) loadDetail(selectedId);
   }, [selectedId, loadDetail]);
 
   return (
@@ -85,7 +88,7 @@ export default function App() {
 
       {selectedId && detail ? (
         <>
-          <button className="link-btn" onClick={() => setSelectedId(null)}>
+          <button className="link-btn" onClick={() => select(null)}>
             ← Back to all invoices
           </button>
           <InvoiceDetail detail={detail} onAction={onAction} setError={setError} />
@@ -98,7 +101,7 @@ export default function App() {
             invoices={invoices}
             total={total}
             onLoadMore={loadMore}
-            onSelect={setSelectedId}
+            onSelect={select}
           />
         </>
       )}

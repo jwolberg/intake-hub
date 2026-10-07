@@ -2389,3 +2389,23 @@ plain pip (#0008; consistent with the "keep pip + requirements files" prior).
   can create databases — true for the CI service container and local trust auth.
 - **Not verified:** the compose `migrate` service and the Cloud Run job (no Docker here,
   billing off).
+
+### #0010 — hub lint + component tests
+- ESLint 9 flat config (JS recommended + react + react-hooks v7) via `npm run lint`, zero
+  errors. It caught one real issue: `App` called `setDetail(null)` synchronously in an
+  effect; the item is now cleared in the select/back handler, so a stale item no longer
+  flashes while the next loads.
+- Vitest + Testing Library (`npm test`, jsdom): list filter chips + Load more, QC action
+  calls (exact URL/method/body), status-gated buttons, and the "Mark reviewed" gate for
+  uncertain citations. Mutation-checked: disabling the gate, or ignoring
+  `allowed_actions`, each fails a test.
+- Fixtures are **generated from the real API** (`python -m backend.tools.gen_hub_fixtures`)
+  rather than hand-written, so API shape drift breaks the hub tests. Regenerate after API
+  changes.
+- **Deviation / dependency decision:** Vitest 3 (the newest that supports Vite 5) carries a
+  *critical* advisory (tinypool) and the `@vitest/mocker` file-read bug, and the existing
+  Vite 5 already had *high* advisories. Rather than add known-vulnerable tooling, upgraded
+  **Vite 5 → 8.3.3** and `@vitejs/plugin-react` 4 → 6.1.2 alongside Vitest 5.0.3; `npm audit`
+  is now 0. The hub builds on Vite 8; dev server not exercised in a browser here. jsdom
+  pinned to 26 (jsdom 30 needs Node ≥ 22.22; local is 22.14). New dev deps are pinned exact.
+- CI hub job: `npm ci` → lint → test → build.

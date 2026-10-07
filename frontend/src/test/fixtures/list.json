@@ -1,0 +1,64 @@
+[
+  {
+    "id": "invoice_1bf7e1a84ed5",
+    "status": "posted",
+    "decision": "submit",
+    "decision_confidence": 0.8,
+    "invoice_number": "INV-1001",
+    "vendor_name": "Riverside Clinical Research",
+    "total_amount": "1320.00",
+    "exception_count": 0,
+    "filter_tags": [
+      "posted"
+    ],
+    "updated_at": "2026-10-07T00:17:15.179556Z"
+  },
+  {
+    "id": "invoice_442b5bf69f18",
+    "status": "held",
+    "decision": "hold",
+    "decision_confidence": 0.0,
+    "invoice_number": "INV-1003",
+    "vendor_name": "Riverside Clinical Research",
+    "total_amount": "720.00",
+    "exception_count": 1,
+    "filter_tags": [
+      "held",
+      "low_confidence",
+      "needs_review"
+    ],
+    "updated_at": "2026-10-07T00:17:15.687389Z"
+  },
+  {
+    "id": "invoice_e92f0b0963e0",
+    "status": "held",
+    "decision": "hold",
+    "decision_confidence": 0.6,
+    "invoice_number": "INV-1006",
+    "vendor_name": "Riverside Clinical Research",
+    "total_amount": "1200.00",
+    "exception_count": 2,
+    "filter_tags": [
+      "held",
+      "low_confidence",
+      "needs_review"
+    ],
+    "updated_at": "2026-10-07T00:17:16.436540Z"
+  },
+  {
+    "id": "invoice_68ea8af5800f",
+    "status": "held",
+    "decision": "hold",
+    "decision_confidence": 0.0,
+    "invoice_number": "INV-1008",
+    "vendor_name": "Northwind Therapeutics",
+    "total_amount": "420.00",
+    "exception_count": 1,
+    "filter_tags": [
+      "held",
+      "low_confidence",
+      "needs_review"
+    ],
+    "updated_at": "2026-10-07T00:17:17.070076Z"
+  }
+]
