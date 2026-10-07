@@ -3,6 +3,7 @@
 import logging
 
 import backend.api.main as api
+import pytest
 from backend.db.repository import InMemoryRepository
 from backend.orchestrator import process_all
 from fastapi.testclient import TestClient
@@ -77,3 +78,18 @@ def test_cors_rejects_other_methods():
 
 def test_cors_rejects_arbitrary_headers():
     assert _preflight("POST", "x-evil-header").status_code == 400
+
+
+def test_unreachable_db_fails_fast_instead_of_hanging():
+    # A black-holed host (e.g. a suspended Cloud SQL IP) must not pin a worker
+    # for the OS TCP timeout (~75 s): the engine bounds the connect.
+    import time
+
+    from backend.db.session import make_engine
+
+    engine = make_engine("postgresql+psycopg://x:y@10.255.255.1:5432/x")
+    start = time.monotonic()
+    with pytest.raises(OperationalError):
+        with engine.connect():
+            pass
+    assert time.monotonic() - start < 8

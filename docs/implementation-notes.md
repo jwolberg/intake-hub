@@ -2422,3 +2422,12 @@ plain pip (#0008; consistent with the "keep pip + requirements files" prior).
   suspended, the pre-pivot public `invoicescreener-*` services, link to #0017. Cost note now
   includes the load balancer.
 - README test section no longer hardcodes a stale test count.
+
+### Review follow-ups (fresh-context reviewer, 2026-10-06)
+A reviewer agent checked every ticket's acceptance criteria against the diff and probed for
+bugs. Real defects are fixed below, each in its own commit tagged with the ticket it
+belongs to.
+
+- **#0015 — `/health` hung ~75 s on a black-holed DB** (the reviewer measured it with an
+  unroutable host): no connect timeout. The engine now sets `connect_timeout=5` and
+  `pool_timeout=5`; a test asserts an unroutable host fails in under 8 s.
