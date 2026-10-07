@@ -18,18 +18,27 @@ from backend.orchestrator import process
 # classification and categorization are both confident and it auto-files.
 CLEAN_EXPENSE = {
     "source": {
-        "channel": "email", "message_id": "m-clean",
-        "subject": "Your receipt from Notion", "sender": "billing@notion.so",
+        "channel": "email",
+        "message_id": "m-clean",
+        "subject": "Your receipt from Notion",
+        "sender": "billing@notion.so",
         "attachment": "receipt.pdf",
     },
     "document": {
         "metadata": {
-            "invoice_number": "N-1", "invoice_date": "2026-03-01",
-            "vendor_name": "Notion", "currency": "USD", "total_amount": "10.00",
+            "invoice_number": "N-1",
+            "invoice_date": "2026-03-01",
+            "vendor_name": "Notion",
+            "currency": "USD",
+            "total_amount": "10.00",
         },
         "line_items": [
-            {"raw_description": "Notion subscription",
-             "quantity": "1", "unit_price": "10.00", "total": "10.00"},
+            {
+                "raw_description": "Notion subscription",
+                "quantity": "1",
+                "unit_price": "10.00",
+                "total": "10.00",
+            },
         ],
     },
 }
@@ -37,12 +46,17 @@ CLEAN_EXPENSE = {
 # A document with a total but no recognizable category keyword → category
 # cannot be assigned with confidence → held for the reviewer (no Sheet write).
 UNCATEGORIZABLE = {
-    "source": {"channel": "email", "message_id": "m-hold", "subject": "note",
-               "sender": "someone@example.com"},
+    "source": {
+        "channel": "email",
+        "message_id": "m-hold",
+        "subject": "note",
+        "sender": "someone@example.com",
+    },
     "document": {
         "metadata": {"vendor_name": "Bob", "total_amount": "10.00"},
-        "line_items": [{"raw_description": "thing", "quantity": "1",
-                        "unit_price": "10.00", "total": "10.00"}],
+        "line_items": [
+            {"raw_description": "thing", "quantity": "1", "unit_price": "10.00", "total": "10.00"}
+        ],
     },
 }
 

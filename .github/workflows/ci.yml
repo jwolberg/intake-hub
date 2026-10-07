@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: intakehub
+          POSTGRES_PASSWORD: intakehub
+          POSTGRES_DB: intakehub
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U intakehub"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql+psycopg://intakehub:intakehub@localhost:5432/intakehub
+      # The Postgres suite must run here, never skip.
+      REQUIRE_POSTGRES: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+      - run: pip install --require-hashes -r backend/requirements-dev.lock
+      - name: Lint
+        run: ruff check .
+      - name: Format check
+        run: ruff format --check .
+      - name: Migrate
+        run: python -m backend.db.migrate
+      - name: Tests
+        run: pytest -q -rs
+
+  hub:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+
+  images:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build backend image
+        run: docker build -f backend/Dockerfile -t intakehub-api:ci .
+      - name: Build hub image
+        run: docker build -f frontend/Dockerfile.prod -t intakehub-hub:ci frontend

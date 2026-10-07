@@ -2,12 +2,14 @@
 # backend/requirements.txt.
 
 [tool.ruff]
-target-version = "py310"
+target-version = "py312"
 line-length = 100
 src = ["backend", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+# UP042 (str+Enum -> StrEnum) changes str() of members; not a mechanical fix.
+ignore = ["UP042"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

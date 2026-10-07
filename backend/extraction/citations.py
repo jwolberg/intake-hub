@@ -31,9 +31,7 @@ from backend.domain import (
 UNCERTAIN_BELOW = 0.7
 
 
-def synthesize_citations(
-    extraction: ExtractionResult, words: list[WordBox]
-) -> list[Citation]:
+def synthesize_citations(extraction: ExtractionResult, words: list[WordBox]) -> list[Citation]:
     """Build word-index citations for an extraction by matching values to OCR words.
 
     One citation per populated header field (``metadata.<field>``) and per line
@@ -77,9 +75,7 @@ def _synthesize(
             status=CitationStatus.UNREADABLE,
         )
     page, indices = located
-    status = (
-        CitationStatus.UNCERTAIN if confidence < UNCERTAIN_BELOW else CitationStatus.EXTRACTED
-    )
+    status = CitationStatus.UNCERTAIN if confidence < UNCERTAIN_BELOW else CitationStatus.EXTRACTED
     return Citation(
         page_number=page,
         target_id=target_id,

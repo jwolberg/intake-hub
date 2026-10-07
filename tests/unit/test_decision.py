@@ -21,8 +21,12 @@ from backend.domain import (
 
 def _extraction(missing=None, field_conf=None, item_conf=0.9, total="120.00"):
     md = InvoiceMetadata(vendor_name="Acme", total_amount=total)
-    li = LineItem(invoice_id="inv", raw_description="Office supplies", total=total,
-                  extraction_confidence=item_conf)
+    li = LineItem(
+        invoice_id="inv",
+        raw_description="Office supplies",
+        total=total,
+        extraction_confidence=item_conf,
+    )
     return ExtractionResult(
         metadata=md,
         line_items=[li],
@@ -31,8 +35,13 @@ def _extraction(missing=None, field_conf=None, item_conf=0.9, total="120.00"):
     )
 
 
-def _categorization(doc_type=DocumentType.EXPENSE, type_conf=0.9,
-                    category="Office expense", cat_conf=0.9, adversarial=False):
+def _categorization(
+    doc_type=DocumentType.EXPENSE,
+    type_conf=0.9,
+    category="Office expense",
+    cat_conf=0.9,
+    adversarial=False,
+):
     return CategorizationResult(
         invoice_id="inv",
         document_type=doc_type,
@@ -84,8 +93,7 @@ def test_missing_amount_holds():
 
 def test_missing_optional_field_is_low_severity_and_still_files():
     result = decide(
-        _extraction(missing=["due_date"],
-                    field_conf={"vendor_name": 0.95, "total_amount": 0.95}),
+        _extraction(missing=["due_date"], field_conf={"vendor_name": 0.95, "total_amount": 0.95}),
         _categorization(),
     )
     assert result.decision is Decision.SUBMIT

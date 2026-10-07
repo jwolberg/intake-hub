@@ -22,7 +22,7 @@ from backend.clients.llm import parse_json_or_raise
 from backend.domain import WordBox
 
 VISION_SYSTEM = (
-    "Extract clinical-trial invoice header metadata and line items from the page "
+    "Extract receipt or invoice header metadata and line items from the page "
     "image. You are given the page's OCR words, each with an integer index. For "
     "every value you extract, return its 'value', the 'word_indices' of the OCR "
     "words that back it, the 1-based 'page', and a 'status' (extracted | "

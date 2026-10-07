@@ -12,13 +12,12 @@ applied for the detail view and consumed by rerun as fixed inputs (P2-C4).
 
 Event shapes (in ``AuditEvent.details``):
 - metadata:  ``{"target": "metadata", "before": {field: old}, "after": {field: new}}``
-- line item: ``{"target": "line_item", "line_item_id": id,
-                 "before": {...}, "after": {"catalog_item_id", "catalog_description"}}``
+- category:  ``{"target": "category", "before": {"category": old}, "after": {"category": new}}``
 """
 
 from __future__ import annotations
 
-from backend.domain import Actor, AuditAction, AuditEvent, InvoiceMetadata, MatchResult
+from backend.domain import Actor, AuditAction, AuditEvent, InvoiceMetadata
 
 
 def _is_correction(event: AuditEvent, target: str) -> bool:
@@ -55,17 +54,6 @@ def category_overlay(audit: list[AuditEvent]) -> str | None:
     return latest
 
 
-def match_overlay(audit: list[AuditEvent]) -> dict[str, dict]:
-    """Latest human match override per line item (line_item_id → {id, description})."""
-    overlay: dict[str, dict] = {}
-    for event in audit:
-        if _is_correction(event, "line_item"):
-            line_item_id = event.details.get("line_item_id")
-            if line_item_id:
-                overlay[line_item_id] = event.details.get("after", {})
-    return overlay
-
-
 def effective_metadata(metadata: InvoiceMetadata, audit: list[AuditEvent]) -> InvoiceMetadata:
     """AI metadata with human overrides applied, re-validated to coerce types."""
     overlay = {k: v for k, v in metadata_overlay(audit).items() if v not in (None, "")}
@@ -73,35 +61,3 @@ def effective_metadata(metadata: InvoiceMetadata, audit: list[AuditEvent]) -> In
         return metadata
     merged = {**metadata.model_dump(), **overlay}
     return InvoiceMetadata(**merged)
-
-
-def apply_match_overlay(
-    matches: list[MatchResult], audit: list[AuditEvent]
-) -> list[MatchResult]:
-    """Overlay human match corrections onto freshly computed matches.
-
-    A corrected line keeps the human's chosen catalog item as a fixed input;
-    its rationale records that it was set by a reviewer.
-    """
-    overlay = match_overlay(audit)
-    if not overlay:
-        return matches
-    result: list[MatchResult] = []
-    for match in matches:
-        override = overlay.get(match.line_item_id)
-        if override is None:
-            result.append(match)
-            continue
-        result.append(
-            match.model_copy(
-                update={
-                    "catalog_item_id": override.get("catalog_item_id"),
-                    "catalog_description": override.get("catalog_description"),
-                    "confidence": 1.0,  # human-confirmed
-                    "requires_exception_review": False,
-                    "exceptions": [],
-                    "rationale": "corrected by reviewer",
-                }
-            )
-        )
-    return result

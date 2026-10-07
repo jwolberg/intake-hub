@@ -1,4 +1,8 @@
--- IntakeHub persistence schema (PRD §11, ARCHITECTURE.md §12).
+-- 0001 baseline: the IntakeHub schema as of the move to versioned migrations
+-- (#0013), formerly backend/db/schema.sql (PRD §11, ARCHITECTURE.md §12). Every
+-- statement is IF NOT EXISTS, so a database created by the old startup
+-- init_schema adopts this baseline without changes. Never edit an applied
+-- migration: add a new NNNN_*.sql instead.
 --
 -- Stage outputs are persisted, not just final state, so the hub can render an
 -- invoice at its latest completed stage and reruns can diff against prior

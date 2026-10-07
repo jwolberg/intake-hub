@@ -14,8 +14,9 @@ from __future__ import annotations
 
 import base64
 import binascii
+import logging
 import pathlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from backend import corrections
 from backend.audit import latest_details, record
@@ -46,12 +47,14 @@ from backend.ledger_integrity import find_duplicate, posted_items
 from backend.ocr import OCRClient
 from backend.parser import parse
 from backend.parser.pdf import LayoutLLMClient
-from backend.parser.raster import is_rasterizable, render_pages
+from backend.parser.raster import is_rasterizable, render_pages, render_pdf_bytes
+
+logger = logging.getLogger("intakehub.orchestrator")
 
 
 def _advance(repo: Repository, invoice: Invoice, status: InvoiceStatus) -> None:
     invoice.status = status
-    invoice.updated_at = datetime.now(timezone.utc)
+    invoice.updated_at = datetime.now(UTC)
     repo.save_invoice(invoice)
 
 
@@ -104,14 +107,22 @@ def _attach_citations(
     resolves the indices to highlight boxes (P4-T4). Citations are additive: any
     render/OCR failure leaves the extraction untouched rather than failing the
     invoice. Invoices with no rasterizable source (e.g. email-body) get none.
+
+    The source is a trusted local path (inbox adapters) or an inline PDF
+    (``attachment_b64`` — every HTTP submission, Gmail, the cloud).
     """
     path = source.get("attachment_path")
-    if not path or not is_rasterizable(path):
-        return extraction
     try:
-        pages = render_pages(path)
-        words = ocr.extract_words(path, pages)
-    except (FileNotFoundError, ValueError, RuntimeError):
+        if path and is_rasterizable(path):
+            pages = render_pages(path)
+            words = ocr.extract_words(path, pages)
+        elif _is_real_pdf(source) and source.get("attachment_b64"):
+            data = base64.b64decode(source["attachment_b64"])
+            pages = render_pdf_bytes(data)
+            words = ocr.extract_words(data, pages)
+        else:
+            return extraction
+    except (FileNotFoundError, ValueError, RuntimeError, binascii.Error):
         return extraction
     if not words:
         return extraction
@@ -167,27 +178,42 @@ def process(
     ocr = ocr or get_ocr_client()
 
     invoice = ingest(sample)
-    repo.save_invoice(invoice)
-    source = sample.get("source", {})
-    record(repo, invoice.id, AuditAction.RECEIVED, actor=Actor.SYSTEM, details={
-        "channel": source.get("channel"),
-        "message_id": source.get("message_id"),
-        "subject": source.get("subject"),
-        "sender": source.get("sender"),
-        "attachment": source.get("attachment"),
-        # Path to the original file (when supplied), so the page-image endpoints
-        # can rasterize the source for the reviewer overlay (P4-T1).
-        "attachment_path": source.get("attachment_path"),
-    })
-    _store_source_pdf(repo, invoice.id, source)
+    with repo.transaction():
+        repo.save_invoice(invoice)
+        source = sample.get("source", {})
+        record(
+            repo,
+            invoice.id,
+            AuditAction.RECEIVED,
+            actor=Actor.SYSTEM,
+            details={
+                "channel": source.get("channel"),
+                "message_id": source.get("message_id"),
+                "subject": source.get("subject"),
+                "sender": source.get("sender"),
+                "attachment": source.get("attachment"),
+                # Path to the original file (when supplied), so the page-image endpoints
+                # can rasterize the source for the reviewer overlay (P4-T1).
+                "attachment_path": source.get("attachment_path"),
+            },
+        )
+        _store_source_pdf(repo, invoice.id, source)
 
     try:
         parsed = parse(invoice.id, sample)
-        repo.set_source_text(invoice.id, parsed.text)
-        _advance(repo, invoice, InvoiceStatus.PARSED)
-        record(repo, invoice.id, AuditAction.PARSED, actor=Actor.SYSTEM, details={
-            "format": parsed.format, "sections": parsed.sections,
-        })
+        with repo.transaction():
+            repo.set_source_text(invoice.id, parsed.text)
+            _advance(repo, invoice, InvoiceStatus.PARSED)
+            record(
+                repo,
+                invoice.id,
+                AuditAction.PARSED,
+                actor=Actor.SYSTEM,
+                details={
+                    "format": parsed.format,
+                    "sections": parsed.sections,
+                },
+            )
 
         try:
             extraction = extract(invoice.id, parsed, _extraction_llm(parsed, llm))
@@ -196,22 +222,29 @@ def process(
             return invoice
         extraction = _attach_citations(extraction, source, ocr)
         invoice.metadata = extraction.metadata
-        repo.replace_line_items(invoice.id, extraction.line_items)
-        _advance(repo, invoice, InvoiceStatus.EXTRACTED)
-        record(repo, invoice.id, AuditAction.EXTRACTED, details={
-            "line_items": len(extraction.line_items),
-            "invoice_number": extraction.metadata.invoice_number,
-            "fields_extracted": len(extraction.field_confidence) - len(extraction.missing_fields),
-            "missing_fields": extraction.missing_fields,
-            # Per-field signals persisted here (no schema change) so the detail
-            # view can show value/confidence/evidence (PRD §10) and rerun can
-            # reconstruct the extraction (P2-C2/C4).
-            "field_confidence": extraction.field_confidence,
-            "field_evidence": extraction.field_evidence,
-            # Source-anchored highlight boxes for the reviewer overlay (P4-T4),
-            # persisted on the extraction event (OD-9, no schema change).
-            "citations": [c.model_dump(mode="json") for c in extraction.citations],
-        })
+        with repo.transaction():
+            repo.replace_line_items(invoice.id, extraction.line_items)
+            _advance(repo, invoice, InvoiceStatus.EXTRACTED)
+            record(
+                repo,
+                invoice.id,
+                AuditAction.EXTRACTED,
+                details={
+                    "line_items": len(extraction.line_items),
+                    "invoice_number": extraction.metadata.invoice_number,
+                    "fields_extracted": len(extraction.field_confidence)
+                    - len(extraction.missing_fields),
+                    "missing_fields": extraction.missing_fields,
+                    # Per-field signals persisted here (no schema change) so the detail
+                    # view can show value/confidence/evidence (PRD §10) and rerun can
+                    # reconstruct the extraction (P2-C2/C4).
+                    "field_confidence": extraction.field_confidence,
+                    "field_evidence": extraction.field_evidence,
+                    # Source-anchored highlight boxes for the reviewer overlay (P4-T4),
+                    # persisted on the extraction event (OD-9, no schema change).
+                    "citations": [c.model_dump(mode="json") for c in extraction.citations],
+                },
+            )
 
         _categorize_and_file(repo, invoice, extraction, source, llm=llm, sheets=sheets)
     except Exception as exc:  # stage failure: isolate, mark failed, never propagate
@@ -247,40 +280,60 @@ def _categorize_and_file(
     # Record the AI's ORIGINAL classification/categorization on the audit trail
     # first — the detail view reads these events as "what the AI produced", and a
     # human category correction must stay an overlay on top, not overwrite them.
-    _advance(repo, invoice, InvoiceStatus.CLASSIFIED)
-    record(repo, invoice.id, AuditAction.CLASSIFIED, details={
-        "document_type": categorization.document_type.value,
-        "confidence": categorization.document_type_confidence,
-        "evidence": categorization.document_type_evidence,
-        "adversarial": categorization.adversarial,
-    })
-    _advance(repo, invoice, InvoiceStatus.CATEGORIZED)
-    record(repo, invoice.id, AuditAction.CATEGORIZED, details={
-        "category": categorization.category,
-        "confidence": categorization.category_confidence,
-        "evidence": categorization.category_evidence,
-        "alternates": categorization.alternates,
-        "rationale": categorization.rationale,
-    })
+    with repo.transaction():
+        _advance(repo, invoice, InvoiceStatus.CLASSIFIED)
+        record(
+            repo,
+            invoice.id,
+            AuditAction.CLASSIFIED,
+            details={
+                "document_type": categorization.document_type.value,
+                "confidence": categorization.document_type_confidence,
+                "evidence": categorization.document_type_evidence,
+                "adversarial": categorization.adversarial,
+            },
+        )
+    with repo.transaction():
+        _advance(repo, invoice, InvoiceStatus.CATEGORIZED)
+        record(
+            repo,
+            invoice.id,
+            AuditAction.CATEGORIZED,
+            details={
+                "category": categorization.category,
+                "confidence": categorization.category_confidence,
+                "evidence": categorization.category_evidence,
+                "alternates": categorization.alternates,
+                "rationale": categorization.rationale,
+            },
+        )
 
     # A human category correction (R10/AE2) is then pinned as a fixed, confident
     # input for the decision + Sheet row — an overlay, so the AI original recorded
     # above is preserved.
     corrected_category = corrections.category_overlay(repo.get_audit(invoice.id))
     if corrected_category:
-        categorization = categorization.model_copy(update={
-            "category": corrected_category,
-            "category_confidence": 1.0,
-            "category_evidence": "corrected by reviewer",
-        })
+        categorization = categorization.model_copy(
+            update={
+                "category": corrected_category,
+                "category_confidence": 1.0,
+                "category_evidence": "corrected by reviewer",
+            }
+        )
 
     decision = decide(extraction, categorization)
     invoice.decision = decision.decision
     invoice.decision_confidence = decision.confidence
 
     if decision.decision is not Decision.SUBMIT:
-        _hold(repo, invoice, decision.rationale, decision.confidence, decision.risk_flags,
-              from_decision(invoice.id, decision))
+        _hold(
+            repo,
+            invoice,
+            decision.rationale,
+            decision.confidence,
+            decision.risk_flags,
+            from_decision(invoice.id, decision),
+        )
         return
 
     # An auto-file candidate that duplicates an already-posted item is held rather
@@ -296,12 +349,19 @@ def _categorize_and_file(
 
 def _hold(repo, invoice, rationale, confidence, risk_flags, exceptions) -> None:
     """Record a hold: persist its exceptions, advance to HELD, and audit it."""
-    repo.add_exceptions(exceptions)
-    _advance(repo, invoice, InvoiceStatus.HELD)
-    record(repo, invoice.id, AuditAction.HELD, reason=rationale, details={
-        "confidence": confidence,
-        "risk_flags": [f.model_dump(mode="json") for f in risk_flags],
-    })
+    with repo.transaction():
+        repo.add_exceptions(exceptions)
+        _advance(repo, invoice, InvoiceStatus.HELD)
+        record(
+            repo,
+            invoice.id,
+            AuditAction.HELD,
+            reason=rationale,
+            details={
+                "confidence": confidence,
+                "risk_flags": [f.model_dump(mode="json") for f in risk_flags],
+            },
+        )
 
 
 def _hold_duplicate(repo: Repository, invoice: Invoice, dup: Invoice, decision) -> None:
@@ -310,14 +370,21 @@ def _hold_duplicate(repo: Repository, invoice: Invoice, dup: Invoice, decision) 
         f"looks like a duplicate of already-posted item {dup.id} "
         f"({dup.metadata.vendor_name}, {dup.metadata.total_amount})"
     )
-    repo.add_exceptions([build_exception(invoice.id, "suspected_duplicate", message=reason)])
-    invoice.decision = Decision.HOLD
-    _advance(repo, invoice, InvoiceStatus.HELD)
-    record(repo, invoice.id, AuditAction.HELD, reason=reason, details={
-        "confidence": decision.confidence,
-        "duplicate_of": dup.id,
-        "risk_flags": [f.model_dump(mode="json") for f in decision.risk_flags],
-    })
+    with repo.transaction():
+        repo.add_exceptions([build_exception(invoice.id, "suspected_duplicate", message=reason)])
+        invoice.decision = Decision.HOLD
+        _advance(repo, invoice, InvoiceStatus.HELD)
+        record(
+            repo,
+            invoice.id,
+            AuditAction.HELD,
+            reason=reason,
+            details={
+                "confidence": decision.confidence,
+                "duplicate_of": dup.id,
+                "risk_flags": [f.model_dump(mode="json") for f in decision.risk_flags],
+            },
+        )
 
 
 def _source_ref(source: dict) -> str | None:
@@ -352,23 +419,50 @@ def _file_to_sheet(
     except SheetsClientError as exc:
         _fail(repo, invoice, "sheet_write_failed", str(exc))
         return
-    _advance(repo, invoice, InvoiceStatus.POSTED)
-    # Record risk flags on the POSTED event too (symmetric with held) so the detail
-    # view's Decision section can show visibility-only medium/low flags.
-    record(repo, invoice.id, AuditAction.POSTED, reason=decision.rationale, details={
-        "sheet_row_ref": outcome.sheet_row_ref,
-        "deduped": outcome.deduped,
-        "risk_flags": [f.model_dump(mode="json") for f in decision.risk_flags],
-    })
+    with repo.transaction():
+        _advance(repo, invoice, InvoiceStatus.POSTED)
+        # Record risk flags on the POSTED event too (symmetric with held) so the detail
+        # view's Decision section can show visibility-only medium/low flags.
+        record(
+            repo,
+            invoice.id,
+            AuditAction.POSTED,
+            reason=decision.rationale,
+            details={
+                "sheet_row_ref": outcome.sheet_row_ref,
+                "deduped": outcome.deduped,
+                "risk_flags": [f.model_dump(mode="json") for f in decision.risk_flags],
+            },
+        )
 
 
 def _fail(repo: Repository, invoice: Invoice, kind: str, message: str) -> None:
-    repo.add_exceptions([build_exception(invoice.id, kind, message=message)])
-    invoice.status = InvoiceStatus.FAILED
-    invoice.updated_at = datetime.now(timezone.utc)
-    repo.save_invoice(invoice)
-    record(repo, invoice.id, AuditAction.FAILED, actor=Actor.SYSTEM,
-           reason=message, details={"kind": kind})
+    with repo.transaction():
+        repo.add_exceptions([build_exception(invoice.id, kind, message=message)])
+        invoice.status = InvoiceStatus.FAILED
+        invoice.updated_at = datetime.now(UTC)
+        repo.save_invoice(invoice)
+        record(
+            repo,
+            invoice.id,
+            AuditAction.FAILED,
+            actor=Actor.SYSTEM,
+            reason=message,
+            details={"kind": kind},
+        )
+
+
+def _supersede_exceptions(repo: Repository, invoice_id: str) -> list[str]:
+    """Clear the previous pass's exceptions before a new pass (#0004).
+
+    Exceptions describe the item's *current* state (why it's held/failed now), so
+    a rerun/recover replaces them rather than piling up stale hold reasons. The
+    superseded types are returned for the audit event, and each HELD/FAILED event
+    already recorded its reason, so history isn't lost.
+    """
+    superseded = sorted({e.type for e in repo.get_exceptions(invoice_id)})
+    repo.clear_exceptions(invoice_id)
+    return superseded
 
 
 def rerun(
@@ -401,19 +495,30 @@ def rerun(
     # the stale AI values that the correction unblocked.
     invoice.metadata = extraction.metadata
     received = latest_details(audit, AuditAction.RECEIVED)
-    source = {k: received.get(k)
-              for k in ("channel", "message_id", "subject", "sender", "attachment")}
+    source = {
+        k: received.get(k) for k in ("channel", "message_id", "subject", "sender", "attachment")
+    }
 
-    record(repo, invoice_id, AuditAction.RERUN, actor=Actor.HUMAN,
-           reason="rerun with corrected data",
-           details={"corrected_fields": sorted(corrections.metadata_overlay(audit))})
-    _advance(repo, invoice, InvoiceStatus.RERUN_REQUESTED)
+    with repo.transaction():
+        record(
+            repo,
+            invoice_id,
+            AuditAction.RERUN,
+            actor=Actor.HUMAN,
+            reason="rerun with corrected data",
+            details={
+                "corrected_fields": sorted(corrections.metadata_overlay(audit)),
+                "superseded_exceptions": _supersede_exceptions(repo, invoice_id),
+            },
+        )
+        _advance(repo, invoice, InvoiceStatus.RERUN_REQUESTED)
 
     try:
         # Rerun bypasses duplicate detection: a reviewer rerunning a held item has
         # judged it distinct, so the dup guard must not re-hold it (R19 resolution).
-        _categorize_and_file(repo, invoice, extraction, source,
-                             llm=llm, sheets=sheets, check_duplicates=False)
+        _categorize_and_file(
+            repo, invoice, extraction, source, llm=llm, sheets=sheets, check_duplicates=False
+        )
     except Exception as exc:  # same isolation contract as process
         _fail(repo, invoice, "stage_failure", str(exc))
 
@@ -445,12 +550,23 @@ def recover(
 
     audit = repo.get_audit(invoice_id)
     received = latest_details(audit, AuditAction.RECEIVED)
-    source = {k: received.get(k)
-              for k in ("channel", "message_id", "subject", "sender", "attachment")}
+    source = {
+        k: received.get(k) for k in ("channel", "message_id", "subject", "sender", "attachment")
+    }
 
-    record(repo, invoice_id, AuditAction.RECOVERED, actor=Actor.SYSTEM,
-           reason="retry failed stage", details={"from_status": invoice.status.value})
-    _advance(repo, invoice, InvoiceStatus.RERUN_REQUESTED)
+    with repo.transaction():
+        record(
+            repo,
+            invoice_id,
+            AuditAction.RECOVERED,
+            actor=Actor.SYSTEM,
+            reason="retry failed stage",
+            details={
+                "from_status": invoice.status.value,
+                "superseded_exceptions": _supersede_exceptions(repo, invoice_id),
+            },
+        )
+        _advance(repo, invoice, InvoiceStatus.RERUN_REQUESTED)
 
     try:
         if latest_details(audit, AuditAction.EXTRACTED):
@@ -466,8 +582,9 @@ def recover(
         # so the guard must run here too — otherwise recovering such an item could
         # post a true duplicate (R19). (Rerun, by contrast, skips it: a reviewer
         # rerunning a held item has judged it distinct.)
-        _categorize_and_file(repo, invoice, extraction, source,
-                             llm=llm, sheets=sheets, check_duplicates=True)
+        _categorize_and_file(
+            repo, invoice, extraction, source, llm=llm, sheets=sheets, check_duplicates=True
+        )
     except Exception as exc:  # same isolation contract as process
         _fail(repo, invoice, "stage_failure", str(exc))
 
@@ -481,9 +598,10 @@ def _reextract(
     extraction failure). The original document isn't re-fetched — the parsed text
     captured at PARSED time is the input."""
     detail = repo.get_detail(invoice_id) or {}
-    source = {k: latest_details(audit, AuditAction.RECEIVED).get(k)
-              for k in ("channel", "message_id", "subject", "sender", "attachment",
-                        "attachment_path")}
+    source = {
+        k: latest_details(audit, AuditAction.RECEIVED).get(k)
+        for k in ("channel", "message_id", "subject", "sender", "attachment", "attachment_path")
+    }
     # A real PDF invoice stored its bytes at intake. Without re-surfacing them, the
     # extraction-client picker (`_is_real_pdf`) would fall back to the JSON stand-in
     # and re-extract the PDF as empty (a Gmail/Cloud PDF has no local
@@ -543,5 +661,8 @@ def process_all(samples: list[dict], repo: Repository, **clients) -> list[Invoic
         try:
             results.append(process(sample, repo, **clients))
         except Exception:  # defensive: even an unexpected error can't halt the batch
+            source = sample.get("source", {})
+            ref = source.get("message_id") or source.get("attachment") or source.get("subject")
+            logger.exception("process_all: unexpected error processing %s", ref)
             continue
     return results

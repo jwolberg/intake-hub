@@ -9,8 +9,6 @@
 import { useState } from "react";
 
 // PRD §10 Suggested filters, in display order. Keys match the API's FILTER_KEYS.
-// (The clinical-trial mismatched_metadata/unmatched_line_items keys still exist
-// server-side but never match post-pivot, so they're dropped here.)
 const FILTERS = [
   ["posted", "Posted"],
   ["held", "Held"],
@@ -23,7 +21,7 @@ function pct(value) {
   return value == null ? "—" : `${Math.round(value * 100)}%`;
 }
 
-export default function InvoiceList({ invoices, onSelect }) {
+export default function InvoiceList({ invoices, total, onLoadMore, onSelect }) {
   const [active, setActive] = useState(null);
 
   if (invoices.length === 0) {
@@ -106,6 +104,14 @@ export default function InvoiceList({ invoices, onSelect }) {
             ))}
           </tbody>
         </table>
+      )}
+      {total > invoices.length && (
+        <p className="muted small">
+          Showing {invoices.length} of {total} (filter counts cover loaded rows){" "}
+          <button className="small-btn" onClick={onLoadMore}>
+            Load more
+          </button>
+        </p>
       )}
     </div>
   );

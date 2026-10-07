@@ -2160,3 +2160,319 @@ An 8-angle multi-agent review of the whole pivot surfaced these real issues, now
   `test_build_gmail_inbox_constructs_client_with_injected_repo` failed. Fixed the fixture
   to a real `Fernet.generate_key()` value — the encrypted persistence path now genuinely
   runs. (Confirms the production encrypt/decrypt + at-rest persistence work end to end.)
+
+## 2026-10-06 — Build-quality audit fixes (tickets #0001–#0017, branch `fix/audit-hardening`)
+
+Audit of the repo against current standards filed 17 tickets; each lands as its own commit.
+Decisions taken up front (asked): auth = IAP + HTTPS load balancer (#0001); migrations =
+in-repo numbered-SQL runner, no new dependency (#0013); Python 3.12 + `uv pip compile
+--generate-hashes` lockfiles generated from the existing `requirements*.txt`, installed with
+plain pip (#0008; consistent with the "keep pip + requirements files" prior).
+
+### #0009 — ruff format repo-wide
+- Formatting-only commit (49 files). Its SHA goes in `.git-blame-ignore-revs` in a follow-up
+  commit (a commit can't contain its own hash).
+
+### #0008 — pin dependencies, Python 3.12 everywhere
+- `backend/requirements.lock` / `requirements-dev.lock` generated with `uv pip compile
+  --generate-hashes --universal` from the existing `.txt` files (still the human-edited
+  source). Docker installs with `pip --require-hashes`. Regeneration steps in RUNBOOK.
+- Python 3.12: Dockerfile, `.python-version`, ruff `target-version`. Local `.venv` was rebuilt
+  on 3.12 (old 3.10 venv moved out of the repo, not deleted).
+- Lock resolution bumped some majors within existing ranges (e.g. starlette 1.x via fastapi
+  0.142, pypdf 5.9); full suite green on 3.12, so accepted.
+- Ruff `UP042` (`str, Enum` → `StrEnum`) ignored: it changes `str(member)` output, so it's a
+  behavior change, not a lint fix. `UP017` (`datetime.UTC`) applied.
+- Hub images now `COPY package-lock.json` + `npm ci`.
+
+### #0007 — real CI (Python + Postgres, hub build, image builds)
+- **Bug found while wiring Postgres:** `init_schema()` failed on every *fresh* database —
+  `_split_statements` split on `;` before stripping comments, and the `oauth_tokens` comment
+  in `schema.sql` contains `(e.g. 'gmail');`, so a comment fragment was sent as SQL. The
+  Postgres test hid it because it skipped on *any* `SQLAlchemyError`. Fixed the splitter
+  (comments stripped first) with a regression test; a fresh deploy would have booted with no
+  tables. (#0013 replaces startup schema init with migrations anyway.)
+- Shared `tests/integration/conftest.py` `pg_repo` fixture: skips only on an unreachable DB
+  (`OperationalError`), truncates between tests, and `REQUIRE_POSTGRES=1` (set in CI) turns a
+  skip into a failure.
+- CI jobs: backend (ruff check + format check + pytest against a Postgres 16 service), hub
+  (`npm ci && npm run build`), images (docker build of both Dockerfiles — Docker isn't running
+  locally, so CI is where image builds get verified). Workflow validated as YAML only;
+  actionlint isn't installed and it hasn't run on GitHub yet.
+- Locally verified against a throwaway Postgres 17: 251 passed, 0 skipped.
+
+### #0002 — client-supplied attachment_path no longer trusted
+- `/api/invoices/process` now takes a strict `IntakeSample` model (`extra="forbid"`) with no
+  `attachment_path`; sending one is a 422 and nothing is stored. Verified the original
+  exploit request now returns 422 with 0 items stored.
+- Size limits: a decoded `attachment_b64` over 20 MiB → 413; any request whose
+  `Content-Length` exceeds 28 MiB → 413 before the body is read. *Tradeoff:* a chunked
+  request without `Content-Length` isn't caught by the middleware (the attachment check still
+  bounds what gets processed; Cloud Run also caps requests at 32 MiB).
+- **Deviation (scope):** inline-base64 PDFs previously got no highlight citations —
+  `_attach_citations` only worked from a local path, so Gmail/cloud PDFs never had overlays.
+  Since every HTTP submission is now inline, `seed_hub` would have lost the overlay too, so
+  `StubOCRClient.extract_words` (and the `OCRClient` protocol) now also accepts PDF bytes.
+- `seed_hub` posts PDFs inline like `seed_cloud`; `docker-compose.override.yml` (whose only
+  job was mounting host sample paths into the api container) is removed.
+- Note: `seed_hub`/`seed_cloud` regenerate `samples/pdf/*.pdf` on every run — that's why
+  those files showed as modified in the working tree before this branch. Left untouched.
+
+### #0001 — authentication via IAP + HTTPS load balancer
+- Chosen (asked): IAP in front of both services on one load balancer — `/api/*` → API,
+  `/*` → hub, same origin so the IAP cookie covers both and the hub calls `/api` relatively.
+- **Defense in depth:** the API verifies IAP's signed `X-Goog-IAP-JWT-Assertion` itself
+  (`backend/api/auth.py`: ES256 signature against IAP's published keys, audience, issuer,
+  expiry, email). Implemented as middleware on every `/api/*` path, not per-route
+  `Depends`, so a new route can't ship unauthenticated by omission. `/health` stays public.
+- **Fail closed:** `AUTH_MODE` defaults to `iap`; startup raises if `IAP_AUDIENCE` is unset
+  or the mode is unknown. Compose and the test suite set `AUTH_MODE=disabled` explicitly.
+- IAP public keys are cached for 1 h; if fetching them fails the API returns 503, not 401.
+- Hub: a 401 triggers a full reload, which goes back through IAP sign-in. `seed_*` and
+  `inbox_poller` send `Authorization: Bearer $IAP_TOKEN` when it's set.
+- Tests sign real ES256 JWTs with a throwaway key (valid / wrong audience / wrong issuer /
+  expired / no email / forged signature / garbage), plus middleware 401/200/503 and
+  `/health` staying public.
+- **Not verified:** the actual LB/IAP/NEG commands in DEPLOY.md §6 haven't been run —
+  billing is off and they create billable, outward-facing infra (that's #0017, needs your
+  go-ahead). `validate_config` is unit-tested; the lifespan hook that calls it isn't, since
+  TestClient without `with` doesn't run lifespan.
+- **Tradeoff:** no per-user audit attribution yet — the verified email is set on
+  `request.state.user` but audit events still record `actor=human`. Possible follow-up.
+
+### #0003 — status-transition guards on QC actions
+- One table, `backend/domain/transitions.py`, decides which QC actions each status allows.
+  Disallowed actions are a 409, and the detail payload exposes `allowed_actions` so the hub
+  hides buttons that would fail.
+- **Decision (posted items):** corrections/rerun/reject/escalate on `posted` are 409. The
+  Sheet append is deduped by item id, so a post-filing correction + rerun could never reach
+  the Sheet; allowing it would only make the hub disagree with the ledger. Fixing a filed
+  row = edit it in the Sheet. Notes / "mark reviewed" / citation confirms still work on any
+  status (they don't change state), so spot-checks are unaffected.
+- `rejected` is terminal (AE4). The audit repro (hold → reject → correct → rerun → posted)
+  now 409s at the correction and the rerun, and no POSTED event is written.
+- **Behavior change:** `/rerun` on a `failed` item is now 409; `/retry` is the failed path
+  (rerun reuses the extraction, which a failed item may not have).
+- Two existing tests that corrected a *posted* item now use a held one.
+- Guards are enforced at the API. `orchestrator.rerun()` itself doesn't check status — the
+  API is its only caller.
+
+### #0004 — stale hold exceptions superseded on rerun/recover
+- Exceptions now mean "why the item is held/failed *now*". `rerun` and `recover` clear the
+  previous pass's exceptions before running (`Repository.clear_exceptions`), so a rerun that
+  files shows 0 exceptions, loses its stale needs_review/low_confidence tags, and leaves
+  notifications/review-queue counts. A rerun that holds again has only the new reasons
+  (replaced, not doubled).
+- Chose clear over a "resolved" flag: no schema change, and history is already on the audit
+  trail (each HELD/FAILED event records its reason). The RERUN/RECOVERED event also lists
+  `superseded_exceptions` (the types it cleared).
+- Checked: metrics and ledger integrity don't read exception history.
+
+### #0005 — inbox fetch serialized
+- **Confirmed the race before fixing** (it was only inferred in the audit): two overlapping
+  fetches over the 6-message mock inbox created 8 items.
+- Fix: `Repository.inbox_fetch_lock()` — a Postgres session-level advisory lock on a
+  dedicated connection (works across Cloud Run instances), and a non-blocking
+  `threading.Lock` in memory. An overlapping fetch gets **409** and the poller retries next tick.
+- **Tradeoff:** a lock around the whole fetch instead of claiming each message before
+  processing. Claim-first is at-most-once — a crash mid-pipeline would silently drop that
+  receipt from the ledger. The lock keeps today's at-least-once semantics (poison messages
+  are still marked seen).
+- The lock is unlocked explicitly in `finally`, because a pooled connection keeps session
+  locks after it's returned. Tests cover release after success and after an exception.
+- Tests run two fetches concurrently (barrier + a slow inbox) against both Postgres and the
+  in-memory repo: exactly one 200 and one 409, each message processed once. Passed 3
+  repeated runs; there's a small theoretical flake window if a CI runner stalls one thread
+  for more than 0.5 s.
+
+### #0006 — status + audit writes are atomic
+- `Repository.transaction()`: on Postgres a `ContextVar` holds the active connection, so
+  every repository call inside the block (reads included, so they see the uncommitted writes)
+  joins one transaction; nested calls join the outer one. The in-memory repo snapshots its
+  state and restores it on error, so tests exercise the same semantics.
+- Wrapped: every orchestrator status change with its audit event (plus the exceptions or
+  line items/source text written at that step), `_fail`, the rerun/recover preamble (which
+  includes superseding exceptions), and the five API routes that record + set status.
+- The Sheet append deliberately stays outside any DB transaction (external side effect;
+  the existing dedup-ledger ordering is unchanged). Only the POSTED status + event that
+  follow it are atomic.
+- `inbox_fetch_lock` keeps its own dedicated connection (not the contextvar), since the
+  advisory lock must outlive individual transactions.
+- Tests inject a crash between writes (a HELD audit append; a status save after a CORRECTED
+  record), against both Postgres and in-memory: no orphaned hold exceptions, no CORRECTED
+  event without its status, and nested blocks roll back with the outer one.
+
+### #0015 — liveness vs readiness; batch errors logged
+- `/health` stays the liveness probe (always 200; `db` is now informational only). The new
+  `/ready` returns 503 while the DB is unreachable — use it for uptime alerts. Both are
+  outside `/api`, so the app doesn't require auth for them (at the edge everything is still
+  behind IAP).
+- `process_all` logs each swallowed exception (`logger.exception`) with the item's
+  message id / attachment / subject.
+
+### #0014 — containers, CORS, security headers
+- Backend image runs as an unprivileged `app` user (uid 10001). Runtime writes only go to
+  `/tmp` (Drive downloads), which stays writable.
+- Hub image is `nginxinc/nginx-unprivileged` (uid 101, 8080), and `RUN nginx -t` validates
+  the config during the build. There's no local nginx/Docker, so the CI `images` job is
+  where it gets checked — **not verified locally**.
+- nginx sends CSP, nosniff, `X-Frame-Options: DENY`, Referrer-Policy, Permissions-Policy.
+  The CSP allows only same origin plus Google Fonts (the one third party in `index.html`)
+  and needs no `'unsafe-inline'` (the hub has no inline scripts or style attributes). A
+  split-origin build would need its API origin added to `connect-src`/`img-src`.
+- CORS narrowed to GET/POST and `Content-Type`/`Authorization`. **Also fixed a middleware
+  ordering bug:** Starlette makes the last-added middleware outermost, so CORS (added first)
+  ran *inside* auth — a cross-origin preflight got a bare 401 with no CORS headers. CORS is
+  now registered last (outermost), with a regression test that fails without the fix.
+- Pre-existing, not changed: the mock inbox can't render demo PDFs inside the backend image
+  (`samples/` and reportlab aren't in it). Demo seeding goes through `seed_hub`/`seed_cloud`.
+
+### #0011 — pre-pivot leftovers removed
+- Removed: `ContextCandidate`/`ResolvedContext`/`CatalogItem`/`MatchResult` models,
+  `Repository.get_context`/`get_matches` (+ the `context`/`matches` keys in detail payloads),
+  `corrections.match_overlay`/`apply_match_overlay`, the `POST
+  /api/invoices/{id}/corrections/line-item` route and `LineItemCorrection` model, the hub's
+  `correctLineItem` client, and the unused `backend/clients/fixtures.py` (catalog fixtures).
+  **API change:** the line-item correction route is gone (it corrected catalog matches that
+  no longer exist; the hub didn't call it).
+- **Also fixed:** the live-LLM extraction prompts (text and vision) still told the model to
+  extract "clinical-trial invoice" metadata. Reworded to "receipt or invoice". Offline
+  stubs are unaffected; **not exercised against the live model** here.
+- **Kept, with reasons:**
+  - Legacy `InvoiceStatus`/`AuditAction` values (`context_resolved`, `catalog_matched`,
+    `submitted`, …) and the matching/catalog hold-reason codes in `taxonomy.py`: nothing
+    emits them, but rows written before the pivot (e.g. the old prod DB) must still load and
+    render. Comments now say so.
+  - `InvoiceMetadata.sponsor_name`/`study_name`/`protocol_number`/`site_identifier`: still
+    live (PDF parser labels, categorization keyword scan, hub display, sample data).
+    Removing them changes extraction/categorization results, so that's filed as follow-up
+    **#0018**.
+- The `invoice` → `item` domain rename stays out of scope (breaking: table + API paths).
+
+### #0012 — N+1 queries, pagination, lazy page renders
+- Measured before fixing (Postgres): `/api/invoices` made 7 queries for 3 items and 25 for
+  12; `/api/review-queue` 7 → 34; `/api/notifications` 3 → 12. Now constant, using batch
+  reads `get_exceptions_by_invoice` / `get_audit_by_invoice` (the list loads only CORRECTED
+  events, which are all the metadata overlay needs). `/api/metrics` batched the same way.
+- `list_invoices` / `get_invoice` no longer `SELECT *` — they used to pull every stored
+  PDF blob and the source text on each list request. A test asserts no list query touches
+  those columns.
+- `/api/invoices` takes `limit` (default 200, max 1000) and `offset`, applied *after* the
+  filter, with the filtered total in `X-Total-Count`. The body is still a list, so existing
+  callers are unaffected. The hub shows "Load more". **Tradeoff:** filtering and tags are
+  still computed in Python over all items (now in 3 queries); filter-chip counts in the
+  hub cover loaded rows only (labeled). SQL-side filtering would need the tag logic in
+  SQL — not worth it at this scale.
+- Pages: detail and `/pages` read page geometry only (no rasterization). Computed dims
+  matched `get_pixmap` output exactly on the sample PDFs and an odd-sized page. An image
+  request renders just its page, cached in a 32-entry LRU keyed by item id + page (a stored
+  PDF never changes after intake) or path + mtime + page.
+
+### #0013 — versioned schema migrations
+- Chosen (asked): a small in-repo runner, `backend/db/migrate.py`, with no new dependency.
+  Numbered `backend/db/migrations/NNNN_name.sql` files are applied in order, each in its own
+  transaction together with its `schema_migrations` row (Postgres DDL is transactional, so
+  a failure leaves neither partial DDL nor a version row). A transaction-scoped advisory
+  lock serializes concurrent runners. Misnamed `.sql` files and duplicate versions are
+  hard errors.
+- `0001_baseline.sql` = the old `schema.sql` (moved with `git mv`). It's all `IF NOT
+  EXISTS`, so a database created by the old startup `init_schema` adopts it without
+  changes — tested with a pre-populated row surviving. **No separate "stamp" command
+  needed.**
+- **Behavior change:** the API no longer creates or alters the schema on startup
+  (`init_schema` removed). Startup logs an error if migrations are pending, and `/ready`
+  returns 503 with `"schema": "pending"` until they're applied.
+- Wired in: compose `migrate` service (the API waits for it to complete), a CI step before
+  pytest, a Cloud Run job in DEPLOY.md, and a RUNBOOK "Migrations" section. The CLI was
+  exercised on a fresh DB (`--status` exit 1 → apply → exit 0).
+- Tests use a throwaway database per test (CREATE/DROP DATABASE), so they need a role that
+  can create databases — true for the CI service container and local trust auth.
+- **Not verified:** the compose `migrate` service and the Cloud Run job (no Docker here,
+  billing off).
+
+### #0010 — hub lint + component tests
+- ESLint 9 flat config (JS recommended + react + react-hooks v7) via `npm run lint`, zero
+  errors. It caught one real issue: `App` called `setDetail(null)` synchronously in an
+  effect; the item is now cleared in the select/back handler, so a stale item no longer
+  flashes while the next loads.
+- Vitest + Testing Library (`npm test`, jsdom): list filter chips + Load more, QC action
+  calls (exact URL/method/body), status-gated buttons, and the "Mark reviewed" gate for
+  uncertain citations. Mutation-checked: disabling the gate, or ignoring
+  `allowed_actions`, each fails a test.
+- Fixtures are **generated from the real API** (`python -m backend.tools.gen_hub_fixtures`)
+  rather than hand-written, so API shape drift breaks the hub tests. Regenerate after API
+  changes.
+- **Deviation / dependency decision:** Vitest 3 (the newest that supports Vite 5) carries a
+  *critical* advisory (tinypool) and the `@vitest/mocker` file-read bug, and the existing
+  Vite 5 already had *high* advisories. Rather than add known-vulnerable tooling, upgraded
+  **Vite 5 → 8.3.3** and `@vitejs/plugin-react` 4 → 6.1.2 alongside Vitest 5.0.3; `npm audit`
+  is now 0. The hub builds on Vite 8; dev server not exercised in a browser here. jsdom
+  pinned to 26 (jsdom 30 needs Node ≥ 22.22; local is 22.14). New dev deps are pinned exact.
+- CI hub job: `npm ci` → lint → test → build.
+
+### #0016 — docs drift
+- `CLAUDE.md` (it was an untracked template, now committed): real description and status,
+  pickup steps (venv from the lock, compose with migrate, Postgres-backed tests, hub
+  lint/test), corrected conventions (the template said bun + Tailwind; this repo is pip +
+  npm with plain CSS), and repo-specific sensitive surfaces (IAP auth, no client file paths,
+  Gmail token, Sheet dedup). Also fixed its link to `docs/ARCHITECTURE.md` (case).
+- `backend/api/main.py` module docstring now describes the real routes, auth, middleware
+  order, and migrations (it still said "Phase 0 exposes only /health").
+- `DEPLOY.md`: new "Current live state (checked 2026-10-06)" section — billing off, SQL
+  suspended, the pre-pivot public `invoicescreener-*` services, link to #0017. Cost note now
+  includes the load balancer.
+- README test section no longer hardcodes a stale test count.
+
+### Review follow-ups (fresh-context reviewer, 2026-10-06)
+A reviewer agent checked every ticket's acceptance criteria against the diff and probed for
+bugs. Real defects are fixed below, each in its own commit tagged with the ticket it
+belongs to.
+
+- **#0015 — `/health` hung ~75 s on a black-holed DB** (the reviewer measured it with an
+  unroutable host): no connect timeout. The engine now sets `connect_timeout=5` and
+  `pool_timeout=5`; a test asserts an unroutable host fails in under 8 s.
+- **#0001 — auth hardening from review:**
+  - Token verification ran *on the event loop*, so a slow gstatic key fetch stalled every
+    request, `/health` included (the reviewer measured 2.9 s). It now runs in the
+    threadpool; a test checks that `/health` answers within 1 s while a key fetch takes 1.5 s.
+  - Key cache: stale keys keep working if the endpoint is down; with no keys, a failure is
+    remembered for 30 s (no per-request network storm); a token naming an unknown key id
+    forces one refetch (key rotation), rate-limited to once a minute.
+  - `/docs`, `/redoc`, `/openapi.json` now require auth too (they were public in IAP mode).
+  - Hub: a 401 reloaded the page unconditionally, so a persistent 401 looped forever. Now at
+    most one reload per 30 s (sessionStorage guard), then a "sign in again" error.
+- **#0012 — `X-Total-Count` wasn't readable cross-origin:** CORS didn't expose it, so in
+  split-origin dev (hub :5173 → API :8000) the hub fell back to `rows.length` and "Load
+  more" never appeared (silently capped at 200). Now in `expose_headers`; same-origin
+  production was unaffected. Not changed: the list stays oldest-first (existing behavior),
+  so with more than 200 items the newest need "Load more" — worth revisiting as a UX call.
+- **#0003 — stuck items were dead ends:** the first transition table allowed nothing for
+  in-flight pipeline states. An item left at e.g. `rerun_requested` by a crashed run (its
+  exceptions already superseded) had no button at all — worse than `main`. In-flight and
+  legacy states now allow `retry` / `escalate` / `reject`. Retry is safe even if a run
+  is somehow still going: the Sheet append is deduped by item id. Added an explicit full
+  status × action matrix test, plus a stuck-item → retry → posted test.
+- **Accepted, filed as a follow-up:** the status check and the write aren't atomic, so a
+  reject racing a rerun on the same item could still end rejected-but-filed. That needs two
+  simultaneous clicks on one item in a single-user tool; fixing it properly needs a
+  row lock or compare-and-set held across the Sheet append. See the follow-up ticket.
+- **#0005 — the lock-release tests couldn't catch a leak:** Postgres session locks are
+  re-entrant and the pool returns the same connection, so the old tests passed even with
+  the unlock deleted (the reviewer showed this). They now probe from an independent
+  session; mutation-checked — deleting the unlock fails both.
+- **#0016 — two stale docstrings:** `PostgresRepository` (still said the lifespan applies
+  the schema) and `seed_cloud` (contrasted itself with a `seed_hub` path behavior that no
+  longer exists).
+- **Reviewer findings not fixed here** (low; documented):
+  - The migration splitter doesn't handle an inline `-- comment` containing `;` after a
+    statement, `$$` bodies, or `CREATE INDEX CONCURRENTLY` (documented in `migrate.py`).
+  - A chunked request with no `Content-Length` is buffered before the attachment-size check.
+  - A crash between `process()` and `mark_seen()` re-processes that message (at-least-once,
+    by design — see #0005).
+  - `InMemoryRepository.transaction` isn't thread-safe (tests/offline only).
+  - `_attach_citations` still renders the full PDF once at intake (`lru_cache(16)`).
+  - `/ready` is public and reveals db/schema state.
+  - Compose publishes 5432/8000 on all interfaces with the dev password (local only).
+  - **Before redeploy (#0017):** the old prod API was public, so its DB may hold
+    RECEIVED events with attacker-written `attachment_path`s, which the page/PDF endpoints
+    still read. Scrub or ignore those rows before pointing new code at that DB.

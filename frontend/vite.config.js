@@ -8,4 +8,9 @@ export default defineConfig({
     host: true,
     port: 5173,
   },
+  // Component tests (#0010): `npm test`.
+  test: {
+    environment: "jsdom",
+    setupFiles: ["./src/test/setup.js"],
+  },
 });

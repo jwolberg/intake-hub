@@ -1,0 +1,701 @@
+{
+  "invoice": {
+    "id": "invoice_e92f0b0963e0",
+    "source": "email",
+    "status": "held",
+    "decision": "hold",
+    "decision_confidence": 0.6,
+    "metadata": {
+      "invoice_number": "INV-1006",
+      "invoice_date": "2026-05-22",
+      "due_date": null,
+      "vendor_name": "Riverside Clinical Research",
+      "sponsor_name": "Northwind Therapeutics",
+      "study_name": "NW-CARDIO-1",
+      "protocol_number": "NWT-101",
+      "site_identifier": "Riverside Clinical Research",
+      "billing_period": null,
+      "currency": "USD",
+      "total_amount": "1200.00",
+      "tax": null,
+      "payment_terms": null
+    },
+    "created_at": "2026-10-07T00:17:15.710159Z",
+    "updated_at": "2026-10-07T00:17:16.436540Z"
+  },
+  "source_text": "INVOICE\nInvoice Number: INV-1006\nInvoice Date: 2026-05-22\nVendor: Riverside Clinical Research\nSponsor: Northwind Therapeutics\nStudy: NW-CARDIO-1\nProtocol: NWT-101\nSite: Riverside Clinical Research\nCurrency: USD\nTotal Amount: 1200.00\nLine Items\nDescription | Qty | Unit Price | Line Total\nPatient screening visit | 2 | 300.00 | 600.00\nECG |  |  | \nRandomization visit | 1 | 450.00 | 450.00\nPharmacy dispensing fee | 2 | 75.00 | 150.00\n",
+  "line_items": [
+    {
+      "id": "line_cbd9f3c7fe43",
+      "invoice_id": "invoice_e92f0b0963e0",
+      "raw_description": "Patient screening visit",
+      "normalized_description": null,
+      "quantity": "2",
+      "unit_price": "300.00",
+      "total": "600.00",
+      "service_period": null,
+      "raw_source_text": "{\"quantity\": \"2\", \"raw_description\": \"Patient screening visit\", \"total\": \"600.00\", \"unit_price\": \"300.00\"}",
+      "extraction_confidence": 0.9
+    },
+    {
+      "id": "line_8d6baa928652",
+      "invoice_id": "invoice_e92f0b0963e0",
+      "raw_description": "ECG",
+      "normalized_description": null,
+      "quantity": null,
+      "unit_price": null,
+      "total": null,
+      "service_period": null,
+      "raw_source_text": "{\"quantity\": null, \"raw_description\": \"ECG\", \"total\": null, \"unit_price\": null}",
+      "extraction_confidence": 0.6
+    },
+    {
+      "id": "line_dd64537aed7e",
+      "invoice_id": "invoice_e92f0b0963e0",
+      "raw_description": "Randomization visit",
+      "normalized_description": null,
+      "quantity": "1",
+      "unit_price": "450.00",
+      "total": "450.00",
+      "service_period": null,
+      "raw_source_text": "{\"quantity\": \"1\", \"raw_description\": \"Randomization visit\", \"total\": \"450.00\", \"unit_price\": \"450.00\"}",
+      "extraction_confidence": 0.9
+    },
+    {
+      "id": "line_b947d961916d",
+      "invoice_id": "invoice_e92f0b0963e0",
+      "raw_description": "Pharmacy dispensing fee",
+      "normalized_description": null,
+      "quantity": "2",
+      "unit_price": "75.00",
+      "total": "150.00",
+      "service_period": null,
+      "raw_source_text": "{\"quantity\": \"2\", \"raw_description\": \"Pharmacy dispensing fee\", \"total\": \"150.00\", \"unit_price\": \"75.00\"}",
+      "extraction_confidence": 0.9
+    }
+  ],
+  "exceptions": [
+    {
+      "id": "exc_667f15bb4077",
+      "invoice_id": "invoice_e92f0b0963e0",
+      "type": "moderate_extraction_confidence",
+      "severity": "medium",
+      "message": "some extracted fields are only moderately confident (0.6)",
+      "created_at": "2026-10-07T00:17:16.393750Z"
+    },
+    {
+      "id": "exc_789f4f971975",
+      "invoice_id": "invoice_e92f0b0963e0",
+      "type": "low_confidence",
+      "severity": "high",
+      "message": "overall decision confidence 0.6 below the file threshold",
+      "created_at": "2026-10-07T00:17:16.393802Z"
+    }
+  ],
+  "audit": [
+    {
+      "id": "evt_60a84b54339b",
+      "invoice_id": "invoice_e92f0b0963e0",
+      "actor": "system",
+      "action": "received",
+      "details": {
+        "channel": "email",
+        "message_id": null,
+        "subject": "Invoice INV-1006 \u2014 Riverside Clinical Research",
+        "sender": "billing@riverside-cr.example",
+        "attachment": "inv_uncertain_006.pdf",
+        "attachment_path": null
+      },
+      "timestamp": "2026-10-07T00:17:15.716509Z"
+    },
+    {
+      "id": "evt_9b114c946a26",
+      "invoice_id": "invoice_e92f0b0963e0",
+      "actor": "system",
+      "action": "parsed",
+      "details": {
+        "format": "pdf",
+        "sections": []
+      },
+      "timestamp": "2026-10-07T00:17:15.729527Z"
+    },
+    {
+      "id": "evt_9df42d0cf324",
+      "invoice_id": "invoice_e92f0b0963e0",
+      "actor": "ai",
+      "action": "extracted",
+      "details": {
+        "line_items": 4,
+        "invoice_number": "INV-1006",
+        "fields_extracted": 9,
+        "missing_fields": [
+          "due_date",
+          "billing_period",
+          "tax",
+          "payment_terms"
+        ],
+        "field_confidence": {
+          "invoice_number": 0.95,
+          "invoice_date": 0.95,
+          "due_date": 0.0,
+          "vendor_name": 0.95,
+          "sponsor_name": 0.95,
+          "study_name": 0.95,
+          "protocol_number": 0.95,
+          "site_identifier": 0.95,
+          "billing_period": 0.0,
+          "currency": 0.95,
+          "total_amount": 0.95,
+          "tax": 0.0,
+          "payment_terms": 0.0
+        },
+        "field_evidence": {
+          "invoice_number": "PDF attachment: \"INV-1006\"",
+          "invoice_date": "PDF attachment: \"2026-05-22\"",
+          "vendor_name": "PDF attachment: \"Riverside Clinical Research\"",
+          "sponsor_name": "PDF attachment: \"Northwind Therapeutics\"",
+          "study_name": "PDF attachment: \"NW-CARDIO-1\"",
+          "protocol_number": "PDF attachment: \"NWT-101\"",
+          "site_identifier": "PDF attachment: \"Riverside Clinical Research\"",
+          "currency": "PDF attachment: \"USD\"",
+          "total_amount": "PDF attachment: \"1200.00\""
+        },
+        "citations": [
+          {
+            "page_number": 1,
+            "target_id": "metadata.invoice_number",
+            "quote": "INV-1006",
+            "word_indices": [
+              3
+            ],
+            "bbox": {
+              "x": 0.25349341498480904,
+              "y": 0.11638257961080532,
+              "width": 0.07592155107485704,
+              "height": 0.019083331329653966
+            },
+            "status": "extracted"
+          },
+          {
+            "page_number": 1,
+            "target_id": "metadata.invoice_date",
+            "quote": "2026-05-22",
+            "word_indices": [
+              6
+            ],
+            "bbox": {
+              "x": 0.22753918716330934,
+              "y": 0.13658459981282553,
+              "width": 0.0919182471979677,
+              "height": 0.019083331329653952
+            },
+            "status": "extracted"
+          },
+          {
+            "page_number": 1,
+            "target_id": "metadata.vendor_name",
+            "quote": "Riverside Clinical Research",
+            "word_indices": [
+              8,
+              9,
+              10
+            ],
+            "bbox": {
+              "x": 0.1855882133533752,
+              "y": 0.15678662001484572,
+              "width": 0.2197123758153978,
+              "height": 0.019083331329653952
+            },
+            "status": "extracted"
+          },
+          {
+            "page_number": 1,
+            "target_id": "metadata.sponsor_name",
+            "quote": "Northwind Therapeutics",
+            "word_indices": [
+              12,
+              13
+            ],
+            "bbox": {
+              "x": 0.19457514145795038,
+              "y": 0.17698864021686592,
+              "width": 0.18978587630527474,
+              "height": 0.019083331329653952
+            },
+            "status": "extracted"
+          },
+          {
+            "page_number": 1,
+            "target_id": "metadata.study_name",
+            "quote": "NW-CARDIO-1",
+            "word_indices": [
+              15
+            ],
+            "bbox": {
+              "x": 0.1735996545529833,
+              "y": 0.19719066041888614,
+              "width": 0.12180883120867161,
+              "height": 0.019083331329653952
+            },
+            "status": "extracted"
+          },
+          {
+            "page_number": 1,
+            "target_id": "metadata.protocol_number",
+            "quote": "NWT-101",
+            "word_indices": [
+              17
+            ],
+            "bbox": {
+              "x": 0.19356860989838645,
+              "y": 0.21739268062090633,
+              "width": 0.07689212973600898,
+              "height": 0.019083331329653952
+            },
+            "status": "extracted"
+          },
+          {
+            "page_number": 1,
+            "target_id": "metadata.site_identifier",
+            "quote": "Riverside Clinical Research",
+            "word_indices": [
+              8,
+              9,
+              10
+            ],
+            "bbox": {
+              "x": 0.1855882133533752,
+              "y": 0.15678662001484572,
+              "width": 0.2197123758153978,
+              "height": 0.019083331329653952
+            },
+            "status": "extracted"
+          },
+          {
+            "page_number": 1,
+            "target_id": "metadata.currency",
+            "quote": "USD",
+            "word_indices": [
+              23
+            ],
+            "bbox": {
+              "x": 0.20054247488383375,
+              "y": 0.2577967210249467,
+              "width": 0.03794282402088439,
+              "height": 0.019083331329653952
+            },
+            "status": "extracted"
+          },
+          {
+            "page_number": 1,
+            "target_id": "metadata.total_amount",
+            "quote": "1200.00",
+            "word_indices": [
+              26
+            ],
+            "bbox": {
+              "x": 0.23453102859796263,
+              "y": 0.27799874122696694,
+              "width": 0.06495748781690411,
+              "height": 0.019083331329653952
+            },
+            "status": "extracted"
+          },
+          {
+            "page_number": 1,
+            "target_id": "line_item.line_cbd9f3c7fe43.raw_description",
+            "quote": "Patient screening visit",
+            "word_indices": [
+              38,
+              39,
+              40
+            ],
+            "bbox": {
+              "x": 0.11764705882352941,
+              "y": 0.36196968772194604,
+              "width": 0.22549019607843138,
+              "height": 0.015770228222163007
+            },
+            "status": "extracted"
+          },
+          {
+            "page_number": 1,
+            "target_id": "line_item.line_8d6baa928652.raw_description",
+            "quote": "ECG",
+            "word_indices": [
+              47
+            ],
+            "bbox": {
+              "x": 0.11764705882352941,
+              "y": 0.3821717079239662,
+              "width": 0.02941176470588236,
+              "height": 0.015770228222163063
+            },
+            "status": "uncertain"
+          },
+          {
+            "page_number": 1,
+            "target_id": "line_item.line_dd64537aed7e.raw_description",
+            "quote": "Randomization visit",
+            "word_indices": [
+              51,
+              52
+            ],
+            "bbox": {
+              "x": 0.11764705882352941,
+              "y": 0.40237372812598643,
+              "width": 0.18627450980392155,
+              "height": 0.015770228222163063
+            },
+            "status": "extracted"
+          },
+          {
+            "page_number": 1,
+            "target_id": "line_item.line_b947d961916d.raw_description",
+            "quote": "Pharmacy dispensing fee",
+            "word_indices": [
+              59,
+              60,
+              61
+            ],
+            "bbox": {
+              "x": 0.11764705882352941,
+              "y": 0.42257574832800665,
+              "width": 0.22549019607843138,
+              "height": 0.015770228222163063
+            },
+            "status": "extracted"
+          }
+        ]
+      },
+      "timestamp": "2026-10-07T00:17:16.338372Z"
+    },
+    {
+      "id": "evt_5e92dbfe61fa",
+      "invoice_id": "invoice_e92f0b0963e0",
+      "actor": "ai",
+      "action": "classified",
+      "details": {
+        "document_type": "expense",
+        "confidence": 0.9,
+        "evidence": "vendor + total present (a purchase)",
+        "adversarial": false
+      },
+      "timestamp": "2026-10-07T00:17:16.388088Z"
+    },
+    {
+      "id": "evt_ca1510e28441",
+      "invoice_id": "invoice_e92f0b0963e0",
+      "actor": "ai",
+      "action": "categorized",
+      "details": {
+        "category": "Commissions and fees",
+        "confidence": 0.8,
+        "evidence": "keyword match to 'Commissions and fees' (0.80)",
+        "alternates": [],
+        "rationale": "keyword match to 'Commissions and fees' (0.80)"
+      },
+      "timestamp": "2026-10-07T00:17:16.392206Z"
+    },
+    {
+      "id": "evt_e94a746d073b",
+      "invoice_id": "invoice_e92f0b0963e0",
+      "actor": "ai",
+      "action": "held",
+      "details": {
+        "confidence": 0.6,
+        "risk_flags": [
+          {
+            "type": "missing_optional_fields",
+            "severity": "low",
+            "message": "optional fields not present: due_date, billing_period, tax, payment_terms"
+          },
+          {
+            "type": "moderate_extraction_confidence",
+            "severity": "medium",
+            "message": "some extracted fields are only moderately confident (0.6)"
+          },
+          {
+            "type": "low_confidence",
+            "severity": "high",
+            "message": "overall decision confidence 0.6 below the file threshold"
+          }
+        ],
+        "reason": "overall decision confidence 0.6 below the file threshold"
+      },
+      "timestamp": "2026-10-07T00:17:16.436879Z"
+    }
+  ],
+  "source": {
+    "channel": "email",
+    "subject": "Invoice INV-1006 \u2014 Riverside Clinical Research",
+    "sender": "billing@riverside-cr.example",
+    "attachment": "inv_uncertain_006.pdf",
+    "has_pdf": true
+  },
+  "extraction": {
+    "field_confidence": {
+      "invoice_number": 0.95,
+      "invoice_date": 0.95,
+      "due_date": 0.0,
+      "vendor_name": 0.95,
+      "sponsor_name": 0.95,
+      "study_name": 0.95,
+      "protocol_number": 0.95,
+      "site_identifier": 0.95,
+      "billing_period": 0.0,
+      "currency": 0.95,
+      "total_amount": 0.95,
+      "tax": 0.0,
+      "payment_terms": 0.0
+    },
+    "field_evidence": {
+      "invoice_number": "PDF attachment: \"INV-1006\"",
+      "invoice_date": "PDF attachment: \"2026-05-22\"",
+      "vendor_name": "PDF attachment: \"Riverside Clinical Research\"",
+      "sponsor_name": "PDF attachment: \"Northwind Therapeutics\"",
+      "study_name": "PDF attachment: \"NW-CARDIO-1\"",
+      "protocol_number": "PDF attachment: \"NWT-101\"",
+      "site_identifier": "PDF attachment: \"Riverside Clinical Research\"",
+      "currency": "PDF attachment: \"USD\"",
+      "total_amount": "PDF attachment: \"1200.00\""
+    },
+    "missing_fields": [
+      "due_date",
+      "billing_period",
+      "tax",
+      "payment_terms"
+    ]
+  },
+  "categorization": {
+    "document_type": "expense",
+    "document_type_confidence": 0.9,
+    "category": "Commissions and fees",
+    "category_confidence": 0.8,
+    "alternates": []
+  },
+  "corrections": {
+    "metadata": {},
+    "category": null
+  },
+  "pages": [
+    {
+      "page_number": 1,
+      "width": 1275,
+      "height": 1650
+    }
+  ],
+  "citations": [
+    {
+      "page_number": 1,
+      "target_id": "metadata.invoice_number",
+      "quote": "INV-1006",
+      "word_indices": [
+        3
+      ],
+      "bbox": {
+        "x": 0.25349341498480904,
+        "y": 0.11638257961080532,
+        "width": 0.07592155107485704,
+        "height": 0.019083331329653966
+      },
+      "status": "extracted"
+    },
+    {
+      "page_number": 1,
+      "target_id": "metadata.invoice_date",
+      "quote": "2026-05-22",
+      "word_indices": [
+        6
+      ],
+      "bbox": {
+        "x": 0.22753918716330934,
+        "y": 0.13658459981282553,
+        "width": 0.0919182471979677,
+        "height": 0.019083331329653952
+      },
+      "status": "extracted"
+    },
+    {
+      "page_number": 1,
+      "target_id": "metadata.vendor_name",
+      "quote": "Riverside Clinical Research",
+      "word_indices": [
+        8,
+        9,
+        10
+      ],
+      "bbox": {
+        "x": 0.1855882133533752,
+        "y": 0.15678662001484572,
+        "width": 0.2197123758153978,
+        "height": 0.019083331329653952
+      },
+      "status": "extracted"
+    },
+    {
+      "page_number": 1,
+      "target_id": "metadata.sponsor_name",
+      "quote": "Northwind Therapeutics",
+      "word_indices": [
+        12,
+        13
+      ],
+      "bbox": {
+        "x": 0.19457514145795038,
+        "y": 0.17698864021686592,
+        "width": 0.18978587630527474,
+        "height": 0.019083331329653952
+      },
+      "status": "extracted"
+    },
+    {
+      "page_number": 1,
+      "target_id": "metadata.study_name",
+      "quote": "NW-CARDIO-1",
+      "word_indices": [
+        15
+      ],
+      "bbox": {
+        "x": 0.1735996545529833,
+        "y": 0.19719066041888614,
+        "width": 0.12180883120867161,
+        "height": 0.019083331329653952
+      },
+      "status": "extracted"
+    },
+    {
+      "page_number": 1,
+      "target_id": "metadata.protocol_number",
+      "quote": "NWT-101",
+      "word_indices": [
+        17
+      ],
+      "bbox": {
+        "x": 0.19356860989838645,
+        "y": 0.21739268062090633,
+        "width": 0.07689212973600898,
+        "height": 0.019083331329653952
+      },
+      "status": "extracted"
+    },
+    {
+      "page_number": 1,
+      "target_id": "metadata.site_identifier",
+      "quote": "Riverside Clinical Research",
+      "word_indices": [
+        8,
+        9,
+        10
+      ],
+      "bbox": {
+        "x": 0.1855882133533752,
+        "y": 0.15678662001484572,
+        "width": 0.2197123758153978,
+        "height": 0.019083331329653952
+      },
+      "status": "extracted"
+    },
+    {
+      "page_number": 1,
+      "target_id": "metadata.currency",
+      "quote": "USD",
+      "word_indices": [
+        23
+      ],
+      "bbox": {
+        "x": 0.20054247488383375,
+        "y": 0.2577967210249467,
+        "width": 0.03794282402088439,
+        "height": 0.019083331329653952
+      },
+      "status": "extracted"
+    },
+    {
+      "page_number": 1,
+      "target_id": "metadata.total_amount",
+      "quote": "1200.00",
+      "word_indices": [
+        26
+      ],
+      "bbox": {
+        "x": 0.23453102859796263,
+        "y": 0.27799874122696694,
+        "width": 0.06495748781690411,
+        "height": 0.019083331329653952
+      },
+      "status": "extracted"
+    },
+    {
+      "page_number": 1,
+      "target_id": "line_item.line_cbd9f3c7fe43.raw_description",
+      "quote": "Patient screening visit",
+      "word_indices": [
+        38,
+        39,
+        40
+      ],
+      "bbox": {
+        "x": 0.11764705882352941,
+        "y": 0.36196968772194604,
+        "width": 0.22549019607843138,
+        "height": 0.015770228222163007
+      },
+      "status": "extracted"
+    },
+    {
+      "page_number": 1,
+      "target_id": "line_item.line_8d6baa928652.raw_description",
+      "quote": "ECG",
+      "word_indices": [
+        47
+      ],
+      "bbox": {
+        "x": 0.11764705882352941,
+        "y": 0.3821717079239662,
+        "width": 0.02941176470588236,
+        "height": 0.015770228222163063
+      },
+      "status": "uncertain"
+    },
+    {
+      "page_number": 1,
+      "target_id": "line_item.line_dd64537aed7e.raw_description",
+      "quote": "Randomization visit",
+      "word_indices": [
+        51,
+        52
+      ],
+      "bbox": {
+        "x": 0.11764705882352941,
+        "y": 0.40237372812598643,
+        "width": 0.18627450980392155,
+        "height": 0.015770228222163063
+      },
+      "status": "extracted"
+    },
+    {
+      "page_number": 1,
+      "target_id": "line_item.line_b947d961916d.raw_description",
+      "quote": "Pharmacy dispensing fee",
+      "word_indices": [
+        59,
+        60,
+        61
+      ],
+      "bbox": {
+        "x": 0.11764705882352941,
+        "y": 0.42257574832800665,
+        "width": 0.22549019607843138,
+        "height": 0.015770228222163063
+      },
+      "status": "extracted"
+    }
+  ],
+  "allowed_actions": [
+    "correct",
+    "escalate",
+    "reject",
+    "rerun"
+  ]
+}

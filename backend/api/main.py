@@ -1,44 +1,55 @@
 """FastAPI application entrypoint.
 
-Phase 0 exposes only ``/health`` and bootstraps the schema on startup. The
-invoice routes (``/process``, ``/invoices``, ...) arrive in Phase 1 (P1-T10).
+Routes: ``/health`` (liveness) and ``/ready`` (DB reachable + no pending
+migrations) are public; every ``/api/*`` route — intake, the inbox fetch, the
+list/detail/queue views, and the human QC actions — requires a verified IAP
+identity (``backend/api/auth.py``). Middleware order (outermost first): CORS,
+request-size limit, auth.
 
-Schema bootstrap is best-effort: if the database is not reachable at startup the
-app still boots and ``/health`` reports ``db: down`` rather than crashing — one
-unavailable dependency should be visible, not fatal (ARCHITECTURE.md §15).
+The API never alters the schema (migrations are a deploy step:
+``python -m backend.db.migrate``). If the database is unreachable at startup the
+app still boots and reports it via ``/health``/``/ready`` rather than crashing —
+one unavailable dependency should be visible, not fatal (ARCHITECTURE.md §15).
 """
 
 from __future__ import annotations
 
 import logging
 import pathlib
+from collections import OrderedDict
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Response
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
+from starlette.concurrency import run_in_threadpool
 
 from backend import corrections
+from backend.api import auth
 from backend.audit import latest_details, record
 from backend.audit.metrics import WorkflowMetrics, compute_metrics
 from backend.clients import get_llm_client, get_sheets_client
 from backend.config import settings
-from backend.db import get_engine, init_schema
+from backend.db import get_engine, migrate
 from backend.db.repository import Repository, get_repository
 from backend.domain import Actor, AuditAction, Decision, InvoiceMetadata, InvoiceStatus
 from backend.domain.taxonomy import is_retryable
+from backend.domain.transitions import allowed_actions, is_allowed
 from backend.inbox import InboxClient, get_inbox_client, message_to_sample
 from backend.ledger_integrity import posted_items, sample_posted
 from backend.orchestrator import process, recover, rerun
 from backend.parser.raster import (
-    RenderedPage,
+    PageDims,
     is_rasterizable,
-    render_pages,
-    render_pdf_bytes,
+    page_dims,
+    pdf_page_dims,
+    render_page,
+    render_pdf_page,
 )
 
 logger = logging.getLogger("intakehub.api")
@@ -46,39 +57,119 @@ logger = logging.getLogger("intakehub.api")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Refuse to start with an auth config that would leave the API open (#0001).
+    auth.validate_config(settings)
+    # The schema is migrated as an explicit deploy step (#0013), never here.
     try:
-        init_schema()
-        logger.info("schema initialized")
+        todo = migrate.pending(get_engine())
+        if todo:
+            logger.error(
+                "schema has %d pending migration(s) (%s): run `python -m backend.db.migrate`",
+                len(todo),
+                ", ".join(m.name for m in todo),
+            )
     except SQLAlchemyError as exc:  # pragma: no cover - depends on live DB
-        logger.warning("schema init skipped, database unavailable: %s", exc)
+        logger.warning("could not check migrations, database unavailable: %s", exc)
     yield
 
 
 app = FastAPI(title="IntakeHub", version="0.0.1", lifespan=lifespan)
 
-# The hub is served from a different origin (Vite :5173) than the API (:8000),
-# so browser fetches need CORS. Origins are configurable via CORS_ORIGINS.
+
+# Upload bounds (#0002). A decoded inline attachment over MAX_ATTACHMENT_BYTES is
+# refused, and any request whose declared body exceeds MAX_REQUEST_BYTES is refused
+# before it is read (base64 inflates ~4/3, plus JSON overhead).
+MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
+MAX_REQUEST_BYTES = 28 * 1024 * 1024
+
+
+# Paths that require a verified identity: the API plus the generated API docs
+# (they describe every route). /health and /ready stay public for probes.
+_PROTECTED_PREFIXES = ("/api/", "/docs", "/redoc", "/openapi.json")
+
+
+def _is_protected(path: str) -> bool:
+    return path.startswith(_PROTECTED_PREFIXES)
+
+
+@app.middleware("http")
+async def require_auth(request: Request, call_next):
+    """Every ``/api/*`` route requires a verified IAP identity (#0001).
+
+    A middleware rather than per-route dependencies so a new route can't be added
+    unauthenticated by forgetting a ``Depends``. ``/health`` stays public.
+    """
+    if _is_protected(request.url.path):
+        try:
+            # Off the event loop: key fetches are blocking network I/O.
+            request.state.user = await run_in_threadpool(
+                auth.authenticate, request.headers, settings
+            )
+        except auth.AuthError:
+            return JSONResponse(status_code=401, content={"detail": "not authenticated"})
+        except auth.CertsUnavailable:
+            logger.exception("auth: could not fetch IAP public keys")
+            return JSONResponse(status_code=503, content={"detail": "auth unavailable"})
+    return await call_next(request)
+
+
+@app.middleware("http")
+async def limit_request_size(request: Request, call_next):
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > MAX_REQUEST_BYTES:
+        return JSONResponse(status_code=413, content={"detail": "request body too large"})
+    return await call_next(request)
+
+
+# CORS for local dev, where the hub (Vite :5173) and API (:8000) are different
+# origins; in production they share one origin behind the IAP load balancer.
+# Only what the hub sends is allowed (#0014). Registered *after* the other
+# middlewares so it is outermost: preflights and 401s still carry CORS headers.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=list(settings.cors_origins),
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type", "Authorization"],
+    # The hub reads the list total from this header (pagination, #0012).
+    expose_headers=["X-Total-Count"],
 )
 
 
-@app.get("/health")
-def health() -> dict:
-    """Liveness probe plus a best-effort database connectivity check."""
-    db_status = "up"
+def _db_status() -> str:
     try:
         with get_engine().connect() as conn:
             conn.execute(text("SELECT 1"))
     except SQLAlchemyError:
-        db_status = "down"
-    return {"status": "ok", "service": "intakehub-api", "db": db_status}
+        return "down"
+    return "up"
+
+
+@app.get("/health")
+def health() -> dict:
+    """Liveness: the process is up (always 200). ``db`` is informational —
+    use ``/ready`` to gate traffic or alert on the database (#0015)."""
+    return {"status": "ok", "service": "intakehub-api", "db": _db_status()}
+
+
+@app.get("/ready")
+def ready() -> JSONResponse:
+    """Readiness: 503 while the database is unreachable or has pending migrations."""
+    db = _db_status()
+    if db != "up":
+        return JSONResponse(status_code=503, content={"status": "not ready", "db": db})
+    try:
+        schema = "pending" if migrate.pending(get_engine()) else "current"
+    except SQLAlchemyError:
+        return JSONResponse(status_code=503, content={"status": "not ready", "db": "down"})
+    status = "ready" if schema == "current" else "not ready"
+    return JSONResponse(
+        status_code=200 if schema == "current" else 503,
+        content={"status": status, "db": db, "schema": schema},
+    )
 
 
 # --- dependencies (overridable in tests) ------------------------------------
+
 
 def get_repo() -> Repository:
     return get_repository()
@@ -111,8 +202,11 @@ _NEEDS_REVIEW_STATUSES = {InvoiceStatus.HELD, InvoiceStatus.FAILED}
 # category / overall). Includes the ledger hold reasons so the "low confidence"
 # chip actually surfaces the most common holds (ambiguous type, low category conf).
 _LOW_CONFIDENCE_FLAGS = {
-    "low_extraction_confidence", "moderate_extraction_confidence", "low_confidence",
-    "ambiguous_income_expense", "low_category_confidence",
+    "low_extraction_confidence",
+    "moderate_extraction_confidence",
+    "low_confidence",
+    "ambiguous_income_expense",
+    "low_category_confidence",
 }
 # A filed item below this confidence is worth a second look even though it cleared the floor.
 _SUBMIT_CONFIDENCE_WATCH = 0.75
@@ -120,7 +214,11 @@ _SUBMIT_CONFIDENCE_WATCH = 0.75
 # Filter keys the API accepts. Statuses double as tags so the same membership test
 # serves every chip.
 FILTER_KEYS = {
-    "posted", "held", "failed", "needs_review", "low_confidence",
+    "posted",
+    "held",
+    "failed",
+    "needs_review",
+    "low_confidence",
 }
 
 
@@ -141,12 +239,27 @@ def _filter_tags(invoice, exceptions) -> list[str]:
     return sorted(tags)
 
 
+def _summaries(invoices: list, repo: Repository) -> list[dict]:
+    """List-row views for many invoices in a constant number of reads (#0012)."""
+    ids = [inv.id for inv in invoices]
+    exceptions_by = repo.get_exceptions_by_invoice(ids)
+    # Only CORRECTED events feed the metadata overlay, so only those are loaded.
+    corrections_by = repo.get_audit_by_invoice(ids, actions={AuditAction.CORRECTED})
+    return [
+        _summary_row(inv, exceptions_by.get(inv.id, []), corrections_by.get(inv.id, []))
+        for inv in invoices
+    ]
+
+
 def _summary(invoice, repo: Repository) -> dict:
-    """List-row view of an invoice (the reviewer hub's list)."""
-    exceptions = repo.get_exceptions(invoice.id)
+    """List-row view of one invoice."""
+    return _summaries([invoice], repo)[0]
+
+
+def _summary_row(invoice, exceptions, audit) -> dict:
     # Reflect human metadata corrections in the listed fields (R10) without mutating
     # the AI output: apply the overlay from the audit trail.
-    meta = corrections.effective_metadata(invoice.metadata, repo.get_audit(invoice.id))
+    meta = corrections.effective_metadata(invoice.metadata, audit)
     total = meta.total_amount
     return {
         "id": invoice.id,
@@ -164,10 +277,48 @@ def _summary(invoice, repo: Repository) -> dict:
 
 # --- invoice routes (PRD §13) -----------------------------------------------
 
+
+class IntakeSource(BaseModel):
+    """Where an HTTP-submitted item came from.
+
+    Deliberately has no ``attachment_path``: a path makes the server read a file
+    off its own disk, so only trusted in-process inbox adapters may set one
+    (#0002). HTTP clients send the document inline as ``attachment_b64``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    channel: str | None = None
+    message_id: str | None = None
+    subject: str | None = None
+    sender: str | None = None
+    attachment: str | None = None
+    attachment_b64: str | None = None
+    body: dict | str | None = None
+
+
+class IntakeSample(BaseModel):
+    """An item submitted over HTTP: ``source`` plus a structured ``document``
+    and/or an email ``body`` (the shape ``orchestrator.process`` consumes)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source: IntakeSource = IntakeSource()
+    document: dict | None = None
+    body: dict | str | None = None
+
+
+def _decoded_size(b64: str) -> int:
+    return len(b64) * 3 // 4
+
+
 @app.post("/api/invoices/process")
-def process_invoice(sample: dict, repo: RepoDep, clients: ClientsDep) -> dict:
+def process_invoice(sample: IntakeSample, repo: RepoDep, clients: ClientsDep) -> dict:
     """Run a sample invoice through the AI pipeline and return its outcome."""
-    invoice = process(sample, repo, **clients)
+    b64 = sample.source.attachment_b64
+    if b64 and _decoded_size(b64) > MAX_ATTACHMENT_BYTES:
+        raise HTTPException(status_code=413, detail="attachment too large")
+    invoice = process(sample.model_dump(exclude_none=True), repo, **clients)
     return _summary(invoice, repo)
 
 
@@ -180,43 +331,56 @@ def fetch_inbox(repo: RepoDep, clients: ClientsDep, inbox: InboxDep) -> dict:
     existing pipeline; already-seen messages are skipped so a re-fetch never
     double-processes (idempotent; PRD §14).
     """
-    received: list[dict] = []
-    skipped = 0
-    for message in inbox.fetch_messages():
-        if repo.is_seen(message.message_id):
-            skipped += 1
-            continue
-        try:
-            invoice = process(message_to_sample(message), repo, **clients)
-        except Exception:
-            # process() isolates stage failures and returns a FAILED invoice, so
-            # reaching here is unexpected. Fall through to mark_seen so one poison
-            # message can't wedge every future poll, then skip it.
-            logger.exception("inbox: unexpected error processing %s", message.message_id)
-            invoice = None
-        # Idempotency is committed BEFORE the post-decision move (KTD3): a move
-        # failure inside on_processed can never cause reprocessing. on_processed
-        # isolates its own errors, so the loop needs no provider-specific guard.
-        repo.mark_seen(message.message_id)
-        if invoice is None:
-            continue
-        inbox.on_processed(message, invoice)
-        received.append({"message_id": message.message_id, **_summary(invoice, repo)})
+    # One fetch at a time (#0005): is_seen -> process -> mark_seen isn't atomic,
+    # so overlapping fetches (poller + hub button) could process a message twice.
+    with repo.inbox_fetch_lock() as acquired:
+        if not acquired:
+            raise HTTPException(status_code=409, detail="an inbox fetch is already running")
+        received: list[dict] = []
+        skipped = 0
+        for message in inbox.fetch_messages():
+            if repo.is_seen(message.message_id):
+                skipped += 1
+                continue
+            try:
+                invoice = process(message_to_sample(message), repo, **clients)
+            except Exception:
+                # process() isolates stage failures and returns a FAILED invoice, so
+                # reaching here is unexpected. Fall through to mark_seen so one poison
+                # message can't wedge every future poll, then skip it.
+                logger.exception("inbox: unexpected error processing %s", message.message_id)
+                invoice = None
+            # Idempotency is committed BEFORE the post-decision move (KTD3): a move
+            # failure inside on_processed can never cause reprocessing. on_processed
+            # isolates its own errors, so the loop needs no provider-specific guard.
+            repo.mark_seen(message.message_id)
+            if invoice is None:
+                continue
+            inbox.on_processed(message, invoice)
+            received.append({"message_id": message.message_id, **_summary(invoice, repo)})
     return {"count": len(received), "skipped": skipped, "received": received}
 
 
 @app.get("/api/invoices")
 def list_invoices(
     repo: RepoDep,
+    response: Response,
     filter: str | None = Query(default=None, description="One of FILTER_KEYS; omit for all."),
+    limit: int = Query(default=200, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
 ) -> list[dict]:
-    """List invoices, optionally narrowed to one triage filter (PRD §10)."""
-    rows = [_summary(inv, repo) for inv in repo.list_invoices()]
-    if filter is None:
-        return rows
-    if filter not in FILTER_KEYS:
+    """List invoices, optionally narrowed to one triage filter (PRD §10).
+
+    Paginated (#0012): ``limit``/``offset`` over the filtered rows, with the full
+    filtered count in ``X-Total-Count``.
+    """
+    if filter is not None and filter not in FILTER_KEYS:
         raise HTTPException(status_code=422, detail=f"unknown filter '{filter}'")
-    return [row for row in rows if filter in row["filter_tags"]]
+    rows = _summaries(repo.list_invoices(), repo)
+    if filter is not None:
+        rows = [row for row in rows if filter in row["filter_tags"]]
+    response.headers["X-Total-Count"] = str(len(rows))
+    return rows[offset : offset + limit]
 
 
 @app.get("/api/review-queue")
@@ -228,15 +392,18 @@ def review_queue(repo: RepoDep) -> list[dict]:
     held and work the oldest first.
     """
     held = [inv for inv in repo.list_invoices() if inv.status is InvoiceStatus.HELD]
+    exceptions_by = repo.get_exceptions_by_invoice([inv.id for inv in held])
     rows = []
-    for inv in held:
-        exceptions = repo.get_exceptions(inv.id)
+    for inv, summary in zip(held, _summaries(held, repo), strict=True):
+        exceptions = exceptions_by.get(inv.id, [])
         primary = exceptions[0] if exceptions else None
-        rows.append({
-            **_summary(inv, repo),
-            "reason": primary.type if primary else None,
-            "reason_title": primary.message if primary else None,
-        })
+        rows.append(
+            {
+                **summary,
+                "reason": primary.type if primary else None,
+                "reason_title": primary.message if primary else None,
+            }
+        )
     # Group by reason (so same-reason items are worked together) and oldest-first
     # within each group (so the longest-waiting item of a reason is handled first).
     rows.sort(key=lambda r: (r["reason"] or "", r["updated_at"]))
@@ -260,8 +427,8 @@ def notifications(repo: RepoDep) -> dict:
     """
     held = [i for i in repo.list_invoices() if i.status is InvoiceStatus.HELD]
     by_reason: dict[str, int] = {}
-    for inv in held:
-        for exc in repo.get_exceptions(inv.id):
+    for exceptions in repo.get_exceptions_by_invoice([i.id for i in held]).values():
+        for exc in exceptions:
             by_reason[exc.type] = by_reason.get(exc.type, 0) + 1
     return {"held_count": len(held), "by_reason": by_reason}
 
@@ -279,8 +446,14 @@ def spot_check(body: SpotCheckRequest, repo: RepoDep) -> dict:
     """
     sample = sample_posted(posted_items(repo.list_invoices()), body.k)
     for inv in sample:
-        record(repo, inv.id, AuditAction.NOTE, actor=Actor.SYSTEM,
-               reason="spot-check sample", details={"spot_check": True})
+        record(
+            repo,
+            inv.id,
+            AuditAction.NOTE,
+            actor=Actor.SYSTEM,
+            reason="spot-check sample",
+            details={"spot_check": True},
+        )
     return {"count": len(sample), "sampled": [_summary(inv, repo) for inv in sample]}
 
 
@@ -297,15 +470,17 @@ def invoice_trace(invoice_id: str, repo: RepoDep) -> dict:
     for event in repo.get_audit(invoice_id):
         failed = event.action is AuditAction.FAILED
         kind = event.details.get("kind") if failed else None
-        steps.append({
-            "stage": event.action.value,
-            "actor": event.actor.value,
-            "at": event.timestamp,
-            "ok": not failed,
-            "kind": kind,
-            "error": event.details.get("reason") if failed else None,
-            "retryable": is_retryable(kind) if kind else None,
-        })
+        steps.append(
+            {
+                "stage": event.action.value,
+                "actor": event.actor.value,
+                "at": event.timestamp,
+                "ok": not failed,
+                "kind": kind,
+                "error": event.details.get("reason") if failed else None,
+                "retryable": is_retryable(kind) if kind else None,
+            }
+        )
     return {"invoice_id": invoice_id, "status": invoice.status.value, "steps": steps}
 
 
@@ -350,7 +525,6 @@ def _build_detail(invoice_id: str, repo: Repository) -> dict | None:
     }
     detail["corrections"] = {
         "metadata": corrections.metadata_overlay(audit),
-        "line_items": corrections.match_overlay(audit),
         "category": corrections.category_overlay(audit),
     }
     # Visual Document Review (P4-T4): the page rasters + the source-anchored
@@ -359,9 +533,11 @@ def _build_detail(invoice_id: str, repo: Repository) -> dict | None:
     # rasterizable source or the extractor found no anchored values.
     detail["pages"] = [
         {"page_number": p.page_number, "width": p.width, "height": p.height}
-        for p in _rendered_pages(invoice_id, repo)
+        for p in _page_dims(invoice_id, repo)
     ]
     detail["citations"] = extracted.get("citations", [])
+    # QC actions the current status allows (#0003), so the hub hides the rest.
+    detail["allowed_actions"] = allowed_actions(detail["invoice"].status)
     return detail
 
 
@@ -394,27 +570,58 @@ def _source_image_path(invoice_id: str, repo: Repository) -> str | None:
     return path
 
 
-def _rendered_pages(invoice_id: str, repo: Repository) -> list[RenderedPage]:
-    """Render the invoice's source pages, or [] when there is nothing to render.
+def _page_dims(invoice_id: str, repo: Repository) -> list[PageDims]:
+    """Page sizes of the invoice's source, or [] when there is nothing to render.
 
-    Prefers the persisted PDF blob (works on Cloud Run, which has no local file),
-    falling back to rasterizing the recorded file path (dev, and image sources).
+    Reads page geometry only — no rasterization (#0012). Prefers the persisted PDF
+    blob (works on Cloud Run, which has no local file), falling back to the
+    recorded file path (dev, and image sources).
     """
     _get_invoice_or_404(invoice_id, repo)
     pdf = repo.get_source_pdf(invoice_id)
-    if pdf:
-        try:
-            return render_pdf_bytes(pdf)
-        except (ValueError, RuntimeError):
-            return []
-    path = _source_image_path(invoice_id, repo)
-    if path is None:
-        return []
     try:
-        return render_pages(path)
-    except (FileNotFoundError, ValueError):
+        if pdf:
+            return pdf_page_dims(pdf)
+        path = _source_image_path(invoice_id, repo)
+        return page_dims(path) if path else []
+    except (FileNotFoundError, ValueError, RuntimeError):
         # Source recorded but unreadable/unsupported: no preview, not a crash.
         return []
+
+
+# Rendered page PNGs, LRU by (source key, page). A stored PDF never changes after
+# intake, so the item id is its key; a file source keys on path + mtime.
+_PAGE_CACHE: OrderedDict[tuple, bytes] = OrderedDict()
+_PAGE_CACHE_SIZE = 32
+
+
+def _page_png(invoice_id: str, page_number: int, repo: Repository) -> bytes | None:
+    _get_invoice_or_404(invoice_id, repo)
+    key = ("pdf", invoice_id, page_number)
+    if key in _PAGE_CACHE:
+        _PAGE_CACHE.move_to_end(key)
+        return _PAGE_CACHE[key]
+    pdf = repo.get_source_pdf(invoice_id)
+    try:
+        if pdf:
+            page = render_pdf_page(pdf, page_number)
+        else:
+            path = _source_image_path(invoice_id, repo)
+            if path is None:
+                return None
+            key = ("path", path, pathlib.Path(path).stat().st_mtime_ns, page_number)
+            if key in _PAGE_CACHE:
+                _PAGE_CACHE.move_to_end(key)
+                return _PAGE_CACHE[key]
+            page = render_page(path, page_number)
+    except (FileNotFoundError, ValueError, RuntimeError):
+        return None
+    if page is None:
+        return None
+    _PAGE_CACHE[key] = page.image_png
+    while len(_PAGE_CACHE) > _PAGE_CACHE_SIZE:
+        _PAGE_CACHE.popitem(last=False)
+    return page.image_png
 
 
 @app.get("/api/invoices/{invoice_id}/pages")
@@ -422,18 +629,17 @@ def list_pages(invoice_id: str, repo: RepoDep) -> list[dict]:
     """Page count + raster dimensions for the invoice's source (PRD §10)."""
     return [
         {"page_number": p.page_number, "width": p.width, "height": p.height}
-        for p in _rendered_pages(invoice_id, repo)
+        for p in _page_dims(invoice_id, repo)
     ]
 
 
 @app.get("/api/invoices/{invoice_id}/pages/{page_number}/image")
 def get_page_image(invoice_id: str, page_number: int, repo: RepoDep) -> Response:
     """The rendered raster (PNG) for a 1-based page of the invoice's source."""
-    pages = _rendered_pages(invoice_id, repo)
-    page = next((p for p in pages if p.page_number == page_number), None)
-    if page is None:
+    png = _page_png(invoice_id, page_number, repo)
+    if png is None:
         raise HTTPException(status_code=404, detail="page image not found")
-    return Response(content=page.image_png, media_type="image/png")
+    return Response(content=png, media_type="image/png")
 
 
 def _has_source_pdf(invoice_id: str, repo: Repository) -> bool:
@@ -491,13 +697,6 @@ class MetadataCorrection(BaseModel):
     reason: str | None = None
 
 
-class LineItemCorrection(BaseModel):
-    line_item_id: str
-    catalog_item_id: str | None = None
-    catalog_description: str | None = None
-    reason: str | None = None
-
-
 class CategoryCorrection(BaseModel):
     category: str
     reason: str | None = None
@@ -527,9 +726,18 @@ def _get_invoice_or_404(invoice_id: str, repo: Repository):
     return invoice
 
 
+def _require_allowed(invoice, action: str) -> None:
+    """409 when ``action`` isn't allowed from the item's current status (#0003)."""
+    if not is_allowed(action, invoice.status):
+        raise HTTPException(
+            status_code=409,
+            detail=f"cannot {action} an item that is {invoice.status.value}",
+        )
+
+
 def _set_status(repo: Repository, invoice, status: InvoiceStatus) -> None:
     invoice.status = status
-    invoice.updated_at = datetime.now(timezone.utc)
+    invoice.updated_at = datetime.now(UTC)
     repo.save_invoice(invoice)
 
 
@@ -537,45 +745,25 @@ def _set_status(repo: Repository, invoice, status: InvoiceStatus) -> None:
 def correct_metadata(invoice_id: str, body: MetadataCorrection, repo: RepoDep) -> dict:
     """Overlay a human correction onto extracted metadata (PRD FR10)."""
     invoice = _get_invoice_or_404(invoice_id, repo)
+    _require_allowed(invoice, "correct")
     unknown = set(body.updates) - set(InvoiceMetadata.model_fields)
     if unknown:
         raise HTTPException(status_code=422, detail=f"unknown field(s): {sorted(unknown)}")
 
     current = corrections.effective_metadata(invoice.metadata, repo.get_audit(invoice_id))
     before = {field: _as_str(getattr(current, field)) for field in body.updates}
-    record(
-        repo, invoice_id, AuditAction.CORRECTED, actor=Actor.HUMAN,
-        details={"target": "metadata"}, before=before, after=body.updates,
-        reason=body.reason,
-    )
-    _set_status(repo, invoice, InvoiceStatus.CORRECTED)
-    return _require_detail(invoice_id, repo)
-
-
-@app.post("/api/invoices/{invoice_id}/corrections/line-item")
-def correct_line_item(invoice_id: str, body: LineItemCorrection, repo: RepoDep) -> dict:
-    """Overlay a human correction onto a line-item catalog match (PRD FR10)."""
-    invoice = _get_invoice_or_404(invoice_id, repo)
-    if all(li.id != body.line_item_id for li in repo.get_line_items(invoice_id)):
-        raise HTTPException(status_code=404, detail="line item not found")
-
-    prior = next(
-        (m for m in repo.get_matches(invoice_id) if m.line_item_id == body.line_item_id), None
-    )
-    before = {
-        "catalog_item_id": prior.catalog_item_id if prior else None,
-        "catalog_description": prior.catalog_description if prior else None,
-    }
-    after = {
-        "catalog_item_id": body.catalog_item_id,
-        "catalog_description": body.catalog_description,
-    }
-    record(
-        repo, invoice_id, AuditAction.CORRECTED, actor=Actor.HUMAN,
-        details={"target": "line_item", "line_item_id": body.line_item_id},
-        before=before, after=after, reason=body.reason,
-    )
-    _set_status(repo, invoice, InvoiceStatus.CORRECTED)
+    with repo.transaction():
+        record(
+            repo,
+            invoice_id,
+            AuditAction.CORRECTED,
+            actor=Actor.HUMAN,
+            details={"target": "metadata"},
+            before=before,
+            after=body.updates,
+            reason=body.reason,
+        )
+        _set_status(repo, invoice, InvoiceStatus.CORRECTED)
     return _require_detail(invoice_id, repo)
 
 
@@ -589,17 +777,23 @@ def correct_category(invoice_id: str, body: CategoryCorrection, repo: RepoDep) -
     confident input, so correcting a held ambiguous item lets it file.
     """
     invoice = _get_invoice_or_404(invoice_id, repo)
+    _require_allowed(invoice, "correct")
     audit = repo.get_audit(invoice_id)
     prior = corrections.category_overlay(audit)
     if prior is None:
         prior = latest_details(audit, AuditAction.CATEGORIZED).get("category")
-    record(
-        repo, invoice_id, AuditAction.CORRECTED, actor=Actor.HUMAN,
-        details={"target": "category"},
-        before={"category": prior}, after={"category": body.category},
-        reason=body.reason,
-    )
-    _set_status(repo, invoice, InvoiceStatus.CORRECTED)
+    with repo.transaction():
+        record(
+            repo,
+            invoice_id,
+            AuditAction.CORRECTED,
+            actor=Actor.HUMAN,
+            details={"target": "category"},
+            before={"category": prior},
+            after={"category": body.category},
+            reason=body.reason,
+        )
+        _set_status(repo, invoice, InvoiceStatus.CORRECTED)
     return _require_detail(invoice_id, repo)
 
 
@@ -612,8 +806,10 @@ def reject_invoice(invoice_id: str, body: ReviewNote, repo: RepoDep) -> dict:
     is ever written for it.
     """
     invoice = _get_invoice_or_404(invoice_id, repo)
-    record(repo, invoice_id, AuditAction.REJECTED, actor=Actor.HUMAN, reason=body.note)
-    _set_status(repo, invoice, InvoiceStatus.REJECTED)
+    _require_allowed(invoice, "reject")
+    with repo.transaction():
+        record(repo, invoice_id, AuditAction.REJECTED, actor=Actor.HUMAN, reason=body.note)
+        _set_status(repo, invoice, InvoiceStatus.REJECTED)
     return _require_detail(invoice_id, repo)
 
 
@@ -628,8 +824,12 @@ def confirm_citation(invoice_id: str, body: CitationConfirm, repo: RepoDep) -> d
     """
     _get_invoice_or_404(invoice_id, repo)
     record(
-        repo, invoice_id, AuditAction.CONFIRMED, actor=Actor.HUMAN,
-        details={"target_id": body.target_id}, reason=body.reason,
+        repo,
+        invoice_id,
+        AuditAction.CONFIRMED,
+        actor=Actor.HUMAN,
+        details={"target_id": body.target_id},
+        reason=body.reason,
     )
     return _require_detail(invoice_id, repo)
 
@@ -646,8 +846,10 @@ def mark_reviewed(invoice_id: str, body: ReviewNote, repo: RepoDep) -> dict:
 def escalate(invoice_id: str, body: EscalateBody, repo: RepoDep) -> dict:
     """Route the invoice to manual exception handling (PRD FR10)."""
     invoice = _get_invoice_or_404(invoice_id, repo)
-    record(repo, invoice_id, AuditAction.ESCALATED, actor=Actor.HUMAN, reason=body.reason)
-    _set_status(repo, invoice, InvoiceStatus.ESCALATED)
+    _require_allowed(invoice, "escalate")
+    with repo.transaction():
+        record(repo, invoice_id, AuditAction.ESCALATED, actor=Actor.HUMAN, reason=body.reason)
+        _set_status(repo, invoice, InvoiceStatus.ESCALATED)
     return _require_detail(invoice_id, repo)
 
 
@@ -662,7 +864,7 @@ def add_note(invoice_id: str, body: NoteBody, repo: RepoDep) -> dict:
 @app.post("/api/invoices/{invoice_id}/rerun")
 def rerun_invoice(invoice_id: str, repo: RepoDep, clients: ClientsDep) -> dict:
     """Re-enter the pipeline using corrected data as fixed inputs (PRD FR10)."""
-    _get_invoice_or_404(invoice_id, repo)
+    _require_allowed(_get_invoice_or_404(invoice_id, repo), "rerun")
     rerun(invoice_id, repo, **clients)
     return _require_detail(invoice_id, repo)
 
@@ -670,9 +872,7 @@ def rerun_invoice(invoice_id: str, repo: RepoDep, clients: ClientsDep) -> dict:
 @app.post("/api/invoices/{invoice_id}/retry")
 def retry_invoice(invoice_id: str, repo: RepoDep, clients: ClientsDep) -> dict:
     """Resume a FAILED invoice from the failed stage (P3-T1; PRD §15 retry option)."""
-    invoice = _get_invoice_or_404(invoice_id, repo)
-    if invoice.status is not InvoiceStatus.FAILED:
-        raise HTTPException(status_code=409, detail="only failed invoices can be retried")
+    _require_allowed(_get_invoice_or_404(invoice_id, repo), "retry")
     recover(invoice_id, repo, **clients)
     return _require_detail(invoice_id, repo)
 

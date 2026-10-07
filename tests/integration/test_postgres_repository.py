@@ -1,6 +1,6 @@
 """PostgresRepository round-trip (P1-T10).
 
-Skipped unless a Postgres is reachable at ``DATABASE_URL`` (e.g. after
+Skipped unless a Postgres is reachable at ``DATABASE_URL`` (see conftest.py) (e.g. after
 ``docker compose up -d db`` with ``DATABASE_URL`` pointed at localhost). It runs
 a clean invoice through the orchestrator persisting to Postgres and asserts the
 detail reads back, exercising every JSONB/NUMERIC column round-trip.
@@ -9,34 +9,20 @@ detail reads back, exercising every JSONB/NUMERIC column round-trip.
 import json
 import pathlib
 
-import pytest
 from backend.clients import PassthroughLLMClient, StubSheetsClient
-from backend.db.session import get_engine, init_schema
 from backend.domain import InvoiceStatus
 from backend.orchestrator import process
-from sqlalchemy.exc import SQLAlchemyError
 
 SAMPLES = pathlib.Path(__file__).resolve().parents[2] / "samples"
-
-
-@pytest.fixture(scope="module")
-def pg_repo():
-    try:
-        with get_engine().connect():
-            pass
-        init_schema()
-    except SQLAlchemyError:
-        pytest.skip("no Postgres reachable at DATABASE_URL")
-    from backend.db.repository import PostgresRepository
-
-    return PostgresRepository(get_engine())
 
 
 def test_postgres_round_trip(pg_repo):
     sample = json.loads((SAMPLES / "inv_clean_001.json").read_text())
     invoice = process(
-        sample, pg_repo,
-        llm=PassthroughLLMClient(), sheets=StubSheetsClient(),
+        sample,
+        pg_repo,
+        llm=PassthroughLLMClient(),
+        sheets=StubSheetsClient(),
     )
 
     reloaded = pg_repo.get_invoice(invoice.id)
@@ -46,6 +32,17 @@ def test_postgres_round_trip(pg_repo):
     detail = pg_repo.get_detail(invoice.id)
     assert len(detail["line_items"]) == 4
     assert detail["line_items"][0].total is not None  # NUMERIC round-trip
-    assert detail["context"] is None  # resolved_context table removed (U5)
-    assert detail["matches"] == []  # match_results table removed (U5)
     assert len(detail["audit"]) > 0
+
+
+def test_postgres_clear_exceptions(pg_repo):
+    from backend.exceptions import build as build_exception
+
+    sample = json.loads((SAMPLES / "inv_clean_001.json").read_text())
+    invoice = process(sample, pg_repo, llm=PassthroughLLMClient(), sheets=StubSheetsClient())
+    pg_repo.add_exceptions([build_exception(invoice.id, "low_confidence", message="x")])
+    assert pg_repo.get_exceptions(invoice.id)
+
+    pg_repo.clear_exceptions(invoice.id)
+
+    assert pg_repo.get_exceptions(invoice.id) == []

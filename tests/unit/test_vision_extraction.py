@@ -134,12 +134,20 @@ def test_extract_vision_no_citation_for_missing_field():
 
 def test_extract_vision_unreadable_when_value_not_in_ocr():
     """A value present in extraction but absent from OCR words → no box."""
-    vision = StubVisionLLMClient(responses=[{
-        "metadata": {
-            "invoice_number": {"value": "GHOST-9", "word_indices": [], "status": "unreadable"},
-        },
-        "line_items": [],
-    }])
+    vision = StubVisionLLMClient(
+        responses=[
+            {
+                "metadata": {
+                    "invoice_number": {
+                        "value": "GHOST-9",
+                        "word_indices": [],
+                        "status": "unreadable",
+                    },
+                },
+                "line_items": [],
+            }
+        ]
+    )
     parsed = parse("inv_x", {"document": {}, "source": {"attachment": "x.png"}})
     result = extract_vision("inv_x", parsed, [], b"", vision)
 
@@ -150,15 +158,22 @@ def test_extract_vision_unreadable_when_value_not_in_ocr():
 
 def test_extract_vision_uncertain_when_low_confidence():
     """Anchored but low-confidence value is surfaced as uncertain (gates review)."""
-    vision = StubVisionLLMClient(responses=[{
-        "metadata": {
-            "invoice_number": {
-                "value": "INV-9", "confidence": 0.3,
-                "word_indices": [0], "page": 1, "status": "extracted",
-            },
-        },
-        "line_items": [],
-    }])
+    vision = StubVisionLLMClient(
+        responses=[
+            {
+                "metadata": {
+                    "invoice_number": {
+                        "value": "INV-9",
+                        "confidence": 0.3,
+                        "word_indices": [0],
+                        "page": 1,
+                        "status": "extracted",
+                    },
+                },
+                "line_items": [],
+            }
+        ]
+    )
     parsed = parse("inv_x", {"document": {}, "source": {"attachment": "x.png"}})
     result = extract_vision("inv_x", parsed, [], b"", vision)
 
@@ -168,24 +183,36 @@ def test_extract_vision_uncertain_when_low_confidence():
 
 
 def test_extract_vision_rejects_invalid_status():
-    vision = StubVisionLLMClient(responses=[{
-        "metadata": {
-            "invoice_number": {"value": "INV-9", "word_indices": [0], "status": "bogus"},
-        },
-        "line_items": [],
-    }])
+    vision = StubVisionLLMClient(
+        responses=[
+            {
+                "metadata": {
+                    "invoice_number": {"value": "INV-9", "word_indices": [0], "status": "bogus"},
+                },
+                "line_items": [],
+            }
+        ]
+    )
     parsed = parse("inv_x", {"document": {}, "source": {"attachment": "x.png"}})
     with pytest.raises(ValueError):
         extract_vision("inv_x", parsed, [], b"", vision)
 
 
 def test_extract_vision_rejects_non_integer_indices():
-    vision = StubVisionLLMClient(responses=[{
-        "metadata": {
-            "invoice_number": {"value": "INV-9", "word_indices": ["x"], "status": "extracted"},
-        },
-        "line_items": [],
-    }])
+    vision = StubVisionLLMClient(
+        responses=[
+            {
+                "metadata": {
+                    "invoice_number": {
+                        "value": "INV-9",
+                        "word_indices": ["x"],
+                        "status": "extracted",
+                    },
+                },
+                "line_items": [],
+            }
+        ]
+    )
     parsed = parse("inv_x", {"document": {}, "source": {"attachment": "x.png"}})
     with pytest.raises(ValueError):
         extract_vision("inv_x", parsed, [], b"", vision)

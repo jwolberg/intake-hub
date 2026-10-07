@@ -18,12 +18,15 @@ from fastapi.testclient import TestClient
 
 
 def _posted(vendor, total, date, id="inv"):
-    return Invoice(id=id, status=InvoiceStatus.POSTED,
-                   metadata=InvoiceMetadata(vendor_name=vendor, total_amount=total,
-                                            invoice_date=date))
+    return Invoice(
+        id=id,
+        status=InvoiceStatus.POSTED,
+        metadata=InvoiceMetadata(vendor_name=vendor, total_amount=total, invoice_date=date),
+    )
 
 
 # --- pure helpers -----------------------------------------------------------
+
 
 def test_find_duplicate_matches_same_vendor_amount_and_close_date():
     candidate = _posted("Adobe", "52.99", "2026-03-02", id="cand")
@@ -61,15 +64,30 @@ def test_sample_posted_is_bounded_and_deterministic():
 
 # --- orchestrator duplicate hold (R19) --------------------------------------
 
+
 def _dup_sample(message_id):
     return {
-        "source": {"channel": "email", "message_id": message_id,
-                   "subject": "Adobe receipt", "sender": "billing@adobe.com"},
+        "source": {
+            "channel": "email",
+            "message_id": message_id,
+            "subject": "Adobe receipt",
+            "sender": "billing@adobe.com",
+        },
         "document": {
-            "metadata": {"vendor_name": "Adobe", "invoice_date": "2026-03-01",
-                         "currency": "USD", "total_amount": "52.99"},
-            "line_items": [{"raw_description": "Creative Cloud subscription",
-                            "quantity": "1", "unit_price": "52.99", "total": "52.99"}],
+            "metadata": {
+                "vendor_name": "Adobe",
+                "invoice_date": "2026-03-01",
+                "currency": "USD",
+                "total_amount": "52.99",
+            },
+            "line_items": [
+                {
+                    "raw_description": "Creative Cloud subscription",
+                    "quantity": "1",
+                    "unit_price": "52.99",
+                    "total": "52.99",
+                }
+            ],
         },
     }
 
@@ -128,10 +146,12 @@ def test_distinct_charge_same_vendor_different_amount_still_posts():
 
 # --- notification + spot-check API ------------------------------------------
 
+
 def _client(repo):
     app.dependency_overrides[get_repo] = lambda: repo
     app.dependency_overrides[get_pipeline_clients] = lambda: {
-        "llm": PassthroughLLMClient(), "sheets": StubSheetsClient(),
+        "llm": PassthroughLLMClient(),
+        "sheets": StubSheetsClient(),
     }
     return TestClient(app)
 

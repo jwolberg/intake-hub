@@ -42,9 +42,9 @@ _TOTAL_TOLERANCE = Decimal("0.01")
 # Confidence thresholds (low blocks, medium is visibility-only).
 _EXTRACTION_HOLD = 0.5
 _EXTRACTION_WATCH = 0.8
-_TYPE_HOLD = 0.7        # income/expense below this → ambiguous_income_expense (block)
-_CATEGORY_HOLD = 0.7    # category confidence below this → low_category_confidence (block)
-_DECISION_FLOOR = 0.8   # file only when confident; below this → hold for review
+_TYPE_HOLD = 0.7  # income/expense below this → ambiguous_income_expense (block)
+_CATEGORY_HOLD = 0.7  # category confidence below this → low_category_confidence (block)
+_DECISION_FLOOR = 0.8  # file only when confident; below this → hold for review
 
 # The one header field a ledger row cannot do without is the amount. Unlike the
 # clinical-trial engine we do not require an invoice number — solopreneur receipts
@@ -78,21 +78,29 @@ def decide(
 
     # --- Adversarial / spoofed content (R16): block regardless of confidence ---
     if categorization.adversarial:
-        flag("suspected_adversarial",
-             "document content contains instruction-like text; treated as untrusted")
+        flag(
+            "suspected_adversarial",
+            "document content contains instruction-like text; treated as untrusted",
+        )
 
     # --- Income vs expense (R5) ---
-    if (categorization.document_type is DocumentType.UNKNOWN
-            or categorization.document_type_confidence < _TYPE_HOLD):
-        flag("ambiguous_income_expense",
-             "could not confidently classify income vs expense "
-             f"({round(categorization.document_type_confidence, 3)})")
+    if (
+        categorization.document_type is DocumentType.UNKNOWN
+        or categorization.document_type_confidence < _TYPE_HOLD
+    ):
+        flag(
+            "ambiguous_income_expense",
+            "could not confidently classify income vs expense "
+            f"({round(categorization.document_type_confidence, 3)})",
+        )
 
     # --- Schedule C category (R6) ---
     if not categorization.category or categorization.category_confidence < _CATEGORY_HOLD:
-        flag("low_category_confidence",
-             "category could not be assigned with confidence "
-             f"({round(categorization.category_confidence, 3)})")
+        flag(
+            "low_category_confidence",
+            "category could not be assigned with confidence "
+            f"({round(categorization.category_confidence, 3)})",
+        )
 
     # --- Extraction completeness + confidence ---
     for field, flag_type in _CRITICAL_FIELDS.items():
@@ -100,16 +108,21 @@ def decide(
             flag(flag_type, f"required field '{field}' is missing")
     optional_missing = [f for f in extraction.missing_fields if f not in _CRITICAL_FIELDS]
     if optional_missing:
-        flag("missing_optional_fields",
-             "optional fields not present: " + ", ".join(optional_missing))
+        flag(
+            "missing_optional_fields", "optional fields not present: " + ", ".join(optional_missing)
+        )
 
     extraction_conf = _extraction_confidence(extraction)
     if extraction_conf < _EXTRACTION_HOLD:
-        flag("low_extraction_confidence",
-             f"extraction confidence {extraction_conf} below the file threshold")
+        flag(
+            "low_extraction_confidence",
+            f"extraction confidence {extraction_conf} below the file threshold",
+        )
     elif extraction_conf < _EXTRACTION_WATCH:
-        flag("moderate_extraction_confidence",
-             f"some extracted fields are only moderately confident ({extraction_conf})")
+        flag(
+            "moderate_extraction_confidence",
+            f"some extracted fields are only moderately confident ({extraction_conf})",
+        )
 
     # --- Totals ---
     line_total = sum((li.total for li in line_items if li.total is not None), Decimal("0"))
@@ -128,8 +141,10 @@ def decide(
     )
     high = [f for f in flags if f.severity is Severity.HIGH]
     if not high and decision_confidence < _DECISION_FLOOR:
-        flag("low_confidence",
-             f"overall decision confidence {decision_confidence} below the file threshold")
+        flag(
+            "low_confidence",
+            f"overall decision confidence {decision_confidence} below the file threshold",
+        )
         high = [f for f in flags if f.severity is Severity.HIGH]
 
     if high:
@@ -152,11 +167,13 @@ def decide(
 def _extraction_confidence(extraction: ExtractionResult) -> float:
     """Weakest-link confidence over populated header fields + line items."""
     populated = [
-        conf for field, conf in extraction.field_confidence.items()
+        conf
+        for field, conf in extraction.field_confidence.items()
         if field not in extraction.missing_fields
     ]
     items = [
-        li.extraction_confidence for li in extraction.line_items
+        li.extraction_confidence
+        for li in extraction.line_items
         if li.extraction_confidence is not None
     ]
     scores = populated + items

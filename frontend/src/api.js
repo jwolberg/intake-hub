@@ -2,7 +2,35 @@
 // invoices the AI has decided on; the POST helpers drive the post-decision human
 // QC actions (PRD FR10): correct, review, escalate, note, rerun.
 
+// In production the hub and API share one origin behind the IAP load balancer, so
+// the build sets VITE_API_URL="" and calls are relative (the IAP cookie rides
+// along). Local dev points at the separate uvicorn/compose API.
 export const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+
+// An expired IAP session surfaces as 401 on an API call; a full reload sends the
+// browser back through IAP's Google sign-in. Guarded: a 401 that persists after
+// a reload (e.g. misconfigured audience) must not reload the page forever.
+const RELOAD_KEY = "intakehub:auth-reload-at";
+const RELOAD_GUARD_MS = 30_000;
+
+function checkAuth(resp) {
+  if (resp.status !== 401) return;
+  let last = 0;
+  try {
+    last = Number(sessionStorage.getItem(RELOAD_KEY) ?? 0);
+  } catch {
+    // storage unavailable: fall through and allow one reload
+  }
+  if (Date.now() - last > RELOAD_GUARD_MS) {
+    try {
+      sessionStorage.setItem(RELOAD_KEY, String(Date.now()));
+    } catch {
+      // ignore
+    }
+    window.location.reload();
+  }
+  throw new Error("Not signed in — reload the page to sign in again.");
+}
 
 // URL of a rendered page raster (1-based) for the Source overlay (P4-T5).
 export function pageImageUrl(id, pageNumber) {
@@ -17,6 +45,7 @@ export function sourcePdfUrl(id) {
 
 async function getJSON(path) {
   const resp = await fetch(`${API_URL}${path}`);
+  checkAuth(resp);
   if (!resp.ok) throw new Error(`${path} → ${resp.status}`);
   return resp.json();
 }
@@ -27,12 +56,23 @@ async function postJSON(path, body) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body ?? {}),
   });
+  checkAuth(resp);
   if (!resp.ok) throw new Error(`${path} → ${resp.status}`);
   return resp.json();
 }
 
-export function listInvoices() {
-  return getJSON("/api/invoices");
+// Paginated list (#0012): resolves to { rows, total } — `total` comes from the
+// API's X-Total-Count header (the row count across all pages).
+export const PAGE_SIZE = 200;
+
+export async function listInvoices({ offset = 0, limit = PAGE_SIZE } = {}) {
+  const path = `/api/invoices?limit=${limit}&offset=${offset}`;
+  const resp = await fetch(`${API_URL}${path}`);
+  checkAuth(resp);
+  if (!resp.ok) throw new Error(`${path} → ${resp.status}`);
+  const rows = await resp.json();
+  const total = Number(resp.headers.get("X-Total-Count") ?? rows.length);
+  return { rows, total };
 }
 
 export function getInvoice(id) {
@@ -66,10 +106,6 @@ export function getHealth() {
 
 export function correctMetadata(id, updates, reason) {
   return postJSON(`/api/invoices/${id}/corrections/metadata`, { updates, reason });
-}
-
-export function correctLineItem(id, body) {
-  return postJSON(`/api/invoices/${id}/corrections/line-item`, body);
 }
 
 // Overlay a Schedule C category correction on a held item; rerun files it (AE2).

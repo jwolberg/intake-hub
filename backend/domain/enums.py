@@ -15,19 +15,19 @@ class InvoiceStatus(str, Enum):
 
     The ledger pivot replaces the clinical-trial middle/terminal states with
     ``CLASSIFIED`` (income vs expense), ``CATEGORIZED`` (Schedule C category), and
-    ``POSTED`` (appended to the Sheet). The clinical-trial states below remain
-    only until the pipeline tail is repointed (U4) and the old stages removed
-    (U5); new code should use the ledger states.
+    ``POSTED`` (appended to the Sheet). The clinical-trial states are legacy
+    (read-only, for pre-pivot rows); new code uses the ledger states.
     """
 
     RECEIVED = "received"
     PARSED = "parsed"
     EXTRACTED = "extracted"
     # --- ledger states ---
-    CLASSIFIED = "classified"      # income vs expense determined (R5)
-    CATEGORIZED = "categorized"    # Schedule C category assigned (R6)
-    POSTED = "posted"              # appended to the user's Google Sheet (R8)
-    # --- clinical-trial states (removed in U5) ---
+    CLASSIFIED = "classified"  # income vs expense determined (R5)
+    CATEGORIZED = "categorized"  # Schedule C category assigned (R6)
+    POSTED = "posted"  # appended to the user's Google Sheet (R8)
+    # --- legacy clinical-trial states: nothing sets these any more; kept only so
+    # rows written before the ledger pivot still load (#0011) ---
     CONTEXT_RESOLVED = "context_resolved"
     CATALOG_MATCHED = "catalog_matched"
     SUBMITTED = "submitted"
@@ -36,7 +36,7 @@ class InvoiceStatus(str, Enum):
     RERUN_REQUESTED = "rerun_requested"
     CORRECTED = "corrected"
     ESCALATED = "escalated"
-    REJECTED = "rejected"       # reviewer discarded a non-receipt (R10/AE4)
+    REJECTED = "rejected"  # reviewer discarded a non-receipt (R10/AE4)
 
 
 class Decision(str, Enum):
@@ -100,10 +100,11 @@ class AuditAction(str, Enum):
     PARSED = "parsed"
     EXTRACTED = "extracted"
     # --- ledger actions ---
-    CLASSIFIED = "classified"      # income vs expense determined (R5)
-    CATEGORIZED = "categorized"    # Schedule C category assigned (R6)
-    POSTED = "posted"              # appended to the user's Google Sheet (R8)
-    # --- clinical-trial actions (removed in U5) ---
+    CLASSIFIED = "classified"  # income vs expense determined (R5)
+    CATEGORIZED = "categorized"  # Schedule C category assigned (R6)
+    POSTED = "posted"  # appended to the user's Google Sheet (R8)
+    # --- legacy clinical-trial actions: nothing emits these any more; kept only so
+    # audit rows written before the ledger pivot still load (#0011) ---
     CONTEXT_RESOLVED = "context_resolved"
     CATALOG_MATCHED = "catalog_matched"
     MATCHED = "matched"

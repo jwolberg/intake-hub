@@ -26,12 +26,22 @@ HOLDS = "inv_body_003.json"
 # A document that holds only for a missing amount (a categorizable line + vendor, no
 # total) — correcting the total on rerun clears the hold and it files.
 HOLD_MISSING_TOTAL = {
-    "source": {"channel": "email", "message_id": "m-missing-total",
-               "subject": "Adobe receipt", "sender": "billing@adobe.com"},
+    "source": {
+        "channel": "email",
+        "message_id": "m-missing-total",
+        "subject": "Adobe receipt",
+        "sender": "billing@adobe.com",
+    },
     "document": {
         "metadata": {"vendor_name": "Adobe", "currency": "USD"},
-        "line_items": [{"raw_description": "Creative Cloud subscription",
-                        "quantity": "1", "unit_price": "52.99", "total": "52.99"}],
+        "line_items": [
+            {
+                "raw_description": "Creative Cloud subscription",
+                "quantity": "1",
+                "unit_price": "52.99",
+                "total": "52.99",
+            }
+        ],
     },
 }
 
@@ -130,10 +140,64 @@ def test_detail_404_for_unknown_invoice(client):
 _PDF = SAMPLES / "pdf" / "inv_clean_001.pdf"
 
 
+def _attach_inline_pdf(sample: dict) -> None:
+    """Attach the committed PDF the only way HTTP clients can: inline base64."""
+    import base64
+
+    sample["source"]["attachment"] = _PDF.name
+    sample["source"]["attachment_b64"] = base64.b64encode(_PDF.read_bytes()).decode()
+
+
+def test_attachment_path_from_request_is_rejected(client, tmp_path):
+    # A caller must never be able to make the server read a file off its own disk
+    # (the old /process trusted source.attachment_path and served it back).
+    secret = tmp_path / "secret.pdf"
+    secret.write_bytes(_PDF.read_bytes())
+    sample = _sample(POSTS)
+    sample["source"]["attachment"] = "secret.pdf"
+    sample["source"]["attachment_path"] = str(secret)
+
+    resp = client.post("/api/invoices/process", json=sample)
+
+    assert resp.status_code == 422
+    assert client.get("/api/invoices").json() == []
+
+
+def test_unknown_top_level_sample_field_is_rejected(client):
+    sample = _sample(POSTS)
+    sample["unexpected"] = True
+    assert client.post("/api/invoices/process", json=sample).status_code == 422
+
+
+def test_oversized_inline_attachment_is_rejected(client, monkeypatch):
+    import backend.api.main as api
+
+    monkeypatch.setattr(api, "MAX_ATTACHMENT_BYTES", 1024)
+    sample = _sample(POSTS)
+    _attach_inline_pdf(sample)  # the sample PDF is > 1 KiB
+
+    resp = client.post("/api/invoices/process", json=sample)
+
+    assert resp.status_code == 413
+    assert client.get("/api/invoices").json() == []
+
+
+def test_oversized_request_body_is_rejected_before_parsing(client, monkeypatch):
+    import backend.api.main as api
+
+    monkeypatch.setattr(api, "MAX_REQUEST_BYTES", 1024)
+    resp = client.post(
+        "/api/invoices/process",
+        content=b"{" + b" " * 4096 + b"}",
+        headers={"Content-Type": "application/json"},
+    )
+    assert resp.status_code == 413
+
+
 def test_pages_and_image_for_rasterizable_source(client):
     # Attach the committed PDF so the page-image endpoints have a source to render.
     sample = _sample(POSTS)
-    sample["source"]["attachment_path"] = str(_PDF)
+    _attach_inline_pdf(sample)
     invoice_id = client.post("/api/invoices/process", json=sample).json()["id"]
 
     pages = client.get(f"/api/invoices/{invoice_id}/pages").json()
@@ -163,7 +227,7 @@ def test_pages_empty_for_body_only_invoice(client):
 
 def test_source_pdf_served_and_flagged_for_pdf_invoice(client):
     sample = _sample(POSTS)
-    sample["source"]["attachment_path"] = str(_PDF)
+    _attach_inline_pdf(sample)
     invoice_id = client.post("/api/invoices/process", json=sample).json()["id"]
 
     detail = client.get(f"/api/invoices/{invoice_id}").json()
@@ -192,8 +256,7 @@ def test_trace_reconstructs_pipeline_path_for_posted(client):
     trace = client.get(f"/api/invoices/{invoice_id}/trace").json()
     assert trace["status"] == "posted"
     stages = [s["stage"] for s in trace["steps"]]
-    assert stages == ["received", "parsed", "extracted", "classified",
-                      "categorized", "posted"]
+    assert stages == ["received", "parsed", "extracted", "classified", "categorized", "posted"]
     assert all(s["ok"] for s in trace["steps"])
 
 
@@ -202,7 +265,8 @@ def test_trace_marks_failed_stage_typed_and_retryable(client):
     failing = StubSheetsClient()
     failing.fail_always = True
     app.dependency_overrides[get_pipeline_clients] = lambda: {
-        "llm": PassthroughLLMClient(), "sheets": failing,
+        "llm": PassthroughLLMClient(),
+        "sheets": failing,
     }
     invoice_id = client.post("/api/invoices/process", json=_sample(POSTS)).json()["id"]
 
@@ -247,7 +311,7 @@ def test_detail_exposes_pages_and_resolved_citations(client):
     # The controlled PDF extracts via the offline layout stand-in, so the detail
     # payload carries page rasters + source-anchored highlight boxes.
     sample = _sample(POSTS)
-    sample["source"]["attachment_path"] = str(_PDF)
+    _attach_inline_pdf(sample)
     invoice_id = client.post("/api/invoices/process", json=sample).json()["id"]
 
     detail = client.get(f"/api/invoices/{invoice_id}").json()
@@ -276,12 +340,13 @@ def test_detail_has_no_citations_without_rasterizable_source(client):
 
 # --- human QC actions -------------------------------------------------------
 
+
 def _process(client, name):
     return client.post("/api/invoices/process", json=_sample(name)).json()["id"]
 
 
 def test_correct_metadata_records_overlay_and_reflects_state(client):
-    invoice_id = _process(client, POSTS)
+    invoice_id = _process(client, HOLDS)  # corrections apply to items not yet filed
 
     resp = client.post(
         f"/api/invoices/{invoice_id}/corrections/metadata",
@@ -307,7 +372,7 @@ def test_correct_metadata_records_overlay_and_reflects_state(client):
 
 
 def test_correct_metadata_rejects_unknown_field(client):
-    invoice_id = _process(client, POSTS)
+    invoice_id = _process(client, HOLDS)
     resp = client.post(
         f"/api/invoices/{invoice_id}/corrections/metadata",
         json={"updates": {"nonsense": "x"}},
@@ -340,6 +405,7 @@ def test_qc_action_404_for_unknown_invoice(client):
 
 # --- rerun with corrected data ----------------------------------------------
 
+
 def test_rerun_after_metadata_correction_resolves_hold(client):
     # holds for a missing amount (missing_total, and a weak income/expense call
     # without the total), but the category is clear
@@ -366,8 +432,11 @@ def test_rerun_after_metadata_correction_resolves_hold(client):
     assert detail["invoice"]["metadata"]["total_amount"] == "52.99"
     # the correction is still recorded as a human overlay on the audit trail
     assert detail["corrections"]["metadata"]["total_amount"] == "52.99"
-    correction = [e for e in detail["audit"]
-                  if e["action"] == "corrected" and e["details"].get("target") == "metadata"][-1]
+    correction = [
+        e
+        for e in detail["audit"]
+        if e["action"] == "corrected" and e["details"].get("target") == "metadata"
+    ][-1]
     assert correction["details"]["before"]["total_amount"] is None  # AI original preserved
 
 
@@ -380,7 +449,7 @@ def test_rerun_unknown_invoice_404(client):
 
 def test_confirm_citation_records_human_event(client):
     sample = _sample(POSTS)
-    sample["source"]["attachment_path"] = str(_PDF)
+    _attach_inline_pdf(sample)
     invoice_id = client.post("/api/invoices/process", json=sample).json()["id"]
 
     resp = client.post(
@@ -397,9 +466,7 @@ def test_confirm_citation_records_human_event(client):
 
 
 def test_confirm_citation_unknown_invoice_404(client):
-    resp = client.post(
-        "/api/invoices/nope/citations/confirm", json={"target_id": "metadata.x"}
-    )
+    resp = client.post("/api/invoices/nope/citations/confirm", json={"target_id": "metadata.x"})
     assert resp.status_code == 404
 
 
@@ -408,13 +475,27 @@ def test_confirm_citation_unknown_invoice_404(client):
 # An ambiguous expense (office vs supplies) holds for low_category_confidence with
 # the runner-up offered as a candidate — the AE2 review scenario.
 AMBIGUOUS = {
-    "source": {"channel": "email", "message_id": "m-amb", "subject": "Depot order",
-               "sender": "orders@depot.example"},
+    "source": {
+        "channel": "email",
+        "message_id": "m-amb",
+        "subject": "Depot order",
+        "sender": "orders@depot.example",
+    },
     "document": {
-        "metadata": {"vendor_name": "Depot", "invoice_date": "2026-03-01",
-                     "currency": "USD", "total_amount": "30.00"},
-        "line_items": [{"raw_description": "office supplies", "quantity": "1",
-                        "unit_price": "30.00", "total": "30.00"}],
+        "metadata": {
+            "vendor_name": "Depot",
+            "invoice_date": "2026-03-01",
+            "currency": "USD",
+            "total_amount": "30.00",
+        },
+        "line_items": [
+            {
+                "raw_description": "office supplies",
+                "quantity": "1",
+                "unit_price": "30.00",
+                "total": "30.00",
+            }
+        ],
     },
 }
 
@@ -469,3 +550,151 @@ def test_metrics_endpoint(client):
     assert metrics["submitted"] == 1 and metrics["held"] == 1
     assert metrics["auto_submit_rate"] == 0.5
     assert metrics["hold_precision"] is None  # nothing dispositioned yet
+
+
+# --- status transitions (#0003) ---------------------------------------------
+
+
+def _held_missing_total(client):
+    resp = client.post("/api/invoices/process", json=HOLD_MISSING_TOTAL).json()
+    assert resp["status"] == "held"
+    return resp["id"]
+
+
+def test_rejected_item_can_never_be_filed(client):
+    # The audit repro: hold -> reject -> correct -> rerun used to end "posted".
+    invoice_id = _held_missing_total(client)
+    client.post(f"/api/invoices/{invoice_id}/reject", json={"note": "not a receipt"})
+
+    correct = client.post(
+        f"/api/invoices/{invoice_id}/corrections/metadata",
+        json={"updates": {"total_amount": "52.99"}},
+    )
+    rerun = client.post(f"/api/invoices/{invoice_id}/rerun", json={})
+
+    assert correct.status_code == 409
+    assert rerun.status_code == 409
+    detail = client.get(f"/api/invoices/{invoice_id}").json()
+    assert detail["invoice"]["status"] == "rejected"
+    assert not [e for e in detail["audit"] if e["action"] == "posted"]
+
+
+@pytest.mark.parametrize(
+    "path,body",
+    [
+        ("corrections/metadata", {"updates": {"vendor_name": "X"}}),
+        ("corrections/category", {"category": "Supplies"}),
+        ("rerun", {}),
+        ("reject", {}),
+        ("escalate", {}),
+    ],
+)
+def test_actions_on_posted_item_are_409_and_keep_status(client, path, body):
+    invoice_id = _process(client, POSTS)
+    resp = client.post(f"/api/invoices/{invoice_id}/{path}", json=body)
+    assert resp.status_code == 409
+    assert client.get(f"/api/invoices/{invoice_id}").json()["invoice"]["status"] == "posted"
+
+
+@pytest.mark.parametrize("path", ["escalate", "reject", "corrections/category"])
+def test_actions_on_rejected_item_are_409(client, path):
+    invoice_id = _held_missing_total(client)
+    client.post(f"/api/invoices/{invoice_id}/reject", json={})
+    body = {"category": "Supplies"} if "category" in path else {}
+    assert client.post(f"/api/invoices/{invoice_id}/{path}", json=body).status_code == 409
+
+
+def test_notes_and_review_allowed_on_any_status(client):
+    invoice_id = _process(client, POSTS)
+    assert client.post(f"/api/invoices/{invoice_id}/note", json={"note": "ok"}).status_code == 200
+    assert client.post(f"/api/invoices/{invoice_id}/reviewed", json={}).status_code == 200
+
+
+def test_detail_lists_allowed_actions(client):
+    held = client.get(f"/api/invoices/{_held_missing_total(client)}").json()
+    posted = client.get(f"/api/invoices/{_process(client, POSTS)}").json()
+    assert {"correct", "rerun", "reject", "escalate"} <= set(held["allowed_actions"])
+    assert "retry" not in held["allowed_actions"]
+    assert posted["allowed_actions"] == []
+
+
+# --- exceptions superseded by a new pass (#0004) ----------------------------
+
+
+def test_rerun_that_files_clears_stale_hold_reasons(client):
+    invoice_id = _held_missing_total(client)
+    assert client.get("/api/notifications").json()["held_count"] == 1
+
+    client.post(
+        f"/api/invoices/{invoice_id}/corrections/metadata",
+        json={"updates": {"total_amount": "52.99"}},
+    )
+    detail = client.post(f"/api/invoices/{invoice_id}/rerun", json={}).json()
+    assert detail["invoice"]["status"] == "posted"
+
+    row = next(r for r in client.get("/api/invoices").json() if r["id"] == invoice_id)
+    assert row["exception_count"] == 0
+    assert "low_confidence" not in row["filter_tags"]
+    assert "needs_review" not in row["filter_tags"]
+    assert detail["exceptions"] == []
+    assert client.get("/api/notifications").json() == {"held_count": 0, "by_reason": {}}
+
+    # History isn't lost: the rerun event names what it superseded.
+    rerun_event = [e for e in detail["audit"] if e["action"] == "rerun"][-1]
+    assert rerun_event["details"]["superseded_exceptions"]
+
+
+def test_rerun_that_holds_again_reports_only_current_reasons(client):
+    invoice_id = _held_missing_total(client)
+    before = client.get(f"/api/invoices/{invoice_id}").json()["exceptions"]
+
+    detail = client.post(f"/api/invoices/{invoice_id}/rerun", json={}).json()
+
+    assert detail["invoice"]["status"] == "held"
+    assert len(detail["exceptions"]) == len(before)  # replaced, not doubled
+
+
+def test_retry_that_succeeds_clears_the_failure_exception():
+    from backend.api.main import app, get_pipeline_clients, get_repo
+
+    repo = InMemoryRepository()
+    sheets = StubSheetsClient()
+    sheets.fail_always = True
+    app.dependency_overrides[get_repo] = lambda: repo
+    app.dependency_overrides[get_pipeline_clients] = lambda: {
+        "llm": PassthroughLLMClient(),
+        "sheets": sheets,
+    }
+    try:
+        c = TestClient(app)
+        invoice_id = c.post("/api/invoices/process", json=_sample(POSTS)).json()["id"]
+        assert c.get(f"/api/invoices/{invoice_id}").json()["invoice"]["status"] == "failed"
+
+        sheets.fail_always = False
+        detail = c.post(f"/api/invoices/{invoice_id}/retry", json={}).json()
+
+        assert detail["invoice"]["status"] == "posted"
+        assert detail["exceptions"] == []
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_item_stuck_mid_rerun_can_be_retried_to_completion(client):
+    # A rerun that died after committing RERUN_REQUESTED (its exceptions already
+    # superseded) must not be left with no way forward.
+    from backend.domain import InvoiceStatus
+
+    invoice_id = _held_missing_total(client)
+    client.post(
+        f"/api/invoices/{invoice_id}/corrections/metadata",
+        json={"updates": {"total_amount": "52.99"}},
+    )
+    repo = app.dependency_overrides[get_repo]()
+    stuck = repo.get_invoice(invoice_id)
+    stuck.status = InvoiceStatus.RERUN_REQUESTED
+    repo.save_invoice(stuck)
+
+    detail = client.get(f"/api/invoices/{invoice_id}").json()
+    assert {"retry", "reject", "escalate"} <= set(detail["allowed_actions"])
+    retried = client.post(f"/api/invoices/{invoice_id}/retry", json={}).json()
+    assert retried["invoice"]["status"] == "posted"

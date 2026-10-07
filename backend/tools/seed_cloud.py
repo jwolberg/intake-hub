@@ -1,12 +1,13 @@
 """Seed a *remote* hub (Cloud Run) with PDF-backed sample invoices (P5-T3).
 
-Unlike ``seed_hub`` — which sets ``source.attachment_path`` to a host file the
-API reads off local disk — this carries the PDF **in the request** as base64
-(``source.attachment_b64``), because Cloud Run cannot read host paths. The API
+Like ``seed_hub``, this carries the PDF **in the request** as base64
+(``source.attachment_b64``) — the API never reads a client-supplied file path
+(#0002), and Cloud Run has no host files anyway. Behind IAP, set ``IAP_TOKEN``
+(docs/DEPLOY.md §7). The API
 persists the bytes (``invoices.source_pdf``), so the deployed hub gets real
 source documents: page-image preview *and* the "Open original PDF" download.
 
-    python -m backend.tools.seed_cloud https://intakehub-api-...run.app
+    python -m backend.tools.seed_cloud https://<domain>
 
 Offline-friendly: the controlled sample PDFs extract via the offline
 ``LayoutLLMClient`` (no API key needed), exactly as the local PDF path does.
@@ -16,6 +17,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import pathlib
 import sys
 import urllib.error
@@ -27,17 +29,30 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 SAMPLES = ROOT / "samples"
 PDF_DIR = SAMPLES / "pdf"
 
-# Same demo set as seed_hub (P3-T6): submit / holds / low-confidence / ambiguity /
-# large invoice + larger catalog.
-STEMS = ["inv_clean_001", "inv_hold_unmatched_002", "inv_hold_mismatch_005",
-         "inv_uncertain_006", "inv_ambiguous_008", "inv_large_007"]
+# Same demo set as seed_hub (P3-T6): items that file, holds, low confidence,
+# ambiguity, and a large multi-line receipt.
+STEMS = [
+    "inv_clean_001",
+    "inv_hold_unmatched_002",
+    "inv_hold_mismatch_005",
+    "inv_uncertain_006",
+    "inv_ambiguous_008",
+    "inv_large_007",
+]
+
+
+def _auth_headers() -> dict:
+    """``Authorization`` for an IAP-protected API: set ``IAP_TOKEN`` to an OIDC
+    token for the IAP OAuth client (see docs/DEPLOY.md). Unset for local dev."""
+    token = os.environ.get("IAP_TOKEN")
+    return {"Authorization": f"Bearer {token}"} if token else {}
 
 
 def _post(api: str, sample: dict) -> dict:
     req = urllib.request.Request(
         f"{api}/api/invoices/process",
         data=json.dumps(sample).encode(),
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "application/json", **_auth_headers()},
         method="POST",
     )
     with urllib.request.urlopen(req) as resp:

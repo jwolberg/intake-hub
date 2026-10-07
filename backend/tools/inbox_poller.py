@@ -38,10 +38,19 @@ import urllib.request
 DEFAULT_API = "http://127.0.0.1:8000"
 
 
+def _auth_headers() -> dict:
+    """``Authorization`` for an IAP-protected API: set ``IAP_TOKEN`` to an OIDC
+    token for the IAP OAuth client (see docs/DEPLOY.md). Unset for local dev."""
+    token = os.environ.get("IAP_TOKEN")
+    return {"Authorization": f"Bearer {token}"} if token else {}
+
+
 def run(api: str) -> int:
     """Fetch once, printing a per-message summary. Returns a shell exit code."""
     api = api.rstrip("/")
-    req = urllib.request.Request(f"{api}/api/inbox/fetch", data=b"", method="POST")
+    req = urllib.request.Request(
+        f"{api}/api/inbox/fetch", data=b"", method="POST", headers=_auth_headers()
+    )
     try:
         with urllib.request.urlopen(req) as resp:
             out = json.load(resp)
@@ -49,10 +58,14 @@ def run(api: str) -> int:
         print(f"  inbox fetch failed ({exc}) — is the API at {api}?", file=sys.stderr)
         return 1
     for row in out.get("received", []):
-        print(f"  {row['message_id']}: {row['id']}  status={row['status']}  "
-              f"decision={row.get('decision')}")
-    print(f"\nReceived {out.get('count', 0)} new invoice(s); skipped "
-          f"{out.get('skipped', 0)} already-seen. ({api})")
+        print(
+            f"  {row['message_id']}: {row['id']}  status={row['status']}  "
+            f"decision={row.get('decision')}"
+        )
+    print(
+        f"\nReceived {out.get('count', 0)} new invoice(s); skipped "
+        f"{out.get('skipped', 0)} already-seen. ({api})"
+    )
     return 0
 
 
@@ -65,8 +78,7 @@ def run_loop(api: str, interval: int) -> int:
             try:
                 run(api)
             except Exception as exc:  # never let one bad tick kill the monitor
-                print(f"  poll cycle errored ({exc}); retrying in {interval}s",
-                      file=sys.stderr)
+                print(f"  poll cycle errored ({exc}); retrying in {interval}s", file=sys.stderr)
             time.sleep(interval)
     except KeyboardInterrupt:
         print("\nMonitor stopped.")

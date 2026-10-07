@@ -111,9 +111,7 @@ def get_llm_client() -> LLMClient:
     hard-failing the invoice. A bound key can therefore never break production.
     """
     if settings.anthropic_api_key:
-        primary = AnthropicLLMClient(
-            api_key=settings.anthropic_api_key, model=settings.llm_model
-        )
+        primary = AnthropicLLMClient(api_key=settings.anthropic_api_key, model=settings.llm_model)
         return FallbackLLMClient(primary, PassthroughLLMClient())
     return PassthroughLLMClient()
 
@@ -135,9 +133,7 @@ def get_sheets_client() -> SheetsClient:
         if creds.startswith("{"):
             import json
 
-            return HttpSheetsClient(
-                spreadsheet_id=sheet_id, credentials_info=json.loads(creds)
-            )
+            return HttpSheetsClient(spreadsheet_id=sheet_id, credentials_info=json.loads(creds))
         return HttpSheetsClient(spreadsheet_id=sheet_id, credentials_file=creds)
     return StubSheetsClient()
 

@@ -41,7 +41,12 @@ def test_build_ledger_row_orders_columns_for_a_filed_expense():
     )
     row = build_ledger_row(invoice, categorization, "gmail:msg-1")
     assert row == [
-        "Expense", "Office Expense", "Acme Software", "2026-06-01", "49.99", "gmail:msg-1",
+        "Expense",
+        "Office Expense",
+        "Acme Software",
+        "2026-06-01",
+        "49.99",
+        "gmail:msg-1",
     ]
     assert LEDGER_HEADERS == ["Type", "Category", "Vendor", "Date", "Amount", "Source"]
 
@@ -132,9 +137,7 @@ def test_http_append_row_reuses_existing_spreadsheet_id_no_create():
 
     def handler(request: httpx.Request) -> httpx.Response:
         calls.append((request.method, request.url.path))
-        return httpx.Response(
-            200, json={"updates": {"updatedRange": f"{TAB_NAME}!A2:F2"}}
-        )
+        return httpx.Response(200, json={"updates": {"updatedRange": f"{TAB_NAME}!A2:F2"}})
 
     client = HttpSheetsClient(
         spreadsheet_id="existing-sheet",

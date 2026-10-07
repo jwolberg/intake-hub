@@ -1,23 +1,26 @@
 """Seed the running hub with PDF-backed sample invoices (demo / P3-T6).
 
 Renders each sample's invoice content to a real PDF (via ``samples/generate_pdfs``)
-and POSTs the sample to the API with ``source.attachment_path`` pointing at that
-PDF. Because the invoice then has a rasterizable source, the reviewer hub's
+and POSTs the sample to the API with that PDF inline as ``source.attachment_b64``
+(the API never reads a client-supplied file path — #0002). Because the invoice
+then has a rasterizable source, the reviewer hub's
 "View source" panel shows the original **page image** with the AI's highlight
 boxes — not just the text preview.
 
     python -m backend.tools.seed_hub                      # -> http://127.0.0.1:8000
     python -m backend.tools.seed_hub http://127.0.0.1:8000
 
-Point it at the API that actually has the Visual Document Review code and can
-read these host paths (a local ``uvicorn``, not a stale container). Note that on
+Point it at the API that actually has the Visual Document Review code (a local
+``uvicorn`` or the compose ``api`` container). Note that on
 macOS ``localhost`` may resolve to IPv6 first — use ``127.0.0.1`` to force the
 local uvicorn if a Docker container is also publishing the port.
 """
 
 from __future__ import annotations
 
+import base64
 import json
+import os
 import pathlib
 import sys
 import urllib.error
@@ -29,18 +32,30 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 SAMPLES = ROOT / "samples"
 PDF_DIR = SAMPLES / "pdf"
 
-# Demo seed set (PRD §19, P3-T6): a clean submit, two distinct holds, a
-# low-confidence line, an ambiguous-context hold, and a large invoice matched
-# against a larger catalog — covering submit / ambiguity / mismatch / large.
-STEMS = ["inv_clean_001", "inv_hold_unmatched_002", "inv_hold_mismatch_005",
-         "inv_uncertain_006", "inv_ambiguous_008", "inv_large_007"]
+# Demo seed set (PRD §19, P3-T6): items that file, holds for different reasons,
+# a low-confidence line, and a large multi-line receipt.
+STEMS = [
+    "inv_clean_001",
+    "inv_hold_unmatched_002",
+    "inv_hold_mismatch_005",
+    "inv_uncertain_006",
+    "inv_ambiguous_008",
+    "inv_large_007",
+]
+
+
+def _auth_headers() -> dict:
+    """``Authorization`` for an IAP-protected API: set ``IAP_TOKEN`` to an OIDC
+    token for the IAP OAuth client (see docs/DEPLOY.md). Unset for local dev."""
+    token = os.environ.get("IAP_TOKEN")
+    return {"Authorization": f"Bearer {token}"} if token else {}
 
 
 def _post(api: str, sample: dict) -> dict:
     req = urllib.request.Request(
         f"{api}/api/invoices/process",
         data=json.dumps(sample).encode(),
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "application/json", **_auth_headers()},
         method="POST",
     )
     with urllib.request.urlopen(req) as resp:
@@ -55,8 +70,8 @@ def run(api: str) -> int:
         sample = json.loads((SAMPLES / f"{stem}.json").read_text())
         pdf = render_invoice_pdf(sample, PDF_DIR / f"{stem}.pdf")
         source = sample.setdefault("source", {})
-        source["attachment_path"] = str(pdf.resolve())
-        source.setdefault("attachment", f"{stem}.pdf")
+        source["attachment"] = f"{stem}.pdf"
+        source["attachment_b64"] = base64.b64encode(pdf.read_bytes()).decode()
         try:
             out = _post(api, sample)
         except urllib.error.URLError as exc:

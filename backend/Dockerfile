@@ -1,16 +1,20 @@
 # Backend image. Build context is the repo root so the `backend` package keeps
 # its import path (`backend.api.main:app`). See docker-compose.yml.
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
 WORKDIR /app
 
-COPY backend/requirements.txt /app/backend/requirements.txt
-RUN pip install --no-cache-dir -r /app/backend/requirements.txt
+COPY backend/requirements.lock /app/backend/requirements.lock
+RUN pip install --no-cache-dir --require-hashes -r /app/backend/requirements.lock
 
 COPY backend /app/backend
+
+# Run unprivileged (#0014).
+RUN useradd --system --uid 10001 --no-create-home app
+USER app
 
 EXPOSE 8000
 # Shell form so Cloud Run's injected $PORT (8080) is honored; defaults to 8000

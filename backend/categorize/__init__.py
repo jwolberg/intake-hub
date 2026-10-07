@@ -44,60 +44,154 @@ class ScheduleCCategory:
 # income bucket (rich income handling is deferred). Keywords are the offline
 # heuristic's evidence; the LLM (when reached) refines genuinely ambiguous cases.
 SCHEDULE_C_CATEGORIES: list[ScheduleCCategory] = [
-    ScheduleCCategory("Advertising", frozenset({
-        "advertising", "ads", "ad", "marketing", "campaign", "promotion", "seo"})),
-    ScheduleCCategory("Car and truck expenses", frozenset({
-        "fuel", "gas", "gasoline", "mileage", "parking", "toll", "uber", "lyft",
-        "rental car", "vehicle"})),
-    ScheduleCCategory("Commissions and fees", frozenset({
-        "commission", "fee", "processing", "stripe", "paypal", "merchant"})),
-    ScheduleCCategory("Contract labor", frozenset({
-        "contractor", "freelance", "freelancer", "subcontractor", "1099"})),
-    ScheduleCCategory("Insurance", frozenset({
-        "insurance", "premium", "liability", "coverage"})),
-    ScheduleCCategory("Legal and professional services", frozenset({
-        "legal", "attorney", "lawyer", "accountant", "accounting", "bookkeeping",
-        "consulting", "consultant", "professional"})),
-    ScheduleCCategory("Office expense", frozenset({
-        "office", "software", "saas", "subscription", "hosting", "domain",
-        "cloud", "app", "license", "google", "microsoft", "adobe", "notion",
-        "zoom", "slack"})),
-    ScheduleCCategory("Rent or lease", frozenset({
-        "rent", "lease", "coworking", "workspace", "office space"})),
-    ScheduleCCategory("Repairs and maintenance", frozenset({
-        "repair", "maintenance", "fix", "service"})),
-    ScheduleCCategory("Supplies", frozenset({
-        "supplies", "supply", "paper", "ink", "toner", "stationery", "materials"})),
-    ScheduleCCategory("Taxes and licenses", frozenset({
-        "tax", "license", "permit", "registration", "filing"})),
-    ScheduleCCategory("Travel", frozenset({
-        "travel", "flight", "airfare", "airline", "hotel", "lodging", "airbnb",
-        "train"})),
-    ScheduleCCategory("Meals", frozenset({
-        "meal", "meals", "restaurant", "dining", "lunch", "dinner", "coffee",
-        "catering"})),
-    ScheduleCCategory("Utilities", frozenset({
-        "utility", "utilities", "internet", "phone", "electricity", "water",
-        "wireless", "broadband"})),
-    ScheduleCCategory("Other expenses", frozenset({
-        "misc", "miscellaneous", "other"})),
-    ScheduleCCategory("Gross receipts (income)", frozenset({
-        "payout", "payment received", "deposit", "invoice paid", "you've been paid",
-        "sales", "revenue"})),
+    ScheduleCCategory(
+        "Advertising",
+        frozenset({"advertising", "ads", "ad", "marketing", "campaign", "promotion", "seo"}),
+    ),
+    ScheduleCCategory(
+        "Car and truck expenses",
+        frozenset(
+            {
+                "fuel",
+                "gas",
+                "gasoline",
+                "mileage",
+                "parking",
+                "toll",
+                "uber",
+                "lyft",
+                "rental car",
+                "vehicle",
+            }
+        ),
+    ),
+    ScheduleCCategory(
+        "Commissions and fees",
+        frozenset({"commission", "fee", "processing", "stripe", "paypal", "merchant"}),
+    ),
+    ScheduleCCategory(
+        "Contract labor",
+        frozenset({"contractor", "freelance", "freelancer", "subcontractor", "1099"}),
+    ),
+    ScheduleCCategory("Insurance", frozenset({"insurance", "premium", "liability", "coverage"})),
+    ScheduleCCategory(
+        "Legal and professional services",
+        frozenset(
+            {
+                "legal",
+                "attorney",
+                "lawyer",
+                "accountant",
+                "accounting",
+                "bookkeeping",
+                "consulting",
+                "consultant",
+                "professional",
+            }
+        ),
+    ),
+    ScheduleCCategory(
+        "Office expense",
+        frozenset(
+            {
+                "office",
+                "software",
+                "saas",
+                "subscription",
+                "hosting",
+                "domain",
+                "cloud",
+                "app",
+                "license",
+                "google",
+                "microsoft",
+                "adobe",
+                "notion",
+                "zoom",
+                "slack",
+            }
+        ),
+    ),
+    ScheduleCCategory(
+        "Rent or lease", frozenset({"rent", "lease", "coworking", "workspace", "office space"})
+    ),
+    ScheduleCCategory(
+        "Repairs and maintenance", frozenset({"repair", "maintenance", "fix", "service"})
+    ),
+    ScheduleCCategory(
+        "Supplies",
+        frozenset({"supplies", "supply", "paper", "ink", "toner", "stationery", "materials"}),
+    ),
+    ScheduleCCategory(
+        "Taxes and licenses", frozenset({"tax", "license", "permit", "registration", "filing"})
+    ),
+    ScheduleCCategory(
+        "Travel",
+        frozenset(
+            {"travel", "flight", "airfare", "airline", "hotel", "lodging", "airbnb", "train"}
+        ),
+    ),
+    ScheduleCCategory(
+        "Meals",
+        frozenset(
+            {"meal", "meals", "restaurant", "dining", "lunch", "dinner", "coffee", "catering"}
+        ),
+    ),
+    ScheduleCCategory(
+        "Utilities",
+        frozenset(
+            {
+                "utility",
+                "utilities",
+                "internet",
+                "phone",
+                "electricity",
+                "water",
+                "wireless",
+                "broadband",
+            }
+        ),
+    ),
+    ScheduleCCategory("Other expenses", frozenset({"misc", "miscellaneous", "other"})),
+    ScheduleCCategory(
+        "Gross receipts (income)",
+        frozenset(
+            {
+                "payout",
+                "payment received",
+                "deposit",
+                "invoice paid",
+                "you've been paid",
+                "sales",
+                "revenue",
+            }
+        ),
+    ),
 ]
 
 _INCOME_CATEGORY = "Gross receipts (income)"
 
 # Explicit signals that a document records money *in* rather than a purchase.
-_INCOME_KEYWORDS = frozenset({
-    "payout", "payment received", "you've been paid", "you got paid", "deposit",
-    "invoice paid", "remittance", "disbursement", "we've sent you", "earnings",
-})
+_INCOME_KEYWORDS = frozenset(
+    {
+        "payout",
+        "payment received",
+        "you've been paid",
+        "you got paid",
+        "deposit",
+        "invoice paid",
+        "remittance",
+        "disbursement",
+        "we've sent you",
+        "earnings",
+    }
+)
 
 # Prompt-injection tells (R16): if the *document* text tries to steer the model,
 # flag it adversarial so the orchestrator holds it instead of auto-filing.
 _ADVERSARIAL_PATTERNS = [
-    re.compile(p, re.IGNORECASE) for p in (
+    re.compile(p, re.IGNORECASE)
+    for p in (
         r"ignore (all|any|previous|prior) (instructions|prompts)",
         r"disregard (the|all|any|previous) (above|instructions|rules)",
         r"system prompt",
@@ -109,12 +203,12 @@ _ADVERSARIAL_PATTERNS = [
 ]
 
 # Confidence tuning (mirrors matching's floor/gap posture).
-_CANDIDATE_FLOOR = 0.5      # below this a category is not a plausible candidate
-_AMBIGUITY_GAP = 0.15       # top two within this → adjudicate with the LLM
-_ONE_HIT = 0.8              # a single distinctive keyword hit
+_CANDIDATE_FLOOR = 0.5  # below this a category is not a plausible candidate
+_AMBIGUITY_GAP = 0.15  # top two within this → adjudicate with the LLM
+_ONE_HIT = 0.8  # a single distinctive keyword hit
 _TWO_HITS = 0.9
 _MANY_HITS = 0.95
-_AMBIGUOUS_CAP = 0.7        # unresolved category race → below the auto-file bar (hold)
+_AMBIGUOUS_CAP = 0.7  # unresolved category race → below the auto-file bar (hold)
 _EXPENSE_DEFAULT_CONF = 0.9  # vendor + total present → clearly a purchase
 _MAX_ALTERNATES = 3
 

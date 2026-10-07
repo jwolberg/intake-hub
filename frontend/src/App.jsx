@@ -10,6 +10,7 @@ import MetricsBar from "./components/MetricsBar.jsx";
 // where reviewers correct, review, escalate, note, and rerun invoices.
 export default function App() {
   const [invoices, setInvoices] = useState([]);
+  const [total, setTotal] = useState(0);
   const [metrics, setMetrics] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
   const [detail, setDetail] = useState(null);
@@ -18,13 +19,28 @@ export default function App() {
   const [heldCount, setHeldCount] = useState(0);
 
   const refresh = useCallback(() => {
-    listInvoices().then(setInvoices).catch((e) => setError(String(e)));
+    listInvoices()
+      .then(({ rows, total }) => {
+        setInvoices(rows);
+        setTotal(total);
+      })
+      .catch((e) => setError(String(e)));
     getMetrics().then(setMetrics).catch((e) => setError(String(e)));
     // Held-item notification digest (R18) — badge in the app bar.
     getNotifications()
       .then((n) => setHeldCount(n.held_count ?? 0))
       .catch((e) => setError(String(e)));
   }, []);
+
+  // Append the next page of the list (#0012).
+  const loadMore = useCallback(() => {
+    listInvoices({ offset: invoices.length })
+      .then(({ rows, total }) => {
+        setInvoices((prev) => [...prev, ...rows]);
+        setTotal(total);
+      })
+      .catch((e) => setError(String(e)));
+  }, [invoices.length]);
 
   const loadDetail = useCallback((id) => {
     getInvoice(id).then(setDetail).catch((e) => setError(String(e)));
@@ -47,12 +63,15 @@ export default function App() {
       .catch(() => setHealth("API unreachable"));
   }, [refresh]);
 
+  // Selecting (or leaving) an item clears the previous detail in the same event,
+  // so a stale item never flashes while the next one loads.
+  const select = useCallback((id) => {
+    setDetail(null);
+    setSelectedId(id);
+  }, []);
+
   useEffect(() => {
-    if (!selectedId) {
-      setDetail(null);
-      return;
-    }
-    loadDetail(selectedId);
+    if (selectedId) loadDetail(selectedId);
   }, [selectedId, loadDetail]);
 
   return (
@@ -69,7 +88,7 @@ export default function App() {
 
       {selectedId && detail ? (
         <>
-          <button className="link-btn" onClick={() => setSelectedId(null)}>
+          <button className="link-btn" onClick={() => select(null)}>
             ← Back to all invoices
           </button>
           <InvoiceDetail detail={detail} onAction={onAction} setError={setError} />
@@ -78,7 +97,12 @@ export default function App() {
         <>
           <button className="link-btn" onClick={refresh}>Refresh</button>
           <MetricsBar metrics={metrics} />
-          <InvoiceList invoices={invoices} onSelect={setSelectedId} />
+          <InvoiceList
+            invoices={invoices}
+            total={total}
+            onLoadMore={loadMore}
+            onSelect={select}
+          />
         </>
       )}
     </div>

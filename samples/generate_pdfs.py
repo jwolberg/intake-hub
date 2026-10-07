@@ -26,9 +26,15 @@ SAMPLES_DIR = pathlib.Path(__file__).resolve().parent
 PDF_DIR = SAMPLES_DIR / "pdf"
 
 # JSON samples that have structured invoice content worth rendering as a PDF.
-_RENDERABLE = ["inv_clean_001", "inv_hold_unmatched_002", "inv_body_003",
-               "inv_hold_mismatch_005", "inv_uncertain_006",
-               "inv_ambiguous_008", "inv_large_007"]
+_RENDERABLE = [
+    "inv_clean_001",
+    "inv_hold_unmatched_002",
+    "inv_body_003",
+    "inv_hold_mismatch_005",
+    "inv_uncertain_006",
+    "inv_ambiguous_008",
+    "inv_large_007",
+]
 
 _MARGIN = 72
 _TOP = 720
@@ -71,12 +77,14 @@ def render_invoice_pdf(sample: dict, path: pathlib.Path | str) -> pathlib.Path:
     c.drawString(_MARGIN, y, COLUMN_SEP.join(LINE_ITEM_COLUMNS))
     y -= _LINE_H
     for item in line_items:
-        row = COLUMN_SEP.join([
-            str(item.get("raw_description", "")),
-            str(item.get("quantity", "") or ""),
-            str(item.get("unit_price", "") or ""),
-            str(item.get("total", "") or ""),
-        ])
+        row = COLUMN_SEP.join(
+            [
+                str(item.get("raw_description", "")),
+                str(item.get("quantity", "") or ""),
+                str(item.get("unit_price", "") or ""),
+                str(item.get("total", "") or ""),
+            ]
+        )
         c.drawString(_MARGIN, y, row)
         y -= _LINE_H
 

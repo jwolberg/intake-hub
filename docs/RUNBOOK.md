@@ -19,10 +19,9 @@ curl -X POST http://localhost:8000/api/invoices/process \
   -H 'Content-Type: application/json' --data @samples/inv_clean_001.json
 ```
 
-`seed_hub` renders the samples to real PDFs and posts them. The dev-only
-`docker-compose.override.yml` (auto-loaded) mounts `samples/` into the `api`
-container at the host path so the container can read those PDFs — run both
-`docker compose` and `seed_hub` from the repo root so `$PWD` matches. Seeded
+`seed_hub` renders the samples to real PDFs and posts them inline (base64) —
+the API never reads a file path supplied by an HTTP client, so no volume mount
+is needed. Seeded
 data persists in the `db_data` volume, so after a reboot just `docker compose
 up -d` (no re-seed needed). This path is offline (no key); export
 `ANTHROPIC_API_KEY` before `up` to use the real provider instead.
@@ -51,7 +50,7 @@ Everything is local-first; no cloud accounts are required.
 backend/    FastAPI app + pipeline stages + clients + persistence (package: backend)
   api/        HTTP routes (PRD §13)
   domain/     Pydantic domain types
-  db/         schema.sql, engine/bootstrap, Repository (in-memory + Postgres)
+  db/         migrations/ (versioned SQL) + migrate runner, engine, Repository (in-memory + Postgres)
   clients/    LLM / Drive / Gmail / Sheets clients
   inbox receipts intake parser extraction categorize decision ledger_integrity exceptions audit corrections orchestrator
 frontend/   React/Vite reviewer hub
@@ -143,8 +142,8 @@ docker compose down                # stop
 docker compose down -v             # stop + wipe the DB volume
 ```
 
-The API applies the DB schema on startup (`init_schema`), so no migration step is
-needed. Then:
+Compose runs the `migrate` service (`python -m backend.db.migrate`) before the
+API starts, so the schema is current. Then:
 
 ```bash
 # Health (also reports DB connectivity)
@@ -179,9 +178,9 @@ clients talk directly to Google's APIs (or their offline stubs).
 docker compose up -d db
 
 # 2. Python env (from repo root)
-python3 -m venv .venv
+python3.12 -m venv .venv
 source .venv/bin/activate
-pip install -r backend/requirements-dev.txt
+pip install --require-hashes -r backend/requirements-dev.lock
 
 # 3. run the API against the local-mapped DB
 export DATABASE_URL=postgresql+psycopg://intakehub:intakehub@localhost:5432/intakehub
@@ -208,7 +207,7 @@ they need no DB or network.
 
 ```bash
 source .venv/bin/activate           # (create per Path B if needed)
-pip install -r backend/requirements-dev.txt
+pip install --require-hashes -r backend/requirements-dev.lock
 
 ruff check .                        # lint
 ruff check --fix .                  # lint + autofix
@@ -245,7 +244,7 @@ PDFs, then run one through the full pipeline. No DB, network, or API key needed.
 
 ```bash
 source .venv/bin/activate
-pip install -r backend/requirements-dev.txt   # pulls reportlab (generator) + pypdf (parser)
+pip install --require-hashes -r backend/requirements-dev.lock   # pulls reportlab (generator) + pypdf (parser)
 
 # 1. generate sample PDFs → samples/pdf/*.pdf  (also committed, so this is optional)
 python -m samples.generate_pdfs
@@ -536,3 +535,35 @@ truth.
 | API 500 on `/api/invoices` | App can't reach Postgres (it uses `PostgresRepository`). Bring up `db` and set `DATABASE_URL`. |
 | Hub shows "API unreachable" | API not running on `VITE_API_URL` (default `:8000`), or CORS/host mismatch. |
 | Postgres round-trip test always skips | Expected without a DB; see "Validating the Postgres path". |
+
+## Updating Python dependencies
+
+`backend/requirements.txt` / `requirements-dev.txt` hold the direct, ranged deps;
+the `.lock` files are generated, hash-pinned, and what Docker/CI/venvs install.
+After editing a `.txt`, regenerate both locks (needs [uv](https://docs.astral.sh/uv/)):
+
+```bash
+for f in requirements requirements-dev; do
+  uv pip compile backend/$f.txt --generate-hashes --universal --python-version 3.12 -o backend/$f.lock
+done
+```
+
+## Migrations
+
+The schema lives in versioned SQL files, `backend/db/migrations/NNNN_name.sql`,
+applied in order by `python -m backend.db.migrate` and recorded in
+`schema_migrations`. The API never changes the schema itself; `/ready` returns
+503 (`"schema": "pending"`) until migrations are applied.
+
+```bash
+python -m backend.db.migrate --status   # applied / PENDING; exits 1 if any pending
+python -m backend.db.migrate            # apply pending (each file in its own transaction)
+```
+
+- **Adding a change:** create the next `NNNN_short_name.sql`; never edit an applied
+  file. Prefer additive, backward-compatible DDL (the old revision keeps serving
+  traffic while the new one rolls out). A failing migration rolls back entirely
+  and is not recorded.
+- **Existing databases** created before versioned migrations already match
+  `0001_baseline` (all `IF NOT EXISTS`), so the first run just records it.
+- Keep `;` out of string literals and function bodies — the runner splits files on `;`.

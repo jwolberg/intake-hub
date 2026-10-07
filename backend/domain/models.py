@@ -10,7 +10,7 @@ amounts; timestamps are timezone-aware ``datetime``.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import uuid4
 
@@ -28,7 +28,7 @@ from .enums import (
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _new_id(prefix: str) -> str:
@@ -150,63 +150,8 @@ class ExtractionResult(BaseModel):
     citations: list[Citation] = Field(default_factory=list)
 
 
-class ContextCandidate(BaseModel):
-    """A ranked sponsor/study/site candidate (ARCHITECTURE.md §7).
-
-    Carries the reference's *canonical* names alongside the ids so the context
-    stage can detect invoice-vs-reference contradictions (PRD FR8, §15) and the
-    hub can show the candidate conflict (PRD §10).
-    """
-
-    sponsor_id: str | None = None
-    study_id: str | None = None
-    site_id: str | None = None
-    score: float
-    sponsor_name: str | None = None
-    study_name: str | None = None
-    protocol_number: str | None = None
-    site_name: str | None = None
-
-
-class ResolvedContext(BaseModel):
-    """Resolved business context (PRD §11 Resolved Context, FR3)."""
-
-    invoice_id: str
-    sponsor_id: str | None = None
-    study_id: str | None = None
-    site_id: str | None = None
-    confidence: float = 0.0
-    candidates: list[ContextCandidate] = Field(default_factory=list)
-    warnings: list[str] = Field(default_factory=list)
-
-
-class CatalogItem(BaseModel):
-    """A sponsor+study-scoped billable catalog item (PRD FR4)."""
-
-    id: str
-    sponsor_id: str
-    study_id: str
-    description: str
-    unit_price: Decimal | None = None
-
-
-class MatchResult(BaseModel):
-    """Result of matching one line item to the catalog (PRD §11, FR5)."""
-
-    line_item_id: str
-    catalog_item_id: str | None = None
-    catalog_description: str | None = None
-    confidence: float = 0.0
-    amount_match: bool | None = None
-    quantity_match: bool | None = None
-    rationale: str | None = None
-    requires_exception_review: bool = False
-    alternates: list[str] = Field(default_factory=list)
-    exceptions: list[str] = Field(default_factory=list)
-
-
 class CategorizationResult(BaseModel):
-    """Output of the classify+categorize stage (R5/R6), shaped like ``MatchResult``.
+    """Output of the classify+categorize stage (R5/R6).
 
     Carries the income/expense determination and the Schedule C category, each as
     an annotated cell (value + confidence + evidence), plus ranked ``alternates``

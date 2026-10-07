@@ -84,12 +84,20 @@ def test_extract_preserves_line_item_source_text():
 
 def test_extract_honors_annotated_field_confidence():
     """A provider may return ``{value, confidence, evidence}`` per field."""
-    llm = StubLLMClient(responses=[{
-        "metadata": {
-            "invoice_number": {"value": "INV-9", "confidence": 0.42, "evidence": "smudged scan"},
-        },
-        "line_items": [],
-    }])
+    llm = StubLLMClient(
+        responses=[
+            {
+                "metadata": {
+                    "invoice_number": {
+                        "value": "INV-9",
+                        "confidence": 0.42,
+                        "evidence": "smudged scan",
+                    },
+                },
+                "line_items": [],
+            }
+        ]
+    )
     parsed = parse("inv_9", {"document": {}, "source": {"attachment": "x.png"}})
     result = extract("inv_9", parsed, llm)
 
@@ -99,10 +107,14 @@ def test_extract_honors_annotated_field_confidence():
 
 
 def test_extract_partial_line_item_gets_lower_confidence():
-    llm = StubLLMClient(responses=[{
-        "metadata": {},
-        "line_items": [{"raw_description": "Consultation"}],  # no total
-    }])
+    llm = StubLLMClient(
+        responses=[
+            {
+                "metadata": {},
+                "line_items": [{"raw_description": "Consultation"}],  # no total
+            }
+        ]
+    )
     parsed = parse("inv_p", {"document": {}})
     result = extract("inv_p", parsed, llm)
 

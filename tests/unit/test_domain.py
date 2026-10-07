@@ -27,9 +27,13 @@ def test_invoice_defaults():
 
 
 def test_line_item_keeps_decimal_amounts():
-    item = LineItem(invoice_id="invoice_1", raw_description="Screening visit",
-                    quantity=Decimal("2"), unit_price=Decimal("300.00"),
-                    total=Decimal("600.00"))
+    item = LineItem(
+        invoice_id="invoice_1",
+        raw_description="Screening visit",
+        quantity=Decimal("2"),
+        unit_price=Decimal("300.00"),
+        total=Decimal("600.00"),
+    )
     assert item.total == Decimal("600.00")
     assert item.id.startswith("line_")
 
@@ -40,8 +44,11 @@ def test_decision_result_structure():
         confidence=0.42,
         rationale="Two possible sites matched the invoice metadata.",
         risk_flags=[
-            RiskFlag(type="context_ambiguity", severity=Severity.MEDIUM,
-                     message="Two possible sites matched."),
+            RiskFlag(
+                type="context_ambiguity",
+                severity=Severity.MEDIUM,
+                message="Two possible sites matched.",
+            ),
         ],
         required_human_actions=["Confirm correct site before submission"],
     )
@@ -55,10 +62,20 @@ def test_status_values_cover_state_machine():
     # states (classified/categorized/posted) coexist with the clinical-trial
     # states until U5 removes the latter.
     expected = {
-        "received", "parsed", "extracted",
-        "classified", "categorized", "posted",
-        "context_resolved", "catalog_matched",
-        "submitted", "held", "failed", "rerun_requested", "corrected", "escalated",
+        "received",
+        "parsed",
+        "extracted",
+        "classified",
+        "categorized",
+        "posted",
+        "context_resolved",
+        "catalog_matched",
+        "submitted",
+        "held",
+        "failed",
+        "rerun_requested",
+        "corrected",
+        "escalated",
         "rejected",
     }
     assert {s.value for s in InvoiceStatus} == expected

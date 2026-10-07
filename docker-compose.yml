@@ -20,12 +20,27 @@ services:
       timeout: 5s
       retries: 10
 
+  # Applies pending schema migrations, then exits; the API waits for it (#0013).
+  migrate:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: python -m backend.db.migrate
+    environment:
+      DATABASE_URL: postgresql+psycopg://intakehub:intakehub@db:5432/intakehub
+    depends_on:
+      db:
+        condition: service_healthy
+
   api:
     build:
       context: .
       dockerfile: backend/Dockerfile
     environment:
       DATABASE_URL: postgresql+psycopg://intakehub:intakehub@db:5432/intakehub
+      # Local dev only: production requires IAP (AUTH_MODE defaults to `iap` and
+      # the API refuses to start without IAP_AUDIENCE). See docs/DEPLOY.md.
+      AUTH_MODE: disabled
       # OD-2 real LLM provider. Read from the host env at `up` time; empty →
       # offline stand-in (network-free default). Export it from the Keychain:
       #   ANTHROPIC_API_KEY="$(security find-generic-password \
@@ -59,6 +74,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
   hub:
     build:

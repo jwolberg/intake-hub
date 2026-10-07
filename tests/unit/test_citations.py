@@ -23,7 +23,9 @@ from backend.extraction.citations import (
 
 def _wb(index: int, text: str, x: float, w: float = 0.1) -> WordBox:
     return WordBox(
-        page_number=1, index=index, text=text,
+        page_number=1,
+        index=index,
+        text=text,
         bbox=BoundingBox(x=x, y=0.2, width=w, height=0.05),
     )
 
@@ -33,8 +35,12 @@ def _wb(index: int, text: str, x: float, w: float = 0.1) -> WordBox:
 
 def test_resolve_unions_cited_word_boxes():
     words = [_wb(0, "Riverside", 0.10), _wb(1, "Clinical", 0.22), _wb(2, "Research", 0.34)]
-    cite = Citation(page_number=1, target_id="metadata.vendor_name",
-                    quote="Riverside Clinical Research", word_indices=[0, 1, 2])
+    cite = Citation(
+        page_number=1,
+        target_id="metadata.vendor_name",
+        quote="Riverside Clinical Research",
+        word_indices=[0, 1, 2],
+    )
 
     [resolved] = resolve_citations([cite], words)
     assert resolved.bbox is not None
@@ -47,8 +53,9 @@ def test_resolve_unions_cited_word_boxes():
 
 def test_resolve_drops_out_of_range_indices():
     words = [_wb(0, "INV-1001", 0.10)]
-    cite = Citation(page_number=1, target_id="metadata.invoice_number",
-                    quote="INV-1001", word_indices=[0, 99])  # 99 doesn't exist
+    cite = Citation(
+        page_number=1, target_id="metadata.invoice_number", quote="INV-1001", word_indices=[0, 99]
+    )  # 99 doesn't exist
 
     [resolved] = resolve_citations([cite], words)
     assert resolved.bbox is not None  # resolved from the valid index only
@@ -57,8 +64,9 @@ def test_resolve_drops_out_of_range_indices():
 
 def test_resolve_no_box_when_no_valid_words():
     words = [_wb(0, "INV-1001", 0.10)]
-    cite = Citation(page_number=1, target_id="metadata.invoice_number",
-                    quote="GHOST", word_indices=[99])  # all out of range
+    cite = Citation(
+        page_number=1, target_id="metadata.invoice_number", quote="GHOST", word_indices=[99]
+    )  # all out of range
 
     [resolved] = resolve_citations([cite], words)
     assert resolved.bbox is None  # no hallucinated highlight (spec §3)
@@ -89,8 +97,11 @@ def _extraction(**meta) -> ExtractionResult:
 
 def test_synthesize_anchors_values_to_words():
     words = [_wb(0, "INV-1001", 0.10), _wb(1, "Acme", 0.30)]
-    extraction = _extraction(invoice_number="INV-1001", vendor_name="Acme",
-                             field_confidence={"invoice_number": 0.95, "vendor_name": 0.95})
+    extraction = _extraction(
+        invoice_number="INV-1001",
+        vendor_name="Acme",
+        field_confidence={"invoice_number": 0.95, "vendor_name": 0.95},
+    )
 
     cites = {c.target_id: c for c in synthesize_citations(extraction, words)}
     assert cites["metadata.invoice_number"].word_indices == [0]
@@ -100,8 +111,11 @@ def test_synthesize_anchors_values_to_words():
 
 def test_synthesize_marks_unanchored_value_unreadable():
     words = [_wb(0, "INV-1001", 0.10)]
-    extraction = _extraction(invoice_number="INV-1001", vendor_name="Nowhere Inc",
-                             field_confidence={"invoice_number": 0.95, "vendor_name": 0.95})
+    extraction = _extraction(
+        invoice_number="INV-1001",
+        vendor_name="Nowhere Inc",
+        field_confidence={"invoice_number": 0.95, "vendor_name": 0.95},
+    )
 
     cites = {c.target_id: c for c in synthesize_citations(extraction, words)}
     vendor = cites["metadata.vendor_name"]
@@ -111,8 +125,7 @@ def test_synthesize_marks_unanchored_value_unreadable():
 
 def test_synthesize_marks_low_confidence_uncertain():
     words = [_wb(0, "INV-1001", 0.10)]
-    extraction = _extraction(invoice_number="INV-1001",
-                             field_confidence={"invoice_number": 0.3})
+    extraction = _extraction(invoice_number="INV-1001", field_confidence={"invoice_number": 0.3})
 
     [cite] = synthesize_citations(extraction, words)
     assert cite.status is CitationStatus.UNCERTAIN
@@ -122,8 +135,9 @@ def test_synthesize_marks_low_confidence_uncertain():
 def test_synthesize_cites_line_items():
     words = [_wb(0, "ECG", 0.10)]
     extraction = ExtractionResult(
-        line_items=[LineItem(invoice_id="i", id="line_a", raw_description="ECG",
-                             extraction_confidence=0.9)],
+        line_items=[
+            LineItem(invoice_id="i", id="line_a", raw_description="ECG", extraction_confidence=0.9)
+        ],
     )
     [cite] = synthesize_citations(extraction, words)
     assert cite.target_id == "line_item.line_a.raw_description"

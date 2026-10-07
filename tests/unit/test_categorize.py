@@ -19,12 +19,8 @@ from backend.domain import DocumentType, ExtractionResult, InvoiceMetadata, Line
 _DECISION_FLOOR = 0.8  # backend.decision._DECISION_FLOOR — the auto-file bar
 
 
-def _extraction(
-    *, vendor=None, total=None, lines=None, invoice_id="inv_1"
-) -> ExtractionResult:
-    line_items = [
-        LineItem(invoice_id=invoice_id, raw_description=desc) for desc in (lines or [])
-    ]
+def _extraction(*, vendor=None, total=None, lines=None, invoice_id="inv_1") -> ExtractionResult:
+    line_items = [LineItem(invoice_id=invoice_id, raw_description=desc) for desc in (lines or [])]
     meta = InvoiceMetadata(
         vendor_name=vendor,
         total_amount=Decimal(total) if total is not None else None,
@@ -101,14 +97,18 @@ def test_connection_error_degrades_to_heuristic_not_raise():
 def test_llm_adjudicates_ambiguous_case():
     """A usable LLM response disambiguates a close category race and lifts
     confidence above the bar."""
-    llm = StubLLMClient(responses=[{
-        "document_type": "expense",
-        "document_type_confidence": 0.95,
-        "category": "Office expense",
-        "category_confidence": 0.92,
-        "alternates": ["Supplies"],
-        "rationale": "software purchase",
-    }])
+    llm = StubLLMClient(
+        responses=[
+            {
+                "document_type": "expense",
+                "document_type_confidence": 0.95,
+                "category": "Office expense",
+                "category_confidence": 0.92,
+                "alternates": ["Supplies"],
+                "rationale": "software purchase",
+            }
+        ]
+    )
     result = categorize(
         "inv_1",
         _extraction(vendor="Depot", total="30.00", lines=["office supplies"]),

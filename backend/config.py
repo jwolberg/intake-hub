@@ -50,12 +50,15 @@ class Settings:
     gmail_token_enc_key: str | None
     gmail_label: str | None
     gmail_tax_year: int
+    # Authentication (#0001). ``iap`` (default, fail closed): every ``/api/*``
+    # request must carry a valid Identity-Aware Proxy assertion for
+    # ``iap_audience``. ``disabled``: local Compose and tests only.
+    auth_mode: str = "iap"
+    iap_audience: str | None = None
 
     @classmethod
     def from_env(cls) -> Settings:
-        origins = os.environ.get(
-            "CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
-        )
+        origins = os.environ.get("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
         return cls(
             database_url=os.environ.get(
                 "DATABASE_URL",
@@ -75,9 +78,9 @@ class Settings:
             gmail_refresh_token=os.environ.get("GMAIL_REFRESH_TOKEN") or None,
             gmail_token_enc_key=os.environ.get("GMAIL_TOKEN_ENC_KEY") or None,
             gmail_label=os.environ.get("GMAIL_LABEL") or None,
-            gmail_tax_year=int(
-                os.environ.get("GMAIL_TAX_YEAR") or date.today().year
-            ),
+            gmail_tax_year=int(os.environ.get("GMAIL_TAX_YEAR") or date.today().year),
+            auth_mode=os.environ.get("AUTH_MODE", "iap").strip().lower(),
+            iap_audience=os.environ.get("IAP_AUDIENCE") or None,
         )
 
 

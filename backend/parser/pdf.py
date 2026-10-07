@@ -87,12 +87,14 @@ def parse_invoice_text(text: str) -> dict:
         desc, qty, unit, total = cells[:4]
         if not desc:
             continue
-        line_items.append({
-            "raw_description": desc,
-            "quantity": qty or None,
-            "unit_price": unit or None,
-            "total": total or None,
-        })
+        line_items.append(
+            {
+                "raw_description": desc,
+                "quantity": qty or None,
+                "unit_price": unit or None,
+                "total": total or None,
+            }
+        )
 
     return {"metadata": metadata, "line_items": line_items}
 

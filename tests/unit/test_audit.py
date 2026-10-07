@@ -18,15 +18,17 @@ def test_record_folds_reason_into_details():
 
 def test_record_without_optionals_keeps_details_clean():
     repo = InMemoryRepository()
-    event = record(repo, "inv_1", AuditAction.PARSED, actor=Actor.SYSTEM,
-                   details={"format": "pdf"})
+    event = record(repo, "inv_1", AuditAction.PARSED, actor=Actor.SYSTEM, details={"format": "pdf"})
     assert event.details == {"format": "pdf"}  # no before/after/reason keys added
 
 
 def test_human_correction_captures_before_after_and_reason():
     repo = InMemoryRepository()
     event = record(
-        repo, "inv_1", AuditAction.CORRECTED, actor=Actor.HUMAN,
+        repo,
+        "inv_1",
+        AuditAction.CORRECTED,
+        actor=Actor.HUMAN,
         before={"sponsor_name": "Acme Biosciences"},
         after={"sponsor_name": "Northwind Therapeutics"},
         reason="sponsor was mis-extracted from the header",
@@ -40,8 +42,15 @@ def test_human_correction_captures_before_after_and_reason():
 def test_ai_and_human_events_are_distinguishable():
     repo = InMemoryRepository()
     record(repo, "inv_1", AuditAction.HELD, actor=Actor.AI, reason="held by policy")
-    record(repo, "inv_1", AuditAction.CORRECTED, actor=Actor.HUMAN,
-           before={"x": 1}, after={"x": 2}, reason="fixed")
+    record(
+        repo,
+        "inv_1",
+        AuditAction.CORRECTED,
+        actor=Actor.HUMAN,
+        before={"x": 1},
+        after={"x": 2},
+        reason="fixed",
+    )
 
     trail = repo.get_audit("inv_1")
     assert [e.actor for e in trail] == [Actor.AI, Actor.HUMAN]  # append-only, ordered

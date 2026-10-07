@@ -178,10 +178,7 @@ class HttpDriveClient:
     # --- operations ---------------------------------------------------------
 
     def list_pdfs(self, folder_id: str) -> list[DriveFile]:
-        q = (
-            f"'{folder_id}' in parents and trashed=false "
-            f"and mimeType='{_PDF_MIME}'"
-        )
+        q = f"'{folder_id}' in parents and trashed=false and mimeType='{_PDF_MIME}'"
         try:
             resp = self._client.get(
                 "/files",
